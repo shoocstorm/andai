@@ -76,6 +76,17 @@ The layers, the rules and the definition of done are in [AGENTS.md](AGENTS.md) �
 Tests never touch your data: the e2e runner isolates knowledge-base files with
 `ANDAI_DATA_DIR` and restores your chat afterwards.
 
+## Releasing
+
+```bash
+npm run release -- --dry-run   # preview the next version and release notes
+npm run release                # bump, check, tag, push → GitHub Actions builds and publishes
+```
+
+Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which verifies
+the tag, builds `Andai.app` and a `.dmg` for Apple Silicon and Intel, and
+publishes a GitHub Release with checksums. For details, see [AGENTS.md](AGENTS.md) §7.
+
 ## Appearance
 
 Choose **System**, **Light** or **Dark** from the sun/moon button in the top bar or

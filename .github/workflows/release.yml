@@ -1,0 +1,196 @@
+name: Release
+
+# Publishing a release = pushing a vX.Y.Z tag. `scripts/release.sh` does the
+# bump + commit + annotated tag + push in one step (see AGENTS.md §7).
+# The annotated tag's message becomes the release notes.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and publish, e.g. v0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # ── 1. nothing ships unless the tag matches the manifests and the suite is green
+  verify:
+    runs-on: macos-15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Tag matches every manifest
+        id: version
+        run: |
+          node scripts/version.mjs check "$TAG"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:rust
+      - run: npm run lint:rust
+
+  # ── 2. build the macOS app for both architectures
+  build:
+    needs: verify
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-15
+            arch: aarch64
+          - os: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: release-${{ matrix.arch }}
+
+      - run: npm ci
+
+      # Signing/notarization activates only when these repository secrets exist:
+      #   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
+      #   APPLE_SIGNING_IDENTITY, and for notarization APPLE_ID,
+      #   APPLE_PASSWORD (app-specific), APPLE_TEAM_ID.
+      # Without them the build is unsigned (Gatekeeper asks users to allow it).
+      - name: Configure code signing (optional)
+        id: signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              [ -n "${!v}" ] && { echo "$v<<__EOF__"; echo "${!v}"; echo "__EOF__"; } >> "$GITHUB_ENV"
+            done
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Code signing enabled."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Apple signing secrets — building an unsigned app."
+          fi
+
+      - name: Build Andai.app + dmg
+        run: npx tauri build --bundles app,dmg
+
+      - name: Package and checksum
+        run: |
+          set -euo pipefail
+          bundle=src-tauri/target/release/bundle
+          mkdir -p out
+          name="Andai_${VERSION}_${{ matrix.arch }}"
+          ditto -c -k --sequesterRsrc --keepParent "$bundle/macos/Andai.app" "out/${name}.app.zip"
+          cp "$(ls "$bundle"/dmg/*.dmg | head -1)" "out/${name}.dmg"
+          # the binary must report the version we are publishing
+          plist_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$bundle/macos/Andai.app/Contents/Info.plist")
+          [ "$plist_version" = "$VERSION" ] || { echo "Info.plist says $plist_version, expected $VERSION"; exit 1; }
+          cd out
+          for f in *; do shasum -a 256 "$f" > "$f.sha256"; done
+          ls -la
+          cat *.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: andai-${{ matrix.arch }}
+          path: out/*
+          if-no-files-found: error
+
+      - name: Record signing state
+        run: echo "${{ steps.signing.outputs.signed }}" > signed-${{ matrix.arch }}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-${{ matrix.arch }}
+          path: signed-${{ matrix.arch }}.txt
+
+  # ── 3. publish the GitHub Release
+  publish:
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Release notes from the annotated tag
+        run: |
+          git fetch --force --tags origin
+          {
+            # release.sh writes grouped notes into the tag annotation
+            if [ "$(git cat-file -t "$TAG")" = "tag" ]; then
+              git tag -l --format='%(contents)' "$TAG" | sed '1{/^v[0-9]/d}'
+            fi
+            echo
+            echo "### Downloads"
+            echo
+            echo "| Mac | File |"
+            echo "|---|---|"
+            echo "| Apple Silicon (M1+) | \`Andai_${{ needs.verify.outputs.version }}_aarch64.dmg\` |"
+            echo "| Intel | \`Andai_${{ needs.verify.outputs.version }}_x86_64.dmg\` |"
+            echo
+            if grep -q false artifacts/signed-*/signed-*.txt 2>/dev/null; then
+              echo "> **Unsigned build.** On first launch, right-click Andai.app → Open (or run"
+              echo "> \`xattr -dr com.apple.quarantine /Applications/Andai.app\`)."
+              echo
+            fi
+            echo "Tested on macOS 26 (Apple Silicon); older versions are untested. Knowledge bases need the [\`ug\`](https://github.com/shoocstorm/ug) CLI."
+            echo "Each asset has a \`.sha256\` alongside it (\`shasum -a 256 -c <file>.sha256\`)."
+          } > notes.md
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Andai ${{ env.TAG }}
+          body_path: notes.md
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/andai-*/*

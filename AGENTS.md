@@ -247,15 +247,65 @@ Rules:
 
 ---
 
-## 7. Release checklist
+## 7. Releases
 
-1. `npm run check`, then `npm run test:e2e:release`.
-2. Bump `version` in `package.json` and `src-tauri/tauri.conf.json` (keep them
-   equal).
-3. `npm run tauri build`. Launch the `.app` from Finder, load a cached model,
-   ask a grounded question, and switch themes.
-4. Note user-visible changes and anything simulated → real in the release
-   notes.
+Releases are **tag-driven**. Pushing a `vX.Y.Z` tag runs
+`.github/workflows/release.yml`, which does three things:
+1. **verify:** the tag must equal the version in every manifest, and the full
+   check suite must pass.
+2. **build:** `Andai.app` + `.dmg` for Apple Silicon and Intel, with
+   `.sha256` checksums. It also asserts that the built `Info.plist` reports the
+   tag's version.
+3. **publish:** a GitHub Release whose notes are the annotated tag's message.
+
+**Always cut releases with the script.** Never hand-edit versions or push tags
+manually:
+
+```bash
+npm run release -- --dry-run        # ALWAYS first: shows next version + grouped notes; changes nothing
+npm run release                     # patch bump (0.1.0 → 0.1.1), asks before pushing
+npm run release -- minor            # or: major, or an explicit 0.3.0
+npm run release -- minor --yes --watch   # non-interactive, then follows the workflow to the published release
+```
+
+What the script does, in order:
+1. Preflight: a branch (not detached), a clean tree, not behind origin, and
+   the tag free locally and on origin.
+2. `npm run check`.
+3. `node scripts/version.mjs set X.Y.Z` on all five manifests.
+4. Confirm.
+5. Commit `release: vX.Y.Z`, create an annotated tag with the notes, and push
+   branch and tag atomically.
+
+If it stops before the commit, it leaves nothing behind: a declined
+confirmation reverts the bump.
+
+Rules for agents:
+- A release is **outward-facing**. Only cut one when the user asked for a
+  release (that request covers `--yes`), and run `--dry-run` first so the
+  version and notes can be reported back.
+- Release notes come from commit subjects since the last tag, grouped by
+  Conventional Commit prefix (`feat:`, `fix:`, `perf:`, `refactor:`; anything
+  else goes under *Other*). Write commit subjects accordingly.
+- Never pass `--skip-checks` or `--allow-dirty` unless the user explicitly
+  asked for it.
+- If the workflow fails, don't delete or re-push the tag blindly. Read
+  `gh run view <id> --log-failed`, fix the problem on `main`, then cut the
+  next patch version. To rebuild an existing tag unchanged, use the
+  workflow's *Run workflow* button with the tag (`workflow_dispatch`).
+- `npm run version` prints the version, and `npm run version -- check` checks
+  that the manifests agree (also enforced by `tests/unit/version.test.ts` and
+  CI).
+
+Code signing: builds are **unsigned** until the repository has the secrets
+`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` and `APPLE_SIGNING_IDENTITY`
+(add `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID` for notarization). The
+workflow detects them automatically, and the release notes say whether a
+build is unsigned.
+
+Before announcing a release, also run `npm run test:e2e:release` locally
+(CI can't run it: it needs ug and a model). Then launch the downloaded `.dmg`
+build, ask a grounded question and switch themes.
 
 Known constraints to keep in mind: the release UI needs port **14230** free
 (the app currently can't start without it), and dev (`localhost:1420`) and
