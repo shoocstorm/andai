@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    # WKWebView + Metal-only paths: build and test on macOS
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:rust
+      - run: npm run lint:rust
+      - run: npm run build
+      # test:ug and test:e2e need the ug CLI, an embedding model and a model
+      # download; run them locally or on a self-hosted runner (see AGENTS.md §6).

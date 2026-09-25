@@ -1,0 +1,8 @@
+node_modules
+dist
+public/wllama
+src-tauri/target
+src-tauri/gen
+.DS_Store
+coverage
+.vitest

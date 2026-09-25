@@ -1,0 +1,170 @@
+/*
+ * Andai design tokens. Two themes share one set of semantic names:
+ *   :root                   → dark (default; the Luminal Command reference)
+ *   :root[data-theme=light] → light
+ * `src/state/theme.ts` sets data-theme on <html> from the user's choice
+ * (system / light / dark). Components must use these tokens — never literal
+ * colors — so both themes stay correct. `npm test` enforces that (theme.test).
+ */
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --canvas: #0e1116;
+  --canvas-2: #0b0e13;
+  --canvas-deep: #0f1318;
+  --sidebar: #11151b;
+  --panel: #151a22;
+  --panel-2: #191f29;
+  --card: #1a2029;
+  --card-2: #1d2430;
+  --raised: #1d2330;
+  --raised-hover: #232a39;
+  --inset: #0b0e13;
+  --selected-bg: #1c2a40;
+  --topbar-bg: #0c0f14d9;
+  --trace-bg: #13171ecc;
+  --toast-bg: #1a202bf2;
+  --backdrop: #05070acc;
+  --tile-grad: linear-gradient(160deg, #1f2736, #141923);
+  --answer-bg: linear-gradient(180deg, #1a202bee, #161b24ee);
+  --orb-frame: linear-gradient(160deg, #262d3b, #151a23);
+  --orb-well: radial-gradient(circle at 50% 45%, #3a3f4a, #23262d 70%);
+  --well-shadow: #000000;
+
+  /* lines */
+  --border: #ffffff10;
+  --border-strong: #ffffff1c;
+  --border-focus: #7db4ff;
+  --edge: #5b6b86;
+  --port: #7a8aa6;
+
+  /* text */
+  --text: #e6e9ef;
+  --text-strong: #ffffff;
+  --text-2: #a9b1c0;
+  --text-3: #6f7889;
+  --text-4: #4a5260;
+  --code-text: #cfe2ff;
+  --error-text: #ffc9c9;
+  /* the "ink" overlays tint toward: white on dark, navy on light */
+  --ink: #ffffff;
+
+  /* accents */
+  --blue: #7db4ff;
+  --blue-strong: #5a9bff;
+  --blue-soft: #7db4ff1f;
+  --blue-glow: #7db4ff55;
+  --violet: #c9a2ff;
+  --violet-soft: #c9a2ff1f;
+  --amber: #f5a524;
+  --amber-soft: #f5a5241f;
+  --red: #ff7a7a;
+  --red-soft: #ff7a7a1c;
+  --green: #5ee0a0;
+  --green-soft: #5ee0a01c;
+  --on-accent: #0a1220;
+  --amber-btn: #3a2a0e;
+  --amber-btn-hover: #47330f;
+  --red-btn: #2b1416;
+  --red-btn-hover: #361a1d;
+
+  /* controls */
+  --knob: #aeb6c4;
+  --knob-on: #0d1a2e;
+  --thumb: #b8d6ff;
+
+  --grad-cta: linear-gradient(180deg, #9cc9ff 0%, #5a9bff 100%);
+  --grad-orb: linear-gradient(135deg, #8ec1ff 0%, #d3a8ff 100%);
+  --grad-brand: linear-gradient(90deg, #8ec1ff 0%, #b8b0ff 55%, #d3a8ff 100%);
+
+  --shadow-color: #000000;
+  --shadow-panel: 0 1px 0 #ffffff08 inset, 0 12px 32px -18px #000000cc;
+  --shadow-pop: 0 24px 60px -12px #000000e6, 0 0 0 1px var(--border-strong);
+
+  /* type */
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* geometry */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --topbar-h: 56px;
+  --statusbar-h: 30px;
+  --sidebar-w: 244px;
+  --sidebar-w-collapsed: 72px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --canvas: #f3f5f9;
+  --canvas-2: #eaeef4;
+  --canvas-deep: #edf0f5;
+  --sidebar: #f8f9fc;
+  --panel: #ffffff;
+  --panel-2: #ffffff;
+  --card: #ffffff;
+  --card-2: #f4f7ff;
+  --raised: #eef1f6;
+  --raised-hover: #e5e9f0;
+  --inset: #f6f8fb;
+  --selected-bg: #eaf1ff;
+  --topbar-bg: #ffffffdb;
+  --trace-bg: #f8f9fccc;
+  --toast-bg: #fffffff5;
+  --backdrop: #0b12205c;
+  --tile-grad: linear-gradient(160deg, #ffffff, #eaeef5);
+  --answer-bg: linear-gradient(180deg, #ffffff, #fbfcfe);
+  --orb-frame: linear-gradient(160deg, #ffffff, #eaeef5);
+  --orb-well: radial-gradient(circle at 50% 45%, #f1f4f9, #dde3ec 70%);
+  --well-shadow: #0b122022;
+
+  --border: #0b12201a;
+  --border-strong: #0b122029;
+  --border-focus: #2f6fe0;
+  --edge: #9aa6bd;
+  --port: #7d8aa3;
+
+  --text: #111827;
+  --text-strong: #0b1220;
+  --text-2: #465063;
+  --text-3: #687286;
+  --text-4: #9aa2b1;
+  --code-text: #1f4fa8;
+  --error-text: #9b1c1c;
+  --ink: #0b1220;
+
+  --blue: #2f6fe0;
+  --blue-strong: #1f57c3;
+  --blue-soft: #2f6fe01a;
+  --blue-glow: #2f6fe040;
+  --violet: #7a4bd8;
+  --violet-soft: #7a4bd81a;
+  --amber: #b45309;
+  --amber-soft: #b453091a;
+  --red: #d33c3c;
+  --red-soft: #d33c3c14;
+  --green: #13875a;
+  --green-soft: #13875a17;
+  --on-accent: #ffffff;
+  --amber-btn: #fdf0da;
+  --amber-btn-hover: #fbe5bf;
+  --red-btn: #fdecec;
+  --red-btn-hover: #fbdcdc;
+
+  --knob: #ffffff;
+  --knob-on: #ffffff;
+  --thumb: #ffffff;
+
+  --grad-cta: linear-gradient(180deg, #4d8cf5 0%, #2f6fe0 100%);
+  --grad-brand: linear-gradient(90deg, #2f6fe0 0%, #5a5ce0 55%, #7a4bd8 100%);
+
+  --shadow-color: #0b122033;
+  --shadow-panel: 0 1px 2px #0b12200d, 0 10px 30px -18px #0b122040;
+  --shadow-pop: 0 24px 60px -16px #0b122052, 0 0 0 1px var(--border-strong);
+}

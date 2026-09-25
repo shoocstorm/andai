@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ug-status"
+description = "Enables the ug_status command without any pre-configured scope."
+commands.allow = ["ug_status"]
+
+[[permission]]
+identifier = "deny-ug-status"
+description = "Denies the ug_status command without any pre-configured scope."
+commands.deny = ["ug_status"]

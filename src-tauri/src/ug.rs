@@ -1,0 +1,707 @@
+//! Knowledge bases, backed by the `ug` CLI.
+//!
+//! Each knowledge base is a folder under `<app data>/kb/<slug>/`:
+//!
+//!   kb.json   — name, sources and index status (owned by Andai)
+//!   docs/     — the normalized files `ug gen` indexes as project `andai-<slug>`
+//!
+//! Every ug call shells out to the CLI with `--json` where it exists. GUI apps
+//! on macOS don't inherit the login shell's PATH, so `ug_path()` also probes
+//! the usual install locations.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashSet;
+use std::fs;
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+const PROJECT_PREFIX: &str = "andai-";
+
+/// Slugs with a `ug gen` in flight; a second index request for one is refused.
+#[derive(Default)]
+pub struct Indexing(pub Mutex<HashSet<String>>);
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Source {
+    /// File name inside `docs/`.
+    pub file: String,
+    /// Absolute path the user added it from.
+    pub original: String,
+    /// Display type: PDF, MD, TXT, CSV, CODE.
+    pub kind: String,
+    pub bytes: u64,
+    /// ~4 chars per token; `None` for binary formats (PDF).
+    pub approx_tokens: Option<u64>,
+    pub added_at: u64,
+    /// pending | indexed | failed
+    pub status: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct KbMeta {
+    pub slug: String,
+    pub name: String,
+    pub created_at: u64,
+    pub sources: Vec<Source>,
+    pub last_indexed_at: Option<u64>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct KbInfo {
+    #[serde(flatten)]
+    pub meta: KbMeta,
+    pub dir: String,
+    /// empty | pending | indexing | ready | failed
+    pub status: String,
+    pub nodes: u64,
+    pub edges: u64,
+    pub size_bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UgStatus {
+    pub found: bool,
+    pub path: Option<String>,
+    pub version: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+struct Progress<'a> {
+    slug: &'a str,
+    line: String,
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────
+
+fn now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn ug_path() -> Option<PathBuf> {
+    let from_path = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).map(|d| d.join("ug")).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let fallbacks = [".local/bin/ug", ".cargo/bin/ug", ".ug/bin/ug"]
+        .iter()
+        .filter_map(|rel| home.as_ref().map(|h| h.join(rel)));
+    let system = ["/opt/homebrew/bin/ug", "/usr/local/bin/ug"].map(PathBuf::from);
+    from_path.into_iter().chain(fallbacks).chain(system).find(|p| p.is_file())
+}
+
+fn ug() -> Result<Command, String> {
+    let path = ug_path().ok_or("The `ug` CLI was not found. Install it, then restart Andai.")?;
+    let mut cmd = Command::new(path);
+    cmd.env("NO_COLOR", "1").env("CLICOLOR", "0").stdin(Stdio::null());
+    Ok(cmd)
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn run_json(mut cmd: Command) -> Result<Value, String> {
+    let out = cmd.output().map_err(|e| format!("failed to run ug: {e}"))?;
+    if !out.status.success() {
+        let err = strip_ansi(&String::from_utf8_lossy(&out.stderr));
+        return Err(err.trim().lines().last().unwrap_or("ug failed").to_string());
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("bad ug JSON: {e}"))
+}
+
+/// `ANDAI_DATA_DIR` relocates all knowledge-base files — the e2e runner points
+/// it at a temp dir so tests never touch a user's real knowledge bases.
+fn kb_root(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = match std::env::var_os("ANDAI_DATA_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => app.path().app_data_dir().map_err(|e| e.to_string())?,
+    };
+    let dir = base.join("kb");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Slugs become directory and ug project names, so only `[a-z0-9-]` gets through
+/// (no `..`, `/`, or anything else that could escape `kb/`).
+fn valid_slug(slug: &str) -> bool {
+    !slug.is_empty() && slug.len() <= 64 && slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+fn kb_dir(app: &AppHandle, slug: &str) -> Result<PathBuf, String> {
+    if !valid_slug(slug) {
+        return Err(format!("invalid knowledge base id: {slug}"));
+    }
+    Ok(kb_root(app)?.join(slug))
+}
+
+fn read_meta(dir: &Path) -> Result<KbMeta, String> {
+    let raw = fs::read_to_string(dir.join("kb.json")).map_err(|e| e.to_string())?;
+    serde_json::from_str(&raw).map_err(|e| e.to_string())
+}
+
+fn write_meta(dir: &Path, meta: &KbMeta) -> Result<(), String> {
+    let raw = serde_json::to_string_pretty(meta).map_err(|e| e.to_string())?;
+    fs::write(dir.join("kb.json"), raw).map_err(|e| e.to_string())
+}
+
+fn slugify(name: &str) -> String {
+    let mut slug = String::new();
+    for c in name.trim().chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.ends_with('-') && !slug.is_empty() {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_end_matches('-').to_string();
+    if slug.is_empty() { "kb".into() } else { slug }
+}
+
+/// ug project stats keyed by project name.
+fn ug_projects() -> Vec<Value> {
+    let Ok(mut cmd) = ug() else { return vec![] };
+    cmd.args(["list", "--json", "--quick"]);
+    run_json(cmd)
+        .ok()
+        .and_then(|v| v.get("projects").and_then(|p| p.as_array()).cloned())
+        .unwrap_or_default()
+}
+
+fn info(dir: &Path, meta: KbMeta, projects: &[Value], indexing: &HashSet<String>) -> KbInfo {
+    let project = projects
+        .iter()
+        .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(&format!("{PROJECT_PREFIX}{}", meta.slug)));
+    let num = |k: &str| project.and_then(|p| p.get(k)).and_then(|v| v.as_u64()).unwrap_or(0);
+    let status = if indexing.contains(&meta.slug) {
+        "indexing"
+    } else if meta.sources.is_empty() {
+        "empty"
+    } else if meta.last_error.is_some() {
+        "failed"
+    } else if meta.sources.iter().any(|s| s.status == "pending") {
+        "pending"
+    } else {
+        "ready"
+    };
+    KbInfo {
+        dir: dir.to_string_lossy().into(),
+        status: status.into(),
+        nodes: num("nodes"),
+        edges: num("edges"),
+        size_bytes: num("sizeBytes"),
+        meta,
+    }
+}
+
+fn load_info(app: &AppHandle, slug: &str, indexing: &Indexing) -> Result<KbInfo, String> {
+    let dir = kb_dir(app, slug)?;
+    let meta = read_meta(&dir)?;
+    let busy = indexing.0.lock().unwrap().clone();
+    Ok(info(&dir, meta, &ug_projects(), &busy))
+}
+
+/// A source is addressed by its bare file name inside `docs/`.
+fn valid_source_name(file: &str) -> bool {
+    !file.is_empty() && !file.contains('/') && !file.contains('\\') && !file.contains("..")
+}
+
+/// Copy one file into `docs/`, converting formats ug can't parse into Markdown.
+fn ingest_file(docs: &Path, src: &Path) -> Result<Source, String> {
+    let original = src.to_string_lossy().to_string();
+    let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("file").to_string();
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let file_name = src.file_name().and_then(|s| s.to_str()).unwrap_or("file").to_string();
+
+    let code = ["ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "java", "rs"];
+    let (kind, target_ext, body): (&str, String, Option<String>) = match ext.as_str() {
+        "md" | "markdown" | "mdx" => ("MD", "md".into(), None),
+        "pdf" => ("PDF", "pdf".into(), None),
+        "txt" | "text" | "log" | "rst" => {
+            let text = fs::read_to_string(src).map_err(|e| format!("{file_name}: {e}"))?;
+            ("TXT", "md".into(), Some(format!("# {file_name}\n\n{text}\n")))
+        }
+        "csv" | "tsv" => {
+            let text = fs::read_to_string(src).map_err(|e| format!("{file_name}: {e}"))?;
+            ("CSV", "md".into(), Some(format!("# {file_name}\n\n```{ext}\n{text}\n```\n")))
+        }
+        e if code.contains(&e) => ("CODE", e.to_string(), None),
+        _ => return Err(format!("{file_name}: unsupported type (use PDF, Markdown, TXT, CSV or source code)")),
+    };
+
+    let mut target = docs.join(format!("{stem}.{target_ext}"));
+    let mut n = 2;
+    while target.exists() {
+        target = docs.join(format!("{stem}-{n}.{target_ext}"));
+        n += 1;
+    }
+    match &body {
+        Some(text) => fs::write(&target, text),
+        None => fs::copy(src, &target).map(|_| ()),
+    }
+    .map_err(|e| format!("{file_name}: {e}"))?;
+
+    let bytes = fs::metadata(&target).map(|m| m.len()).unwrap_or(0);
+    Ok(Source {
+        file: target.file_name().unwrap().to_string_lossy().into(),
+        original,
+        kind: kind.into(),
+        bytes,
+        approx_tokens: if kind == "PDF" { None } else { Some(bytes / 4) },
+        added_at: now(),
+        status: "pending".into(),
+    })
+}
+
+// ── commands ─────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn ug_status() -> UgStatus {
+    let path = ug_path();
+    let version = path.as_ref().and_then(|p| {
+        let out = Command::new(p).arg("-v").output().ok()?;
+        Some(strip_ansi(&String::from_utf8_lossy(&out.stdout)).trim().to_string())
+    });
+    UgStatus { found: path.is_some(), path: path.map(|p| p.to_string_lossy().into()), version }
+}
+
+#[tauri::command]
+pub async fn kb_list(app: AppHandle, indexing: State<'_, Indexing>) -> Result<Vec<KbInfo>, String> {
+    let root = kb_root(&app)?;
+    let busy = indexing.0.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let projects = ug_projects();
+        let mut out: Vec<KbInfo> = fs::read_dir(&root)
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .filter_map(|entry| {
+                let dir = entry.path();
+                read_meta(&dir).ok().map(|meta| info(&dir, meta, &projects, &busy))
+            })
+            .collect();
+        out.sort_by_key(|k| k.meta.created_at);
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn kb_create(app: AppHandle, name: String, indexing: State<'_, Indexing>) -> Result<KbInfo, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Give the knowledge base a name.".into());
+    }
+    let base = slugify(name);
+    let mut slug = base.clone();
+    let mut n = 2;
+    while kb_dir(&app, &slug)?.exists() {
+        slug = format!("{base}-{n}");
+        n += 1;
+    }
+    let dir = kb_dir(&app, &slug)?;
+    fs::create_dir_all(dir.join("docs")).map_err(|e| e.to_string())?;
+    let meta = KbMeta {
+        slug: slug.clone(),
+        name: name.into(),
+        created_at: now(),
+        sources: vec![],
+        last_indexed_at: None,
+        last_error: None,
+    };
+    write_meta(&dir, &meta)?;
+    load_info(&app, &slug, &indexing)
+}
+
+/// Copies files in; returns the updated KB plus per-file errors. Call `kb_index` after.
+#[tauri::command]
+pub fn kb_add_files(
+    app: AppHandle,
+    slug: String,
+    paths: Vec<String>,
+    indexing: State<'_, Indexing>,
+) -> Result<(KbInfo, Vec<String>), String> {
+    let dir = kb_dir(&app, &slug)?;
+    let docs = dir.join("docs");
+    fs::create_dir_all(&docs).map_err(|e| e.to_string())?;
+    let mut meta = read_meta(&dir)?;
+    let mut errors = vec![];
+    for p in paths {
+        let src = PathBuf::from(&p);
+        if src.is_dir() {
+            errors.push(format!("{p}: folders aren't supported yet — drop the files inside it"));
+            continue;
+        }
+        match ingest_file(&docs, &src) {
+            Ok(source) => meta.sources.push(source),
+            Err(e) => errors.push(e),
+        }
+    }
+    write_meta(&dir, &meta)?;
+    Ok((load_info(&app, &slug, &indexing)?, errors))
+}
+
+#[tauri::command]
+pub fn kb_remove_source(
+    app: AppHandle,
+    slug: String,
+    file: String,
+    indexing: State<'_, Indexing>,
+) -> Result<KbInfo, String> {
+    let dir = kb_dir(&app, &slug)?;
+    let mut meta = read_meta(&dir)?;
+    if !valid_source_name(&file) {
+        return Err("invalid file name".into());
+    }
+    let _ = fs::remove_file(dir.join("docs").join(&file));
+    meta.sources.retain(|s| s.file != file);
+    write_meta(&dir, &meta)?;
+    load_info(&app, &slug, &indexing)
+}
+
+#[tauri::command]
+pub async fn kb_delete(app: AppHandle, slug: String) -> Result<(), String> {
+    let dir = kb_dir(&app, &slug)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(mut cmd) = ug() {
+            let _ = cmd.args(["remove", &format!("{PROJECT_PREFIX}{slug}"), "-y"]).output();
+        }
+        fs::remove_dir_all(&dir).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Runs `ug gen --with-embed` over `docs/`, streaming its progress lines as
+/// `kb-progress` events. Resolves with the updated KB once the run finishes.
+#[tauri::command]
+pub async fn kb_index(app: AppHandle, slug: String, indexing: State<'_, Indexing>) -> Result<KbInfo, String> {
+    let dir = kb_dir(&app, &slug)?;
+    if !indexing.0.lock().unwrap().insert(slug.clone()) {
+        return Err("This knowledge base is already indexing.".into());
+    }
+    let _ = app.emit("kb-progress", Progress { slug: &slug, line: "Starting ug gen…".into() });
+
+    let (app2, slug2, dir2) = (app.clone(), slug.clone(), dir.clone());
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let docs = dir2.join("docs");
+        let project = format!("{PROJECT_PREFIX}{slug2}");
+        let empty = fs::read_dir(&docs).map(|mut d| d.next().is_none()).unwrap_or(true);
+        if empty {
+            // Nothing left to index: drop the ug project so search can't return stale hits.
+            let _ = ug()?.args(["remove", &project, "-y"]).output();
+            return Ok(());
+        }
+        let mut child = ug()?
+            .arg("gen")
+            .arg(&docs)
+            .args(["-n", &project, "--with-embed"])
+            .current_dir(&docs)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("failed to start ug: {e}"))?;
+
+        // ug redraws progress with \r, so split on both line endings.
+        let stderr = child.stderr.take().unwrap();
+        let (app3, slug3) = (app2.clone(), slug2.clone());
+        let err_thread = std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = BufReader::new(stderr).read_to_string(&mut buf);
+            let text = strip_ansi(&buf);
+            for line in text.split(['\r', '\n']).map(str::trim).filter(|l| !l.is_empty()) {
+                let _ = app3.emit("kb-progress", Progress { slug: &slug3, line: line.into() });
+            }
+            text
+        });
+        let mut last = String::new();
+        for chunk in BufReader::new(child.stdout.take().unwrap()).split(b'\n') {
+            let Ok(chunk) = chunk else { break };
+            for line in strip_ansi(&String::from_utf8_lossy(&chunk)).split('\r') {
+                let line = line.trim();
+                if !line.is_empty() {
+                    last = line.to_string();
+                    let _ = app2.emit("kb-progress", Progress { slug: &slug2, line: last.clone() });
+                }
+            }
+        }
+        let status = child.wait().map_err(|e| e.to_string())?;
+        let err_text = err_thread.join().unwrap_or_default();
+        if status.success() {
+            Ok(())
+        } else {
+            let msg = err_text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or(&last);
+            Err(format!("ug gen failed: {}", msg.trim()))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+
+    indexing.0.lock().unwrap().remove(&slug);
+    let mut meta = read_meta(&dir)?;
+    match &result {
+        Ok(()) => {
+            meta.last_error = None;
+            meta.last_indexed_at = Some(now());
+            for s in &mut meta.sources {
+                s.status = "indexed".into();
+            }
+        }
+        Err(e) => {
+            meta.last_error = Some(e.clone());
+            for s in meta.sources.iter_mut().filter(|s| s.status == "pending") {
+                s.status = "failed".into();
+            }
+        }
+    }
+    write_meta(&dir, &meta)?;
+    let _ = app.emit(
+        "kb-progress",
+        Progress { slug: &slug, line: result.clone().map(|_| "Index ready.".into()).unwrap_or_else(|e| e) },
+    );
+    load_info(&app, &slug, &indexing)
+}
+
+/// GraphRAG search over one knowledge base: `ug search … --snippets --json`.
+#[tauri::command]
+pub async fn kb_search(
+    app: AppHandle,
+    slug: String,
+    query: String,
+    k: u32,
+    max_chars: u32,
+) -> Result<Value, String> {
+    let dir = kb_dir(&app, &slug)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = ug()?;
+        cmd.arg("search")
+            .arg(&query)
+            .args(["-n", &format!("{PROJECT_PREFIX}{slug}")])
+            .args(["-k", &k.to_string(), "--max-chars", &max_chars.to_string()])
+            .arg("--snippets")
+            .arg("--repo-root")
+            .arg(dir.join("docs"))
+            .arg("--json")
+            .current_dir(dir.join("docs"));
+        run_json(cmd)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn meta(sources: Vec<Source>, last_error: Option<&str>) -> KbMeta {
+        KbMeta {
+            slug: "docs".into(),
+            name: "Docs".into(),
+            created_at: 1,
+            sources,
+            last_indexed_at: None,
+            last_error: last_error.map(Into::into),
+        }
+    }
+
+    fn source(status: &str) -> Source {
+        Source {
+            file: "a.md".into(),
+            original: "/x/a.md".into(),
+            kind: "MD".into(),
+            bytes: 4,
+            approx_tokens: Some(1),
+            added_at: 1,
+            status: status.into(),
+        }
+    }
+
+    #[test]
+    fn slugify_makes_safe_ids() {
+        assert_eq!(slugify("Product Specs 2026!"), "product-specs-2026");
+        assert_eq!(slugify("  --Hello__World--  "), "hello-world");
+        assert_eq!(slugify("日本語"), "kb");
+        assert_eq!(slugify(""), "kb");
+        assert!(valid_slug(&slugify("../../etc/passwd")));
+    }
+
+    #[test]
+    fn slug_validation_blocks_path_escapes() {
+        assert!(valid_slug("product-specs-2"));
+        for bad in ["", "..", "../x", "a/b", "a b", "a.b", &"x".repeat(65)] {
+            assert!(!valid_slug(bad), "{bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn source_names_must_be_bare_file_names() {
+        assert!(valid_source_name("README.md"));
+        for bad in ["", "../kb.json", "docs/a.md", "a\\b.md", ".."] {
+            assert!(!valid_source_name(bad), "{bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn strip_ansi_removes_color_codes() {
+        assert_eq!(strip_ansi("\u{1b}[32m✓ done\u{1b}[0m in \u{1b}[1m2s\u{1b}[0m"), "✓ done in 2s");
+        assert_eq!(strip_ansi("plain"), "plain");
+    }
+
+    #[test]
+    fn ingest_copies_markdown_and_pdf_as_is() {
+        let src = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        fs::write(src.path().join("notes.md"), "# Notes\nbody").unwrap();
+        fs::write(src.path().join("paper.pdf"), b"%PDF-1.4 fake").unwrap();
+
+        let md = ingest_file(docs.path(), &src.path().join("notes.md")).unwrap();
+        assert_eq!((md.file.as_str(), md.kind.as_str(), md.status.as_str()), ("notes.md", "MD", "pending"));
+        assert_eq!(md.approx_tokens, Some(md.bytes / 4));
+        assert_eq!(fs::read_to_string(docs.path().join("notes.md")).unwrap(), "# Notes\nbody");
+
+        let pdf = ingest_file(docs.path(), &src.path().join("paper.pdf")).unwrap();
+        assert_eq!((pdf.file.as_str(), pdf.kind.as_str()), ("paper.pdf", "PDF"));
+        assert_eq!(pdf.approx_tokens, None, "binary formats have no token estimate");
+    }
+
+    #[test]
+    fn ingest_converts_text_and_csv_to_markdown() {
+        let src = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        fs::write(src.path().join("log.txt"), "line one").unwrap();
+        fs::write(src.path().join("data.csv"), "a,b\n1,2").unwrap();
+
+        let txt = ingest_file(docs.path(), &src.path().join("log.txt")).unwrap();
+        assert_eq!((txt.file.as_str(), txt.kind.as_str()), ("log.md", "TXT"));
+        assert_eq!(fs::read_to_string(docs.path().join("log.md")).unwrap(), "# log.txt\n\nline one\n");
+
+        let csv = ingest_file(docs.path(), &src.path().join("data.csv")).unwrap();
+        assert_eq!((csv.file.as_str(), csv.kind.as_str()), ("data.md", "CSV"));
+        assert_eq!(fs::read_to_string(docs.path().join("data.md")).unwrap(), "# data.csv\n\n```csv\na,b\n1,2\n```\n");
+    }
+
+    #[test]
+    fn ingest_never_overwrites_an_existing_source() {
+        let src = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        fs::write(src.path().join("a.md"), "one").unwrap();
+        let first = ingest_file(docs.path(), &src.path().join("a.md")).unwrap();
+        fs::write(src.path().join("a.md"), "two").unwrap();
+        let second = ingest_file(docs.path(), &src.path().join("a.md")).unwrap();
+        assert_eq!((first.file.as_str(), second.file.as_str()), ("a.md", "a-2.md"));
+        assert_eq!(fs::read_to_string(docs.path().join("a.md")).unwrap(), "one");
+    }
+
+    #[test]
+    fn ingest_rejects_unsupported_and_missing_files() {
+        let src = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        fs::write(src.path().join("pic.png"), b"png").unwrap();
+        let err = ingest_file(docs.path(), &src.path().join("pic.png")).unwrap_err();
+        assert!(err.contains("unsupported type"), "{err}");
+        assert!(ingest_file(docs.path(), &src.path().join("gone.txt")).is_err());
+        assert_eq!(fs::read_dir(docs.path()).unwrap().count(), 0, "nothing written on failure");
+    }
+
+    #[test]
+    fn status_is_derived_from_sources_errors_and_indexing() {
+        let dir = Path::new("/tmp/kb/docs");
+        let idle = HashSet::new();
+        let busy: HashSet<String> = ["docs".to_string()].into();
+        let status = |m: KbMeta, i: &HashSet<String>| info(dir, m, &[], i).status;
+
+        assert_eq!(status(meta(vec![], None), &idle), "empty");
+        assert_eq!(status(meta(vec![source("pending")], None), &idle), "pending");
+        assert_eq!(status(meta(vec![source("indexed")], None), &idle), "ready");
+        assert_eq!(status(meta(vec![source("indexed")], Some("boom")), &idle), "failed");
+        assert_eq!(status(meta(vec![source("indexed")], Some("boom")), &busy), "indexing", "indexing wins");
+    }
+
+    #[test]
+    fn graph_stats_come_from_the_matching_ug_project() {
+        let projects = vec![
+            json!({ "name": "andai-other", "nodes": 99, "edges": 99, "sizeBytes": 99 }),
+            json!({ "name": "andai-docs", "nodes": 9, "edges": 8, "sizeBytes": 1234 }),
+        ];
+        let kb = info(Path::new("/tmp"), meta(vec![], None), &projects, &HashSet::new());
+        assert_eq!((kb.nodes, kb.edges, kb.size_bytes), (9, 8, 1234));
+        let none = info(Path::new("/tmp"), meta(vec![], None), &[], &HashSet::new());
+        assert_eq!((none.nodes, none.edges), (0, 0));
+    }
+
+    #[test]
+    fn kb_info_serializes_flat_camel_case_for_the_frontend() {
+        let kb = info(Path::new("/tmp"), meta(vec![source("indexed")], None), &[], &HashSet::new());
+        let v = serde_json::to_value(&kb).unwrap();
+        for key in ["slug", "name", "createdAt", "sources", "lastIndexedAt", "lastError", "dir", "status", "nodes", "sizeBytes"] {
+            assert!(v.get(key).is_some(), "missing {key} in {v}");
+        }
+        assert!(v["sources"][0].get("approxTokens").is_some());
+    }
+
+    /// Real ug round trip: gen --with-embed → search → remove.
+    /// Needs the `ug` CLI and its embedding model: `cargo test -- --ignored`.
+    #[test]
+    #[ignore = "requires the ug CLI"]
+    fn ug_indexes_and_searches_documents() {
+        assert!(ug_path().is_some(), "ug not found on PATH or fallbacks");
+        let docs = tempfile::tempdir().unwrap();
+        fs::write(
+            docs.path().join("notes.md"),
+            "# Deployment\n\n## Isolation\n\nwllama needs Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers.\n",
+        )
+        .unwrap();
+        let project = format!("andai-test-{}", std::process::id());
+
+        let gen = ug().unwrap().arg("gen").arg(docs.path()).args(["-n", &project, "--with-embed"]).output().unwrap();
+        let cleanup = || {
+            let _ = ug().unwrap().args(["remove", &project, "-y"]).output();
+        };
+        if !gen.status.success() {
+            cleanup();
+            panic!("ug gen failed: {}", String::from_utf8_lossy(&gen.stderr));
+        }
+
+        let mut search = ug().unwrap();
+        search
+            .args(["search", "which headers does wllama need", "-n", &project, "-k", "4", "--snippets", "--json"])
+            .arg("--repo-root")
+            .arg(docs.path());
+        let result = run_json(search);
+        let listed = ug_projects().iter().any(|p| p["name"] == project.as_str());
+        cleanup();
+
+        let items = result.expect("search JSON")["items"].as_array().cloned().unwrap_or_default();
+        assert!(listed, "project should appear in `ug list --json`");
+        assert!(!items.is_empty(), "search returned no items");
+        let text = serde_json::to_string(&items).unwrap();
+        assert!(text.contains("Cross-Origin-Embedder-Policy"), "snippet should carry the passage: {text}");
+    }
+}
