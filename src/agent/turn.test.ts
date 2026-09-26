@@ -77,6 +77,14 @@ vi.mock('./tools/argfill', () => ({
   },
 }));
 
+const rel = vi.hoisted(() => ({ scores: null as number[] | null, fail: null as Error | null }));
+vi.mock('../llm/laya', () => ({
+  layaRelevance: async (_request: string, passages: unknown[]) => {
+    if (rel.fail) throw rel.fail;
+    return { scores: rel.scores ?? passages.map(() => 0.9), ms: 20, model: 'laya-multilingual' };
+  },
+}));
+
 vi.mock('../llm/engine', async () => {
   const { create } = await import('zustand');
   const { MODELS } = await import('../llm/models');
@@ -178,6 +186,53 @@ beforeEach(() => {
     output: { kb_search: { items: [hit] } },
     toolFail: null,
     toolDelayMs: 0,
+  });
+});
+
+describe('relevance check (with a Laya decision model)', () => {
+  const hits = [1, 2, 3, 4].map((i) => ({ ...hit, id: `h${i}`, file: `f${i}.md`, snippet: `passage ${i}` }));
+  beforeEach(() => {
+    rel.scores = null;
+    rel.fail = null;
+  });
+
+  it('drops a clearly unhelpful passage before the prompt, and numbers sources as the prompt cites them', async () => {
+    agent.laya = true;
+    search.hits = hits;
+    rel.scores = [0.9, 0.05, 0.01, 0.8];
+    await runTurn('What headers does wllama need?');
+    expect(statuses().filter).toBe('done');
+    expect(assistant().sources!.map((h) => h.id)).toEqual(['h1', 'h2', 'h4']);
+    expect(assistant().relevance!.items.map((x) => x.kept)).toEqual([true, true, false, true]);
+    expect(assistant().steps!.find((s) => s.kind === 'filter')!.detail).toMatch(/^Kept 3 of 4 passages · ~\d+ tokens less to read/);
+    // the dropped passage never reaches the chat model
+    const system = engine.seen.at(-1)!.messages[0].content;
+    expect(system).toContain('[3] f4.md');
+    expect(system).not.toContain('f3.md');
+  });
+
+  it('keeps every passage when the check fails', async () => {
+    agent.laya = true;
+    search.hits = hits;
+    rel.fail = new Error('No Laya model is loaded.');
+    await runTurn('What headers does wllama need?');
+    expect(statuses().filter).toBe('error');
+    expect(assistant().steps!.find((s) => s.kind === 'filter')!.detail).toMatch(/kept every passage/);
+    expect(assistant().sources).toHaveLength(4);
+    expect(statuses().generate).toBe('done');
+  });
+
+  it('has nothing to check with only the top results, and no step without Laya', async () => {
+    agent.laya = true;
+    search.hits = hits.slice(0, 2);
+    await runTurn('What headers does wllama need?');
+    expect(statuses().filter).toBe('skipped');
+    clearChat();
+    agent.laya = false;
+    search.hits = hits;
+    await runTurn('What headers does wllama need?');
+    expect(statuses().filter).toBeUndefined();
+    expect(assistant().sources).toHaveLength(4);
   });
 });
 

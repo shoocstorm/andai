@@ -98,12 +98,24 @@ pasting in whatever one search returns:
   often (82.8% against 86.2%) and it searched on greetings and small talk.
   Laya English was slower overall (5.1 s). Qwen3 0.6B stays the most
   accurate decision model; Laya Multilingual is the fastest.
+- **Relevance check (with a Laya decision model).** Before retrieved
+  passages go into the chat model's prompt, Laya scores how likely each one
+  helps answer the question and drops the clear misses (below 10%). The top
+  two search results are always kept, and if the check fails nothing is
+  dropped. The Execution Trace lists every passage with its score, what was
+  kept (numbered as the answer cites it) and what was dropped. In our agent
+  eval it made the prompt 23% shorter with Laya English (the first word came
+  about 0.6 s sooner) and 8% shorter with Laya Multilingual, with no loss of
+  answer facts, for 36–57 ms per question.
 - **Every step is visible.** The Execution Trace lists each decision with
   its options and probabilities, and each tool call with its arguments, the
   ug command that ran, timing and what it returned. Each step shows how long
-  its decision took, the turn shows the total, and a decision's details show
-  the exact prompt and parameters the decision model got and its raw reply
-  (the top candidate tokens), each with a copy button. A decision that failed
+  its decision took and the turn shows the total. **Why this step?** opens a
+  dialog that explains the decision in plain sentences (what the model was
+  asked, how it scored each option, any override, what the agent did), shows
+  what the model saw (the state, the question and the options) and what it
+  returned, with the exact prompt, parameters and raw reply folded away and a
+  copy button. Tool call details unfold separately. A decision that failed
   shows the same. **Copy trace** exports a turn as JSON.
 - **Read-only and on your computer.** Every tool only reads the selected
   knowledge base. Andai re-checks each call before running it, limits its

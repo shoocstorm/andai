@@ -112,6 +112,7 @@ pub fn run() {
             laya::laya_load,
             laya::laya_unload,
             laya::laya_decide,
+            laya::laya_relevance,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Andai");

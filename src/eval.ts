@@ -71,6 +71,13 @@ function report(c: EvalCase, msg: Message | undefined, error: string | null, ms:
       },
     })),
     sources: (msg?.sources ?? []).map((h) => `${h.file}:${h.start_line}-${h.end_line}`),
+    relevance: msg?.relevance
+      ? {
+          ms: msg.relevance.ms,
+          tokensSaved: msg.relevance.tokensSaved,
+          items: msg.relevance.items.map((x) => ({ source: `${x.file}:${x.start_line}-${x.end_line}`, score: x.score, kept: x.kept })),
+        }
+      : null,
     answer: msg?.content ?? '',
     stats: msg?.stats ? { promptTokens: msg.stats.promptTokens, tokens: msg.stats.tokens, firstTokenMs: msg.stats.firstTokenMs } : null,
   };

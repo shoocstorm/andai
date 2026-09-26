@@ -52,6 +52,10 @@ export const layaRemove = (id: string) => invoke<void>('laya_remove', { checkpoi
 /** Every question about `state` in one batched forward pass (up to 4). */
 export const layaDecide = (state: string, questions: LayaQuestion[]) => invoke<LayaAnswers>('laya_decide', { state, questions });
 
+/** How likely each passage helps answer `request` (one yes/no row per passage, batched in Rust). */
+export const layaRelevance = (request: string, passages: { source: string; text: string }[]) =>
+  invoke<{ scores: number[]; ms: number; model: string }>('laya_relevance', { request, passages });
+
 /** Bytes per IPC call; Rust accepts up to 16 MiB. */
 export const CHUNK = 8 * 1024 * 1024;
 

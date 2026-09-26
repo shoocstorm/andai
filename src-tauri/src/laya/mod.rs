@@ -128,6 +128,18 @@ pub const MAX_STATE: usize = 64 * 1024;
 pub const MAX_QUESTION: usize = 2 * 1024;
 pub const MAX_OPTION_TEXT: usize = 1024;
 pub const MAX_OPTIONS: usize = 16;
+/// Relevance check: passages per call, and bounds on each.
+pub const MAX_PASSAGES: usize = 24;
+pub const MAX_PASSAGE: usize = 16 * 1024;
+pub const MAX_SOURCE: usize = 512;
+pub const MAX_REQUEST: usize = 4 * 1024;
+
+/// The relevance question, asked of each retrieved passage (a `noul`). Of two
+/// phrasings probed on the eval fixtures (47 passages × 29 questions), this
+/// separated passages holding the expected fact best: AUC 0.76 multilingual,
+/// 0.85 English (AGENTS.md §2).
+#[cfg_attr(not(laya), allow(dead_code))]
+pub const RELEVANT: &str = "This passage contains information that helps answer the user's request.";
 /// Questions per call: each is its own row in the batch.
 pub const MAX_QUESTIONS: usize = 4;
 /// One IPC chunk of a checkpoint download.
@@ -135,6 +147,44 @@ pub const MAX_CHUNK: usize = 16 * 1024 * 1024;
 
 fn slug(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LayaPassage {
+    /// Where it's from (file and lines), shown to the model with the text.
+    source: String,
+    text: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayaRelevance {
+    /// P(the passage helps answer the request), per passage in order.
+    scores: Vec<f64>,
+    /// Model time for all passages (Rust), ms.
+    ms: f64,
+    model: String,
+}
+
+pub fn validate_passages(request: &str, passages: &[LayaPassage]) -> Result<(), String> {
+    if request.trim().is_empty() || request.len() > MAX_REQUEST {
+        return Err(format!("the request must be 1–{MAX_REQUEST} bytes"));
+    }
+    if !(1..=MAX_PASSAGES).contains(&passages.len()) {
+        return Err(format!("check 1–{MAX_PASSAGES} passages at a time, got {}", passages.len()));
+    }
+    for (i, p) in passages.iter().enumerate() {
+        if p.source.len() > MAX_SOURCE || p.text.len() > MAX_PASSAGE {
+            return Err(format!("passage {} is over {MAX_PASSAGE} bytes (or its source over {MAX_SOURCE})", i + 1));
+        }
+    }
+    Ok(())
+}
+
+/// The state one passage is judged in: the request, then the passage.
+#[cfg_attr(not(laya), allow(dead_code))]
+pub fn passage_state(request: &str, p: &LayaPassage) -> String {
+    format!("User request:\n{}\n\nPassage from {}:\n{}", request.trim(), p.source, p.text.trim())
 }
 
 /// Bounds on what the webview may ask the model to score.
@@ -342,6 +392,29 @@ pub async fn laya_decide(app: AppHandle, laya: tauri::State<'_, Laya>, state: St
     }
 }
 
+/// Scores how likely each retrieved passage helps answer `request`, one
+/// `noul` row per passage, batched. The webview decides what to drop.
+#[tauri::command]
+pub async fn laya_relevance(app: AppHandle, laya: tauri::State<'_, Laya>, request: String, passages: Vec<LayaPassage>) -> Result<LayaRelevance, String> {
+    validate_passages(&request, &passages)?;
+    #[cfg(laya)]
+    {
+        let model = laya.loaded().ok_or("No Laya model is loaded.")?;
+        let w = laya.worker(&app);
+        let rows = passages
+            .iter()
+            .map(|p| (passage_state(&request, p), engine::Question { kind: prompt::Kind::Noul, instructions: RELEVANT.into(), options: vec![] }))
+            .collect();
+        let asked = blocking(move || w.rows(rows)).await?;
+        Ok(LayaRelevance { scores: asked.answers.iter().map(|a| a.probabilities[1]).collect(), ms: asked.ms, model })
+    }
+    #[cfg(not(laya))]
+    {
+        let _ = (app, laya, request, passages);
+        Err(UNSUPPORTED.into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +471,26 @@ mod tests {
         let q: Vec<LayaQuestion> = serde_json::from_str(r#"[{"id":"next","kind":"choice","question":"q?","options":[{"id":"a","text":"x"},{"id":"b","text":"y"}]},{"id":"stop","kind":"noul","question":"It holds."}]"#).unwrap();
         assert_eq!((q[0].kind, q[1].kind, q[1].options.len()), (LayaKind::Choice, LayaKind::Noul, 0));
         assert!(serde_json::from_str::<Vec<LayaQuestion>>(r#"[{"id":"x","kind":"score","question":"q"}]"#).is_err(), "only choice and noul");
+    }
+
+    fn passage(source: &str, text: &str) -> LayaPassage {
+        LayaPassage { source: source.into(), text: text.into() }
+    }
+
+    #[test]
+    fn bounds_the_relevance_check() {
+        assert!(validate_passages("q?", &[passage("a.md:1-3", "text")]).is_ok());
+        assert!(validate_passages("  ", &[passage("a", "t")]).is_err());
+        assert!(validate_passages(&"q".repeat(MAX_REQUEST + 1), &[passage("a", "t")]).is_err());
+        assert!(validate_passages("q", &[]).unwrap_err().contains("1–24"));
+        assert!(validate_passages("q", &vec![passage("a", "t"); MAX_PASSAGES + 1]).is_err());
+        assert!(validate_passages("q", &[passage("a", &"t".repeat(MAX_PASSAGE + 1))]).is_err());
+        assert!(validate_passages("q", &[passage(&"s".repeat(MAX_SOURCE + 1), "t")]).is_err());
+    }
+
+    #[test]
+    fn a_passage_is_judged_after_the_request() {
+        assert_eq!(passage_state(" q? ", &passage("a.md:1-3", " body ")), "User request:\nq?\n\nPassage from a.md:1-3:\nbody");
     }
 
     #[cfg(not(laya))]

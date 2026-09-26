@@ -22,6 +22,7 @@ const COMMANDS: &[&str] = &[
     "laya_load",
     "laya_unload",
     "laya_decide",
+    "laya_relevance",
 ];
 
 fn main() {

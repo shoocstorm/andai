@@ -2,10 +2,15 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { Policy } from '../agent/tools/types';
 import type { SearchHit } from '../kb/api';
+import type { RelevanceRecord } from '../agent/relevance';
 import type { DecisionIO } from '../llm/decide';
 
-/** `retrieve` belongs to the fixed pipeline; `plan` to agent mode, whose tool calls are in `Message.agent`. */
-export type StepKind = 'analyze' | 'retrieve' | 'plan' | 'build' | 'generate';
+/**
+ * `retrieve` belongs to the fixed pipeline; `plan` to agent mode, whose tool
+ * calls are in `Message.agent`. `filter` is the relevance check (agent/relevance.ts,
+ * with a Laya decision model only), recorded in `Message.relevance`.
+ */
+export type StepKind = 'analyze' | 'retrieve' | 'plan' | 'filter' | 'build' | 'generate';
 export type StepStatus = 'queued' | 'running' | 'done' | 'skipped' | 'error';
 
 export type TraceStep = {
@@ -119,6 +124,8 @@ export type Message = {
   sources?: SearchHit[];
   /** Agent mode: every decision and tool call, in order. */
   agent?: AgentStep[];
+  /** The relevance check: every retrieved passage's score and whether it went into the prompt. */
+  relevance?: RelevanceRecord;
   kbName?: string | null;
   stats?: TurnStats;
   streaming?: boolean;

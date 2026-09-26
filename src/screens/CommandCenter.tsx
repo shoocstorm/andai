@@ -6,6 +6,7 @@ import {
   Code2,
   Database,
   FileText,
+  ListFilter,
   Loader2,
   MessagesSquare,
   Network,
@@ -29,14 +30,14 @@ import { Bar, CopyButton, Markdown, Stat, fmtTime } from '../components/ui';
 import { debugReport } from '../agent/debugReport';
 import { inTauri } from '../kb/api';
 import { loadModel, useEngine } from '../llm/engine';
-import { MODELS, modelById } from '../llm/models';
+import { layaById, MODELS, modelById } from '../llm/models';
 import { clearChat, splitThink, useChat, type Message, type TraceStep } from '../state/chat';
 import { addFiles, createKb, useKb } from '../state/kb';
 import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
-import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
+import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, RelevanceList, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 import { shortcut } from '../lib/platform';
 
@@ -46,6 +47,7 @@ const STEP_STYLE: Record<TraceStep['kind'], { color: string; icon: typeof Search
   analyze: { color: 'var(--blue)', icon: BarChart3 },
   retrieve: { color: 'var(--violet)', icon: Search },
   plan: { color: 'var(--violet)', icon: Wrench },
+  filter: { color: 'var(--violet)', icon: ListFilter },
   build: { color: 'var(--blue)', icon: Network },
   generate: { color: 'var(--amber)', icon: Code2 },
 };
@@ -306,7 +308,7 @@ function reportFor(m: Message): string {
   const kb = k.kbs.find((x) => x.name === m.kbName) ?? null;
   return debugReport(m, questionFor(m), {
     chatModel: modelById(e.loadedId)?.name ?? null,
-    deciderModel: modelById(e.decider.loadedId)?.name ?? null,
+    deciderModel: (layaById(e.decider.loadedId) ?? modelById(e.decider.loadedId))?.name ?? null,
     engine: e.info ? `${e.info.backend} · ${e.info.threads} threads${e.info.compat ? ' · compat' : ''}` : null,
     ug: k.ug?.version ?? null,
     agent: { agentMode: t.agentMode, maxSteps: t.maxSteps, minConfidence: t.minConfidence, policies: t.policies },
@@ -322,6 +324,8 @@ function chipText(s: TraceStep) {
       return s.status === 'running' ? s.detail : `Searching knowledge base: ${s.detail}`;
     case 'plan':
       return s.status === 'running' ? `Planning: ${s.detail}` : `Plan complete: ${s.detail}`;
+    case 'filter':
+      return s.status === 'running' ? `Checking relevance: ${s.detail}` : `Relevance check: ${s.detail}`;
     case 'build':
       return `Assembling context: ${s.detail}`;
     case 'generate':
@@ -704,6 +708,7 @@ function TracePanel({ msg }: { msg?: Message }) {
                     ))}
                   </div>
                 )}
+                {s.kind === 'filter' && msg.relevance && <RelevanceList r={msg.relevance} />}
                 {(s.kind === 'retrieve' || s.kind === 'plan') && !!msg.sources?.length && (
                   <div className="trace-subs">
                     {msg.sources.slice(0, 5).map((h, j) => (

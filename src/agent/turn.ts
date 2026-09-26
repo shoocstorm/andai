@@ -21,6 +21,8 @@ import { recordSearch, useKb } from '../state/kb';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { runAgent } from './loop';
+import { checkRelevance, KEEP_TOP } from './relevance';
+import { decidesWithLaya } from '../llm/decide';
 
 let controller: AbortController | null = null;
 
@@ -70,6 +72,10 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
           status: searchable ? 'queued' : 'skipped',
         },
       ];
+  // With a Laya decision model, retrieved passages are checked for relevance
+  // before they go into the prompt (agent/relevance.ts).
+  const relevance = !!searchable && decidesWithLaya();
+  if (relevance) steps.push({ kind: 'filter', title: 'Relevance check', detail: 'Waiting for passages…', status: 'queued' });
   steps.push(
     { kind: 'build', title: 'Assemble context', detail: 'Persona + retrieved passages + history', status: 'queued' },
     { kind: 'generate', title: `Generate · ${model.name}`, detail: 'Waiting for first token…', status: 'queued' },
@@ -130,6 +136,34 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
           });
         } catch (e) {
           patchStep(id, 'retrieve', { status: 'error', detail: `Search failed: ${e instanceof Error ? e.message : e}` });
+        }
+      }
+    }
+    if (signal.aborted) throw new DOMException('aborted', 'AbortError');
+
+    if (relevance) {
+      if (hits.length <= KEEP_TOP) {
+        patchStep(id, 'filter', { status: 'skipped', detail: hits.length ? `${hits.length} passage${hits.length === 1 ? '' : 's'}, all kept (the top ${KEEP_TOP} always are)` : 'No passages to check' });
+      } else {
+        patchStep(id, 'filter', { status: 'running', detail: `Scoring ${hits.length} passages…` });
+        try {
+          const r = await checkRelevance(prompt, hits);
+          if (r) {
+            hits = r.hits;
+            // Sources are numbered as the prompt cites them, so they're set after the check.
+            patchMessage(id, { sources: hits, relevance: r.record });
+            const dropped = r.record.items.length - hits.length;
+            patchStep(id, 'filter', {
+              status: 'done',
+              detail: dropped
+                ? `Kept ${hits.length} of ${r.record.items.length} passages · ~${r.record.tokensSaved.toLocaleString()} tokens less to read · ${r.record.ms} ms`
+                : `All ${hits.length} passages look relevant · ${r.record.ms} ms`,
+            });
+          }
+        } catch (e) {
+          if (signal.aborted) throw e;
+          // A failed check never costs the answer its context.
+          patchStep(id, 'filter', { status: 'error', detail: `Check failed (${e instanceof Error ? e.message : e}); kept every passage` });
         }
       }
     }

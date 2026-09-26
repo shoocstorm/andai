@@ -158,14 +158,15 @@ export function Markdown({ text }: { text: string }) {
  * and shows a check mark for a moment. For debugging aids: trace steps,
  * arguments, commands, outputs, errors.
  */
-export function CopyButton({ text, label, size = 12 }: { text: string | (() => string); label: string; size?: number }) {
+/** Icon-only by default; `children` adds a visible label (a regular button then). */
+export function CopyButton({ text, label, size = 12, children }: { text: string | (() => string); label: string; size?: number; children?: ReactNode }) {
   const [done, setDone] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   return (
     <button
       type="button"
-      className={`copy-btn${done ? ' done' : ''}`}
+      className={children ? `btn secondary sm${done ? ' done' : ''}` : `copy-btn${done ? ' done' : ''}`}
       aria-label={label}
       title={label}
       onClick={(e) => {
@@ -182,11 +183,12 @@ export function CopyButton({ text, label, size = 12 }: { text: string | (() => s
       }}
     >
       {done ? <Check size={size} /> : <Copy size={size} />}
+      {children}
     </button>
   );
 }
 
-export function Modal({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
+export function Modal({ open, onClose, children, wide, label }: { open: boolean; onClose: () => void; children: ReactNode; wide?: boolean; label?: string }) {
   return (
     <AnimatePresence>
       {open && (
@@ -200,9 +202,10 @@ export function Modal({ open, onClose, children }: { open: boolean; onClose: () 
           onKeyDown={(e) => e.key === 'Escape' && onClose()}
         >
           <motion.div
-            className="modal"
+            className={`modal${wide ? ' wide' : ''}`}
             role="dialog"
             aria-modal="true"
+            aria-label={label}
             initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}

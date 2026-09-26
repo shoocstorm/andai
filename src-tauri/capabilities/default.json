@@ -28,7 +28,8 @@
     "allow-laya-remove",
     "allow-laya-load",
     "allow-laya-unload",
-    "allow-laya-decide"
+    "allow-laya-decide",
+    "allow-laya-relevance"
   ],
   "remote": {
     "urls": [

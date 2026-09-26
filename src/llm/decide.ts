@@ -48,7 +48,8 @@ export type Decision = {
  * Execution Trace so an odd decision can be inspected and copied.
  */
 export type DecisionIO = {
-  request: { messages: { role: string; content: string }[]; params: Record<string, unknown> };
+  /** `state` is the situation the model judged, apart from the prompt around it. */
+  request: { state?: string; messages: { role: string; content: string }[]; params: Record<string, unknown> };
   /** Null when the call itself failed (no reply to read). */
   response: {
     sampled: string | null;
@@ -180,7 +181,7 @@ export async function decide(
     cache_prompt: target.slot === 'decider',
     chat_template_kwargs: { enable_thinking: false },
   };
-  const io: DecisionIO = { request: { messages, params }, response: null };
+  const io: DecisionIO = { request: { state, messages, params }, response: null };
   let result: Awaited<ReturnType<typeof complete>>;
   try {
     result = await complete(target.slot, { messages, ...params, abortSignal: signal });
@@ -235,6 +236,7 @@ async function decideWithLaya(
 ): Promise<Decision> {
   const io: DecisionIO = {
     request: {
+      state,
       messages: [
         { role: 'state', content: state },
         { role: 'question', content: question },

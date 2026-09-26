@@ -24,6 +24,21 @@ def probs(questions):
 
 items, [single] = probs({"next": choice})
 _, [b_choice, b_stop] = probs({"next": choice, "stop": stop})
+rel = fx["relevance"]
+rel_states = [f"User request:\n{rel['request']}\n\nPassage from {src}:\n{text}" for src, text in rel["passages"]]
+# One noul row per passage, each with its own state, in one padded batch.
+rel_items = []
+for st in rel_states:
+    it, _ = a.prepare(st, {"rel": {"type": "noul", "instructions": rel["statement"]}})
+    rel_items += it
+rel_logits, _ = a.forward(collate_items(rel_items, a.tok.pad_token_id))
+t_noul = a.temperature_by_options.get("noul:2", a.temperature[2])
+relevance = []
+for row in range(len(rel_items)):
+    z = np.asarray(rel_logits, dtype=np.float64)[row, :2] / t_noul
+    q = np.exp(z - z.max())
+    relevance.append(float((q / q.sum())[1]))
+
 json.dump(
     {
         "source": "laya-mlx 0.2.0 (" + sys.argv[3] + ", float32)",
@@ -31,8 +46,9 @@ json.dump(
         "markers": items[0]["markers"],
         "probabilities_fp32": single,
         "batch": {"choice_fp32": b_choice, "stop_fp32": b_stop},
+        "relevance_fp32": relevance,
     },
     open(sys.argv[4], "w"),
     indent=1,
 )
-print(sys.argv[3], len(items[0]["ids"]), np.round(single, 4), "stop P(true)", round(b_stop[1], 4))
+print(sys.argv[3], len(items[0]["ids"]), np.round(single, 4), "stop P(true)", round(b_stop[1], 4), "relevance", np.round(relevance, 4))

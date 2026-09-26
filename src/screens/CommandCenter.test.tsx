@@ -185,6 +185,11 @@ describe('Command Center (agent mode)', () => {
     });
   };
 
+  const whyDialog = async (user: ReturnType<typeof userEvent.setup>, trace: ReturnType<typeof within>, n = 0) => {
+    await user.click(trace.getAllByRole('button', { name: /why this step/i })[n]);
+    return within(screen.getByRole('dialog', { name: `Why step ${n + 1}` }));
+  };
+
   it('shows each tool call as a chip, and every decision and call in the trace', async () => {
     const user = userEvent.setup();
     turn([
@@ -198,18 +203,63 @@ describe('Command Center (agent mode)', () => {
     expect(trace.getByText('Answer now')).toBeInTheDocument();
     expect(trace.getByText(/Chosen with 85% of 3 options/)).toBeInTheDocument();
 
-    await user.click(trace.getAllByRole('button', { name: 'Details' })[0]);
-    const bars = trace.getByRole('list', { name: /probabilities/i });
+    // the tool call unfolds in the card, without the decision
+    await user.click(trace.getByRole('button', { name: 'Tool call' }));
+    expect(trace.getByText("ug search 'wllama COOP headers' -k 8 --json")).toBeInTheDocument();
+    expect(trace.getByText(/"file":"README.md"/)).toBeInTheDocument();
+    expect(trace.queryByRole('list', { name: /probabilities/i })).toBeNull();
+    // a step without a tool call has no tool-call toggle
+    expect(trace.getAllByRole('button', { name: /tool call$/i })).toHaveLength(1);
+    expect(trace.getByRole('button', { name: /copy trace/i })).toBeInTheDocument();
+  });
+
+  it('explains a step in a dialog: why, what the model saw, what it returned', async () => {
+    const user = userEvent.setup();
+    const io = {
+      request: {
+        state: 'User request:\nWhat headers?\n\nTool results so far: none.',
+        messages: [
+          { role: 'system', content: 'Make the requested decision.' },
+          { role: 'user', content: 'State:\nUser request:\nWhat headers?\n\nAllowed options:\nA. Answer now\nB. Search' },
+        ],
+        params: { max_tokens: 1, grammar: 'root ::= "A" | "B" | "C"' },
+      },
+      response: { sampled: 'B', topLogprobs: [{ token: 'B', logprob: Math.log(0.85) }, { token: 'A', logprob: Math.log(0.1) }] },
+    };
+    turn([{ id: 's1', index: 0, at: 0, decision: { ...decision, io }, action: 'kb_search', call: call() }]);
+    render(<CommandCenter />);
+    const dialog = await whyDialog(user, within(screen.getByText('Execution Trace').closest('aside')!));
+    expect(dialog.getByRole('heading', { name: 'Why: Knowledge search' })).toBeInTheDocument();
+    expect(dialog.getByText(/Qwen3 1\.7B · decision model · decided in 140 ms · 420 input tokens/)).toBeInTheDocument();
+    const why = within(dialog.getByRole('region', { name: 'Why this step' }));
+    expect(why.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'The agent asked Qwen3 1.7B “q” and it scored 3 options in 140 ms.',
+      'Knowledge search scored highest at 85%, ahead of Answer now at 10%.',
+      'So the agent ran Knowledge search with query: "wllama COOP headers", scope: "broad".',
+    ]);
+    const saw = within(dialog.getByRole('region', { name: 'What the model saw' }));
+    // the state reads as text, newlines intact
+    expect(saw.getByText((_, el) => el?.tagName === 'PRE' && el.textContent === io.request.state)).toBeInTheDocument();
+    expect(saw.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['AAnswer now Answer now', 'BKnowledge search Search', 'CAsk to clarify Ask']);
+    const bars = within(dialog.getByRole('region', { name: 'What it returned' })).getByRole('list', { name: /probabilities/i });
     expect(within(bars).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       expect.stringMatching(/B Knowledge search.*85%/),
       expect.stringMatching(/A Answer now.*10%/),
       expect.stringMatching(/C Ask to clarify.*5\.0%/),
     ]);
-    expect(trace.getByText(/Qwen3 1\.7B · decision model · 140 ms/)).toBeInTheDocument();
-    // shown exactly as a shell would run it
-    expect(trace.getByText("ug search 'wllama COOP headers' -k 8 --json")).toBeInTheDocument();
-    expect(trace.getByText(/"file":"README.md"/)).toBeInTheDocument();
-    expect(trace.getByRole('button', { name: /copy trace/i })).toBeInTheDocument();
+    // the exact call is folded away, raw readout included
+    await user.click(dialog.getByText(/Exact call/));
+    expect(within(dialog.getByRole('table')).getAllByRole('row').map((r) => r.textContent)).toEqual([
+      'TokenLogprobShare of listed',
+      expect.stringMatching(/^"B" Knowledge search-0\.163\d+%$/),
+      expect.stringMatching(/^"A" Answer now-2\.303\d+%$/),
+    ]);
+    await user.click(dialog.getByRole('button', { name: 'Copy input: prompt' }));
+    expect(await navigator.clipboard.readText()).toBe(`[system]\nMake the requested decision.\n\n[user]\n${io.request.messages[1].content}`);
+    await user.click(dialog.getByRole('button', { name: 'Copy decision call' }));
+    expect(JSON.parse(await navigator.clipboard.readText())).toMatchObject({ step: 1, action: 'kb_search', decision: { io } });
+    await user.click(dialog.getByRole('button', { name: /^close$/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); // after its exit animation
   });
 
   it('asks for approval inline and resolves the waiting call', async () => {
@@ -234,7 +284,7 @@ describe('Command Center (agent mode)', () => {
     expect(JSON.parse(await navigator.clipboard.readText())).toMatchObject({ action: 'kb_search', call: { args: { query: 'wllama COOP headers' } } });
     expect(trace.getByRole('button', { name: 'Copy step 1 as JSON' }).querySelector('svg')).toBeTruthy();
 
-    await user.click(trace.getByRole('button', { name: 'Details' }));
+    await user.click(trace.getByRole('button', { name: 'Tool call' }));
     await user.click(trace.getByRole('button', { name: 'Copy command' }));
     expect(await navigator.clipboard.readText()).toBe("ug search 'wllama COOP headers' -k 8 --json");
 
@@ -257,52 +307,34 @@ describe('Command Center (agent mode)', () => {
     expect(screen.getByText(/decided 2× in 1\.62 s/)).toBeInTheDocument();
   });
 
-  it('shows a decision call’s input and output in the details, and copies it', async () => {
-    const user = userEvent.setup();
-    const io = {
-      request: {
-        messages: [
-          { role: 'system', content: 'Make the requested decision.' },
-          { role: 'user', content: 'State:\nUser request:\nWhat headers?\n\nAllowed options:\nA. Answer now\nB. Search' },
-        ],
-        params: { max_tokens: 1, grammar: 'root ::= "A" | "B" | "C"' },
-      },
-      response: { sampled: 'B', topLogprobs: [{ token: 'B', logprob: Math.log(0.85) }, { token: 'A', logprob: Math.log(0.1) }] },
-    };
-    turn([{ id: 's1', index: 0, at: 0, decision: { ...decision, io }, action: 'kb_search', call: call() }]);
-    render(<CommandCenter />);
-    const trace = within(screen.getByText('Execution Trace').closest('aside')!);
-    await user.click(trace.getByRole('button', { name: 'Details' }));
-    expect(trace.getByText('Decision call')).toBeInTheDocument();
-    // the prompt reads as text, newlines intact, one block per message
-    expect(trace.getByText((_, el) => el?.tagName === 'PRE' && !!el.textContent?.startsWith('State:\nUser request:\nWhat headers?\n'))).toBeInTheDocument();
-    expect(trace.getByText(/"grammar": "root ::= \\"A\\"/)).toBeInTheDocument();
-    const table = trace.getByRole('table');
-    expect(within(table).getAllByRole('row').map((r) => r.textContent)).toEqual([
-      'TokenLogprobShare of listed',
-      expect.stringMatching(/^"B" Knowledge search-0\.163\d+%$/),
-      expect.stringMatching(/^"A" Answer now-2\.303\d+%$/),
-    ]);
-    await user.click(trace.getByRole('button', { name: 'Copy decision call' }));
-    expect(JSON.parse(await navigator.clipboard.readText())).toEqual(io);
-    await user.click(trace.getByRole('button', { name: 'Copy input: prompt' }));
-    expect(await navigator.clipboard.readText()).toBe(`[system]\nMake the requested decision.\n\n[user]\n${io.request.messages[1].content}`);
-  });
-
-  it('shows Laya’s answer to the stop question on the step and in the details', async () => {
+  it('explains Laya’s stop question: on the step and in the dialog', async () => {
     const user = userEvent.setup();
     const stop = { statement: 'The tool results above already contain the information needed.', probability: 0.78 };
-    turn([{ id: 's1', index: 0, at: 0, decision: { ...decision, model: 'Laya Multilingual', chosen: 'answer_now', stop }, action: 'answer_now' }]);
+    turn([
+      {
+        id: 's1',
+        index: 0,
+        at: 0,
+        decision: { ...decision, model: 'Laya Multilingual', chosen: 'kb_search', stop },
+        action: 'answer_now',
+        note: 'The tool results cover the request (78% likely), so answering.',
+      },
+    ]);
     render(<CommandCenter />);
     const trace = within(screen.getByText('Execution Trace').closest('aside')!);
     expect(trace.getByText(/Results suffice: 78% · Chosen with/)).toBeInTheDocument();
-    await user.click(trace.getByRole('button', { name: 'Details' }));
-    expect(trace.getByText(/Results suffice\?/)).toHaveTextContent('Results suffice? 78% yes');
+    const dialog = await whyDialog(user, trace);
+    const lines = within(dialog.getByRole('region', { name: 'Why this step' })).getAllByRole('listitem').map((li) => li.textContent);
+    expect(lines[1]).toBe('With tool results in hand, it also asked whether they already answer the request: 78% yes, so no more tools were needed.');
+    expect(lines.at(-1)).toBe('So the agent stopped using tools and answered.');
+    expect(lines.join(' ')).not.toMatch(/The tool results cover/); // said once, not twice
+    expect(dialog.getByText(stop.statement)).toBeInTheDocument();
+    expect(dialog.getByText(/Results suffice\?/)).toHaveTextContent('Results suffice? 78% yes');
   });
 
-  it('shows a failed decision call with its time, error and request', async () => {
+  it('explains a failed decision with its time, error and request', async () => {
     const user = userEvent.setup();
-    const io = { request: { messages: [{ role: 'user', content: 'State: failing' }], params: {} }, response: null };
+    const io = { request: { state: 'State: failing', messages: [{ role: 'user', content: 'State: failing' }], params: {} }, response: null };
     turn([
       {
         id: 's1',
@@ -319,9 +351,56 @@ describe('Command Center (agent mode)', () => {
     render(<CommandCenter />);
     const trace = within(screen.getByText('Execution Trace').closest('aside')!);
     expect(trace.getByText('Decision failed after 640 ms')).toBeInTheDocument();
-    await user.click(trace.getByRole('button', { name: 'Details' }));
-    expect(trace.getByText('State: failing')).toBeInTheDocument();
-    expect(trace.getByText(/No reply: the call failed/)).toBeInTheDocument();
+    const dialog = await whyDialog(user, trace);
+    expect(dialog.getByText('Decision failed after 640 ms')).toBeInTheDocument();
+    expect(dialog.getByText(/call failed: context overflow/)).toBeInTheDocument();
+    expect(dialog.getByText('State: failing', { selector: 'pre.dd-state' })).toBeInTheDocument();
+    await user.click(dialog.getByText(/Exact call/));
+    expect(dialog.getByText(/No reply: the call failed/)).toBeInTheDocument();
+  });
+
+  it('shows the relevance check: each passage’s score, what was kept and dropped', () => {
+    const relevance = {
+      model: 'Laya Multilingual',
+      ms: 41,
+      modelMs: 38,
+      keepTop: 2,
+      dropBelow: 0.1,
+      tokensSaved: 180,
+      items: [
+        { file: 'README.md', start_line: 1, end_line: 9, name: 'a', score: 0.92, kept: true, reason: 'top' as const, chars: 400 },
+        { file: 'notes.md', start_line: 3, end_line: 8, name: 'b', score: 0.03, kept: true, reason: 'top' as const, chars: 300 },
+        { file: 'old.md', start_line: 1, end_line: 5, name: 'c', score: 0.04, kept: false, reason: 'low' as const, chars: 700 },
+        { file: 'api.md', start_line: 2, end_line: 6, name: 'd', score: 0.61, kept: true, reason: 'score' as const, chars: 200 },
+      ],
+    };
+    addMessage({ id: 'u', role: 'user', content: 'What headers?', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Use COOP [1].',
+      createdAt: 0,
+      kbName: 'Docs',
+      relevance,
+      steps: [
+        { kind: 'retrieve', title: 'Knowledge retrieval', detail: 'Retrieved 4 passages', status: 'done' },
+        { kind: 'filter', title: 'Relevance check', detail: 'Kept 3 of 4 passages · ~180 tokens less to read · 41 ms', status: 'done' },
+        { kind: 'build', title: 'Assemble context', detail: '', status: 'done' },
+        { kind: 'generate', title: 'Generate', detail: '', status: 'done' },
+      ],
+    });
+    render(<CommandCenter />);
+    expect(screen.getByText(/Relevance check: Kept 3 of 4 passages/)).toBeInTheDocument();
+    const list = within(screen.getByRole('region', { name: 'Relevance check' }));
+    expect(list.getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual([
+      'README.md: 92%, kept',
+      'notes.md: 3.0%, kept',
+      'old.md: 4.0%, dropped',
+      'api.md: 61%, kept',
+    ]);
+    // kept passages carry the number the answer cites them by
+    expect(list.getByText('[3]', { exact: false }).closest('li')).toHaveAttribute('aria-label', 'api.md: 61%, kept');
+    expect(list.getByText(/1 dropped · ~180 fewer prompt tokens/)).toBeInTheDocument();
   });
 
   it('shows a fallback note when the loop overrode the decision', () => {

@@ -77,6 +77,7 @@ Andai/
 │  ├─ agent/prompt.ts        PURE prompt assembly: keywords, system prompt, history, budgets, agent state
 │  ├─ agent/turn.ts          one turn: plan (agent loop) or analyze → retrieve (fixed) → build → generate
 │  ├─ agent/loop.ts          agent loop: decide → fill args → policy gate → run tool → observe; writes Message.agent
+│  ├─ agent/relevance.ts     relevance check (Laya): score retrieved passages, drop clear misses before the prompt
 │  ├─ agent/evidence.ts      PURE: merges what the tools found into the answer's passages (same node, covered ranges, order)
 │  ├─ agent/tools/           tool registry (code only), ug tools, argument filling, schema validation + GBNF
 │  ├─ kb/api.ts              typed wrappers over the Rust ug bridge + hit dedupe
@@ -110,7 +111,8 @@ Andai/
 model, GBNF from the tool schema) → `validate` → policy gate (Auto / Ask →
 approval card) → `kbTool` (Rust `kb_tool` → `ug <cmd> --json`) →
 `tool.observe` → `addEvidence`] × up to `maxSteps` → `mergeEvidence` →
-`buildSystem` (tool results fenced as passages) + `buildHistory` → `engine.chat` → answer. Every decision and call
+relevance check (with Laya: `checkRelevance` drops passages scored < 0.10
+past the top 2) → `buildSystem` (tool results fenced as passages) + `buildHistory` → `engine.chat` → answer. Every decision and call
 is written to `Message.agent`, which drives the tool chips, approval cards and
 the Execution Trace. **Agent mode off, or no KB:** `runTurn` → `kbSearch` (one
 `ug search` with the question) → `buildSystem` → `engine.chat`.
@@ -317,6 +319,26 @@ level defaults to *Ask*.
   again per question (laya-mlx does the same). Choice alone vs choice +
   stop in one pass: 7.9 → 12.7 ms (multilingual), 18.3 → 30.8 ms (English)
   in release; separate calls would cost about twice the single time.
+- **Laya as a relevance filter** (`agent/relevance.ts`, `laya_relevance`: one
+  `noul` row per passage, its own state `User request … Passage from …`).
+  Probed on the eval fixtures (47 passages × 29 questions, a passage counts
+  as relevant when it holds the question's expected fact), the statement
+  "This passage contains information that helps answer the user's request."
+  separated them with AUC 0.76 (multilingual) and 0.85 (English); dropping at
+  0.2 would lose 17–30% of relevant passages, so the policy keeps the top 2
+  search results and drops only scores < 0.10. Agent eval (Laya deciding,
+  2026-09-26): multilingual dropped 21 of 168 passages, prompt 500 → 460
+  tokens, facts 82.8% → 82.8%, grounded 48.5% → 54.5%, check 36 ms median;
+  English dropped 43 of 158, prompt 432 → 333 tokens, first token 2990 →
+  2406 ms median, facts 79.3% → 79.3% (one question gained, one lost), 57 ms.
+  The eval's knowledge bases are small (7 files); larger ones retrieve more
+  noise to drop.
+- **The e2e and eval runners serve the dev UI on port 1431**
+  (`scripts/dev-port.mjs`, `ANDAI_DEV_PORT`), not 1420. "localhost" reaches
+  both 127.0.0.1 and [::1]: with a developer's own `tauri dev` on 1420, a
+  harness run loaded that app instead of its own and hung until its
+  timeout. Their webview storage is therefore separate from the dev app's
+  (the model downloads once more for the harness).
 - **mlx-sys builds MLX as CMake "Debug" in dev builds** (its build script
   follows `debug_assertions`), which made Laya about 4× slower in `tauri dev`
   and the agent eval (53 ms vs 13 ms per decision). `Cargo.toml` builds
@@ -336,7 +358,7 @@ level defaults to *Ask*.
 | Chat, streaming, stop, think folding | Real | `llm/engine.ts`, `agent/turn.ts` |
 | Reasoning chips, Execution Trace, stats | Real (actual step timings, tokens, tok/s; every decision and tool call) | `agent/turn.ts`, `agent/loop.ts`, `screens/AgentTrace.tsx` |
 | Knowledge bases: create, ingest, index, search, delete | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts` |
-| Laya decision model (download, verify, load, decide; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
+| Laya decision model (download, verify, load, decide, stop question, relevance check; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
 | Agent tool loop: decisions, 8 ug tools, per-tool policy, approvals, decision model, Tools screen | Real | `agent/loop.ts`, `agent/tools/`, `llm/decide.ts`, `state/tools.ts`, `screens/Tools.tsx`, `src-tauri/src/tools.rs` |
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |

@@ -3,11 +3,12 @@
 // command that ran, timing and output. Tool output and arguments come from
 // the model and the user's files, so they render as plain text only.
 
-import { Check, ChevronRight, Copy, Hand, ShieldQuestion, Wrench, X } from 'lucide-react';
+import { Check, ChevronRight, Copy, Hand, HelpCircle, ShieldQuestion, Wrench, X } from 'lucide-react';
 import { useState } from 'react';
 import { toolById } from '../agent/tools/registry';
-import { CopyButton, fmtTime } from '../components/ui';
+import { CopyButton, Modal, fmtTime } from '../components/ui';
 import { shellCommand } from '../agent/debugReport';
+import type { RelevanceRecord } from '../agent/relevance';
 import type { DecisionIO } from '../llm/decide';
 import type { AgentStep, CallStatus, DecisionRecord, Message, ToolCallRecord } from '../state/chat';
 import { resolveApproval } from '../state/tools';
@@ -70,15 +71,12 @@ export function DecisionSummary({ agent }: { agent: AgentStep[] | undefined }) {
 /** The prompt as plain text, one block per message: easy to read and to paste back. */
 export const ioPromptText = (io: DecisionIO) => io.request.messages.map((m) => `[${m.role}]\n${m.content}`).join('\n\n');
 
-/** What the decision model was sent and what it returned. Text from the model and the user's files, so plain text only. */
-export function DecisionCall({ io, labels }: { io: DecisionIO; labels?: Record<string, string> }) {
+/** The exact call: prompt, parameters and raw reply. Text from the model and the user's files, so plain text only. */
+export function RawDecisionCall({ io, labels }: { io: DecisionIO; labels?: Record<string, string> }) {
   const r = io.response;
   const total = r ? r.topLogprobs.reduce((a, t) => a + Math.exp(t.logprob), 0) : 0;
   return (
     <div className="ag-call ag-io">
-      <Field k="Decision call" copy={JSON.stringify(io, null, 2)}>
-        <span className="faint ag-small">What the decision model was sent, and its raw reply. Copy it to report an odd decision.</span>
-      </Field>
       <Field k="Input: prompt" copy={ioPromptText(io)}>
         {io.request.messages.map((m, i) => (
           <div key={i} className="ag-msg">
@@ -266,10 +264,141 @@ export function CallDetail({ c }: { c: ToolCallRecord }) {
   );
 }
 
-/** One loop iteration in the Execution Trace. */
+const FINAL: Record<string, string> = {
+  answer_now: 'So the agent stopped using tools and answered.',
+  ask_clarification: 'So the agent asked the user a clarifying question.',
+};
+
+/**
+ * Why a step did what it did, in plain sentences, from its record: what the
+ * decision model was asked and how it scored the options, the yes/no stop
+ * question when Laya asked one, any override by the loop (`note`), and the
+ * action taken. Pure, for the decision dialog and its tests.
+ */
+export function explainStep(s: AgentStep): string[] {
+  const out: string[] = [];
+  const d = s.decision;
+  if (d) {
+    const [top, next] = [...d.options].sort((a, b) => b.probability - a.probability);
+    out.push(`The agent asked ${d.model} “${d.question}” and it scored ${d.options.length} options in ${fmtMs(d.ms)}.`);
+    if (d.stop) {
+      const yes = d.stop.probability >= 0.5;
+      out.push(`With tool results in hand, it also asked whether they already answer the request: ${pct(d.stop.probability)} yes, so ${yes ? 'no more tools were needed' : 'more looking was needed'}.`);
+    }
+    out.push(`${actionLabel(top.id)} scored highest at ${pct(top.probability)}${next ? `, ahead of ${actionLabel(next.id)} at ${pct(next.probability)}` : ''}.`);
+  } else if (s.failedDecision) {
+    out.push(`The agent asked the decision model what to do next, but the call failed: ${s.failedDecision.error}`);
+  }
+  // The loop's own reason when it overrode or skipped the decision; the stop rule is already said above.
+  if (s.note && !(d?.stop && s.note.startsWith('The tool results cover'))) out.push(s.note);
+  const c = s.call;
+  out.push(c ? `So the agent ran ${c.title}${c.args && Object.keys(c.args).length ? ` with ${argsInline(c.args, 160)}` : ''}.` : (FINAL[s.action] ?? `So the agent chose ${actionLabel(s.action)}.`));
+  return out;
+}
+
+/** Everything about one decision, apart from the tool call it led to. */
+export function DecisionDialog({ s, open, onClose }: { s: AgentStep; open: boolean; onClose: () => void }) {
+  const d = s.decision;
+  const io = d?.io ?? s.failedDecision?.io;
+  const laya = io?.response?.laya;
+  const labels = d ? Object.fromEntries(d.options.map((o) => [o.label, actionLabel(o.id)])) : undefined;
+  return (
+    <Modal open={open} onClose={onClose} wide label={`Why step ${s.index + 1}`}>
+      <div className="dd-head">
+        <div>
+          <div className="label violet">Step {s.index + 1} · decision</div>
+          <h3>Why: {actionLabel(s.action)}</h3>
+          <div className="faint ag-small">
+            {d
+              ? `${d.model} · ${d.slot === 'decider' ? 'decision model' : 'chat model'} · decided in ${fmtMs(d.ms)}${laya ? ` (model ${fmtMs(laya.ms)})` : ''}${d.promptTokens != null ? ` · ${d.promptTokens} input tokens` : ''}`
+              : s.failedDecision
+                ? `Decision failed after ${fmtMs(s.failedDecision.ms)}`
+                : 'No decision was scored'}
+            {d?.truncated && <span className="ag-note"> · input cut to fit the model</span>}
+          </div>
+        </div>
+        <button className="btn ghost sm" aria-label="Close dialog" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+
+      <section className="dd-section" aria-label="Why this step">
+        <h4 className="label">Why this step</h4>
+        <ol className="dd-why">
+          {explainStep(s).map((line, i) => (
+            <li key={i} className="selectable">
+              {line}
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      {(io || d) && (
+        <div className="dd-grid">
+          <section className="dd-section" aria-label="What the model saw">
+            <h4 className="label">What the model saw</h4>
+            {io?.request.state != null && (
+              <Field k="State" copy={io.request.state}>
+                <pre className="ag-pre selectable dd-state">{io.request.state}</pre>
+              </Field>
+            )}
+            {d && (
+              <>
+                <Field k="Question">
+                  <div className="ag-small selectable">{d.question}</div>
+                </Field>
+                <Field k="Options">
+                  <ol className="dd-options">
+                    {d.options.map((o) => (
+                      <li key={o.id} className={o.id === d.chosen ? 'chosen' : undefined}>
+                        <span className="mono faint">{o.label}</span>
+                        <span>
+                          <b>{actionLabel(o.id)}</b> <span className="faint selectable">{o.text}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </Field>
+                {d.stop && (
+                  <Field k="Yes/no question">
+                    <div className="ag-small selectable">{d.stop.statement}</div>
+                  </Field>
+                )}
+              </>
+            )}
+          </section>
+          <section className="dd-section" aria-label="What it returned">
+            <h4 className="label">What it returned</h4>
+            {d ? <DecisionBars d={d} /> : <div className="ag-small ag-err selectable">{s.failedDecision?.error ?? 'No reply.'}</div>}
+          </section>
+        </div>
+      )}
+
+      {io && (
+        <details className="ag-raw dd-raw">
+          <summary>Exact call: prompt, parameters and raw reply</summary>
+          <RawDecisionCall io={io} labels={labels} />
+        </details>
+      )}
+      <div className="dd-foot">
+        {io && (
+          <CopyButton text={JSON.stringify({ step: s.index + 1, action: s.action, note: s.note, decision: d, failed: s.failedDecision }, null, 2)} label="Copy decision call">
+            Copy decision call
+          </CopyButton>
+        )}
+        <button className="btn primary sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** One loop iteration in the Execution Trace: the decision opens in a dialog, the tool call unfolds here. */
 export function AgentStepCard({ s }: { s: AgentStep }) {
   const c = s.call;
   const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState(false);
   const pill = c ? CALL_PILL[c.status] : ['Decided', 'violet'];
   return (
     <div className={`trace-card ag-step${c?.status === 'running' || c?.status === 'awaiting' ? ' running' : ''}`}>
@@ -300,23 +429,67 @@ export function AgentStepCard({ s }: { s: AgentStep }) {
       )}
       {s.note && <div className="trace-detail ag-note">{s.note}</div>}
       {c?.observation && <div className="trace-detail">{c.observation}</div>}
-      <button className="btn ghost sm ag-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {open ? 'Hide details' : 'Details'}
-      </button>
-      {open && (
+      <div className="ag-step-buttons">
+        <button className="btn ghost sm ag-toggle" onClick={() => setWhy(true)}>
+          <HelpCircle size={12} /> Why this step?
+        </button>
+        {c && (
+          <button className="btn ghost sm ag-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {open ? 'Hide tool call' : 'Tool call'}
+          </button>
+        )}
+      </div>
+      {open && c && (
         <div className="ag-details">
-          {s.decision ? <DecisionBars d={s.decision} /> : <div className="faint ag-small">No decision was scored for this step.</div>}
-          {s.decision?.io && <DecisionCall io={s.decision.io} labels={Object.fromEntries(s.decision.options.map((o) => [o.label, actionLabel(o.id)]))} />}
-          {!s.decision && s.failedDecision?.io && (
-            <>
-              <div className="ag-small ag-err selectable">{s.failedDecision.error}</div>
-              <DecisionCall io={s.failedDecision.io} />
-            </>
-          )}
-          {c && <CallDetail c={c} />}
+          <CallDetail c={c} />
         </div>
       )}
+      <DecisionDialog s={s} open={why} onClose={() => setWhy(false)} />
     </div>
+  );
+}
+
+/**
+ * The relevance check under its trace step: every retrieved passage, its
+ * score, and whether it went into the prompt (numbered as the answer cites
+ * it) or was dropped, and why.
+ */
+export function RelevanceList({ r }: { r: RelevanceRecord }) {
+  let n = 0;
+  const dropped = r.items.filter((x) => !x.kept).length;
+  return (
+    <section className="trace-subs ag-rel" aria-label="Relevance check">
+      <div className="faint ag-small">
+        {r.model} scored how likely each passage helps answer the request. The top {r.keepTop} search results are always kept; the
+        rest are dropped below {pct(r.dropBelow)}.
+      </div>
+      <ul className="ag-rel-list">
+        {r.items.map((x, i) => {
+          const cite = x.kept ? ++n : null;
+          return (
+            <li key={i} className={x.kept ? 'kept' : 'dropped'} aria-label={`${x.file}: ${pct(x.score)}, ${x.kept ? 'kept' : 'dropped'}`}>
+              {x.kept ? <Check size={13} color="var(--violet)" /> : <X size={13} color="var(--text-4)" />}
+              <span className="ag-rel-file ellipsis" title={x.file}>
+                {cite != null && <span className="mono">[{cite}] </span>}
+                {x.file.split('/').pop()}
+                <span className="faint">
+                  :{x.start_line}-{x.end_line}
+                </span>
+              </span>
+              <span className="ag-bar-track">
+                <i style={{ width: `${Math.max(1, x.score * 100)}%` }} />
+              </span>
+              <span className="ag-bar-value mono">{pct(x.score)}</span>
+              <span className="ag-rel-why faint">{x.reason === 'top' ? 'top result' : x.reason === 'score' ? 'relevant' : 'dropped'}</span>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="faint ag-small">
+        {dropped ? `${dropped} dropped · ~${r.tokensSaved.toLocaleString()} fewer prompt tokens for the chat model to read` : 'Nothing dropped'} ·{' '}
+        {fmtMs(r.ms)}
+      </div>
+    </section>
   );
 }
 

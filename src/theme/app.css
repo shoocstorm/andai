@@ -836,6 +836,11 @@ select.field {
   box-shadow: var(--shadow-pop);
   padding: 26px 28px;
 }
+.modal.wide {
+  width: min(980px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
 .modal h3 {
   margin: 0 0 6px;
   font: 600 20px/1.2 var(--font-display);

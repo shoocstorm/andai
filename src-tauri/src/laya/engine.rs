@@ -103,32 +103,38 @@ impl Engine {
 
     /// Scores every question against `state` in one batched forward pass.
     pub fn ask(&self, state: &str, questions: &[Question]) -> R<Asked> {
+        let rows: Vec<(&str, &Question)> = questions.iter().map(|q| (state, q)).collect();
+        self.ask_rows(&rows)
+    }
+
+    /// Each row is its own state and question (one passage per row for the
+    /// relevance check), scored in padded batches of at most `BATCH` rows.
+    pub fn ask_rows(&self, rows: &[(&str, &Question)]) -> R<Asked> {
+        const BATCH: usize = 8;
         let started = Instant::now();
-        let seqs = questions
-            .iter()
-            .map(|q| {
-                let options = match q.kind {
-                    Kind::Choice => q.options.iter().map(|(id, text)| prompt::render_option(id, text)).collect(),
-                    Kind::Noul => prompt::noul_options(),
-                };
-                prompt::build(&self.tok, &self.special, q.kind, state, &q.instructions, &options, self.max_len, self.head_max_len)
-            })
-            .collect::<R<Vec<_>>>()?;
-        let rows: Vec<_> = seqs.iter().zip(questions).map(|(s, q)| (s.ids.as_slice(), s.markers.as_slice(), q.kind.qtype())).collect();
-        let logits = self.model.logits(&rows, self.pad)?;
-        let answers = seqs
-            .iter()
-            .zip(questions)
-            .zip(logits)
-            .map(|((seq, q), l)| {
+        let mut answers = Vec::with_capacity(rows.len());
+        for chunk in rows.chunks(BATCH) {
+            let seqs = chunk
+                .iter()
+                .map(|(state, q)| {
+                    let options = match q.kind {
+                        Kind::Choice => q.options.iter().map(|(id, text)| prompt::render_option(id, text)).collect(),
+                        Kind::Noul => prompt::noul_options(),
+                    };
+                    prompt::build(&self.tok, &self.special, q.kind, state, &q.instructions, &options, self.max_len, self.head_max_len)
+                })
+                .collect::<R<Vec<_>>>()?;
+            let batch: Vec<_> = seqs.iter().zip(chunk).map(|(s, (_, q))| (s.ids.as_slice(), s.markers.as_slice(), q.kind.qtype())).collect();
+            let logits = self.model.logits(&batch, self.pad)?;
+            for ((seq, (_, q)), l) in seqs.iter().zip(chunk).zip(logits) {
                 if l.iter().any(|v| !v.is_finite()) {
-                    return Err("the decision model returned non-finite scores".to_string());
+                    return Err("the decision model returned non-finite scores".into());
                 }
                 let bucket = prompt::bucket(q.kind, l.len());
                 let t = self.by_options.iter().find(|(k, _)| *k == bucket).map_or(self.temperature[q.kind.qtype() as usize], |(_, t)| *t);
-                Ok(Answer { probabilities: prompt::probabilities(&l, t), input_tokens: seq.ids.len(), truncated: seq.truncated })
-            })
-            .collect::<R<Vec<_>>>()?;
+                answers.push(Answer { probabilities: prompt::probabilities(&l, t), input_tokens: seq.ids.len(), truncated: seq.truncated });
+            }
+        }
         Ok(Asked { answers, ms: started.elapsed().as_secs_f64() * 1e3 })
     }
 }
@@ -201,8 +207,24 @@ mod tests {
             t.sort_by(f64::total_cmp);
             t[12]
         };
+        // Relevance: one noul row per passage, each with its own state (mod.rs `laya_relevance`).
+        let rel = &fx["relevance"];
+        let noul = Question { kind: Kind::Noul, instructions: crate::laya::RELEVANT.into(), options: vec![] };
+        assert_eq!(rel["statement"].as_str().unwrap(), crate::laya::RELEVANT);
+        let states: Vec<String> = rel["passages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| crate::laya::passage_state(rel["request"].as_str().unwrap(), &crate::laya::LayaPassage { source: p[0].as_str().unwrap().into(), text: p[1].as_str().unwrap().into() }))
+            .collect();
+        let rows: Vec<(&str, &Question)> = states.iter().map(|s| (s.as_str(), &noul)).collect();
+        let got: Vec<f64> = engine.ask_rows(&rows).unwrap().answers.iter().map(|a| a.probabilities[1]).collect();
+        let want: Vec<f64> = serde_json::from_value(golden["relevance_fp32"].clone()).unwrap();
+        let worst_r = got.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+        assert!(worst_r < 0.006 && got[0] > got[1], "relevance {got:?} vs laya-mlx {want:?}");
+
         let (t1, t2) = (p50(std::slice::from_ref(&choice)), p50(&[choice, stop]));
-        println!("{id}: P50 {t1:.1} ms (choice), {t2:.1} ms (choice + noul), {} tokens, max |Δp| {worst:.4} / batched {worst_b:.4}", one.answers[0].input_tokens);
+        println!("{id}: P50 {t1:.1} ms (choice), {t2:.1} ms (choice + noul), {} tokens, max |Δp| {worst:.4} / batched {worst_b:.4} / relevance {worst_r:.4}", one.answers[0].input_tokens);
         assert!(t2 < 100.0, "a decision must take < 100 ms (P50 {t2:.1} ms)");
     }
 

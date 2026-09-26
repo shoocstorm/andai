@@ -14,6 +14,7 @@ enum Job {
     Load { id: String, dir: PathBuf, reply: Reply<f64> },
     Unload { reply: Reply<()> },
     Ask { state: String, questions: Vec<Question>, reply: Reply<Asked> },
+    Rows { rows: Vec<(String, Question)>, reply: Reply<Asked> },
 }
 
 pub struct Worker {
@@ -56,6 +57,13 @@ impl Worker {
                             *shared.lock().unwrap() = None;
                             let _ = reply.send(Ok(()));
                         }
+                        Job::Rows { rows, reply } => {
+                            let res = match &engine {
+                                Some(e) => e.ask_rows(&rows.iter().map(|(s, q)| (s.as_str(), q)).collect::<Vec<_>>()),
+                                None => Err("No Laya model is loaded.".into()),
+                            };
+                            let _ = reply.send(res);
+                        }
                         Job::Ask { state, questions, reply } => {
                             let res = match &engine {
                                 Some(e) => e.ask(&state, &questions),
@@ -87,6 +95,11 @@ impl Worker {
 
     pub fn questions(&self, state: String, questions: Vec<Question>) -> Result<Asked, String> {
         self.ask(|reply| Job::Ask { state, questions, reply })
+    }
+
+    /// Rows with a state each (see `Engine::ask_rows`).
+    pub fn rows(&self, rows: Vec<(String, Question)>) -> Result<Asked, String> {
+        self.ask(|reply| Job::Rows { rows, reply })
     }
 
     pub fn loaded(&self) -> Option<String> {

@@ -71,6 +71,14 @@ export function debugReport(m: Message, question: string, env: ReportEnv): strin
     ...(m.steps ?? []).map((s) => `- ${s.kind}: ${s.status}${s.ms != null ? ` · ${s.ms} ms` : ''} · ${s.detail}`),
   ];
   if (m.agent?.length) lines.push('', '### Agent', ...m.agent.flatMap(stepLines));
+  if (m.relevance) {
+    const r = m.relevance;
+    lines.push(
+      '',
+      `### Relevance check (${r.model}, ${r.ms} ms; top ${r.keepTop} kept, drop below ${pct(r.dropBelow)})`,
+      ...r.items.map((x) => `- ${x.kept ? 'kept' : 'DROPPED'} ${pct(x.score)} ${x.file}:${x.start_line}-${x.end_line} (${x.reason})`),
+    );
+  }
   if (m.sources?.length) {
     lines.push('', '### Sources', ...m.sources.map((h, i) => `[${i + 1}] ${h.file}:${h.start_line}-${h.end_line}${h.name && h.name !== h.file ? ` — ${h.name}` : ''}`));
   }
