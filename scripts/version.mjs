@@ -1,16 +1,16 @@
-#!/usr/bin/env node
-// The app version lives in five manifests that must always agree:
+#!/usr/bin/env bun
+// The app version lives in four manifests that must always agree
+// (bun.lock doesn't record the root package's version):
 //
 //   package.json               "version"
-//   package-lock.json          "version" and packages[""].version
 //   src-tauri/tauri.conf.json  "version"   ← what the built .app reports
 //   src-tauri/Cargo.toml       [package] version
 //   src-tauri/Cargo.lock       the "andai" package entry
 //
-//   node scripts/version.mjs            print the version (fails if they disagree)
-//   node scripts/version.mjs check      same, quiet on success
-//   node scripts/version.mjs check 1.2.3 | v1.2.3   also require that exact version (CI: tag == version)
-//   node scripts/version.mjs set 1.2.3  write it to every manifest, then re-check
+//   bun scripts/version.mjs            print the version (fails if they disagree)
+//   bun scripts/version.mjs check      same, quiet on success
+//   bun scripts/version.mjs check 1.2.3 | v1.2.3   also require that exact version (CI: tag == version)
+//   bun scripts/version.mjs set 1.2.3  write it to every manifest, then re-check
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -29,13 +29,10 @@ const cargoTomlRe = /^(version\s*=\s*")([^"]+)(")/m;
 const cargoLockRe = /(\[\[package\]\]\nname = "andai"\nversion = ")([^"]+)(")/;
 
 export function readVersions() {
-  const lock = json.read('package-lock.json');
   const toml = readFileSync(path('src-tauri/Cargo.toml'), 'utf8').match(cargoTomlRe);
   const cargoLock = readFileSync(path('src-tauri/Cargo.lock'), 'utf8').match(cargoLockRe);
   return {
     'package.json': json.read('package.json').version,
-    'package-lock.json': lock.version,
-    'package-lock.json packages[""]': lock.packages?.['']?.version,
     'src-tauri/tauri.conf.json': json.read('src-tauri/tauri.conf.json').version,
     'src-tauri/Cargo.toml': toml?.[2],
     'src-tauri/Cargo.lock (andai)': cargoLock?.[2],
@@ -46,11 +43,6 @@ function setVersion(v) {
   const pkg = json.read('package.json');
   pkg.version = v;
   json.write('package.json', pkg);
-
-  const lock = json.read('package-lock.json');
-  lock.version = v;
-  if (lock.packages?.['']) lock.packages[''].version = v;
-  json.write('package-lock.json', lock);
 
   const conf = json.read('src-tauri/tauri.conf.json');
   conf.version = v;

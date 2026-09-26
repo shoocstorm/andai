@@ -1,11 +1,11 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // End-to-end test of the real app: launches Andai with VITE_SMOKE=e2e, which
 // (inside the actual WKWebView) creates a knowledge base, ingests the fixtures
 // through ug, loads the model, runs one grounded agent turn and prints a
 // RESULT line. This script asserts on it.
 //
-//   npm run test:e2e              # dev build (tauri dev)
-//   npm run test:e2e -- --release # release binary: http://localhost origin + ACL
+//   bun run test:e2e              # dev build (tauri dev)
+//   bun run test:e2e --release    # release binary: http://localhost origin + ACL
 //   E2E_MODEL=stories-260k ...    # engine plumbing only (answer not checked)
 //
 // Needs: ug on PATH (or ~/.local/bin), network on first run for the model.
@@ -49,9 +49,9 @@ const env = {
 };
 
 function launch() {
-  if (!release) return spawn('npx', ['tauri', 'dev'], { cwd: root, env, detached: true });
+  if (!release) return spawn('bun', ['run', 'tauri', 'dev'], { cwd: root, env, detached: true });
   console.log('[e2e] building release binary with the e2e harness…');
-  const b = spawnSync('npx', ['tauri', 'build', '--no-bundle'], { cwd: root, env, stdio: 'inherit' });
+  const b = spawnSync('bun', ['run', 'tauri', 'build', '--no-bundle'], { cwd: root, env, stdio: 'inherit' });
   if (b.status !== 0) process.exit(b.status ?? 1);
   // Minimal environment, like a Finder launch: proves ug is found without the shell PATH.
   return spawn(resolve(root, 'src-tauri/target/release/andai'), [], {

@@ -26,14 +26,15 @@ Andai (Tauri 2)
 ## Run
 
 ```bash
-npm install              # also copies the wllama wasm builds into public/wllama/
-npm run tauri dev        # desktop app with hot reload
-npm run tauri build      # → src-tauri/target/release/bundle/macos/Andai.app
+bun install              # also copies the wllama wasm builds into public/wllama/
+bun run tauri dev        # desktop app with hot reload
+bun run tauri build      # → src-tauri/target/release/bundle/macos/Andai.app
 ```
 
 Requirements:
 - **Rust**, plus Xcode command-line tools.
-- **Node 20+**.
+- **Bun 1.3+**, which is the package manager and script runner. Plain `bun test` is Bun's own runner, so use `bun run test`.
+- **Node 22+**, only for Vitest (jsdom doesn't run on Bun's runtime). Everything else runs on Bun.
 - **`ug`**, on `PATH` or in `~/.local/bin`, `~/.cargo/bin`, `/opt/homebrew/bin` or `/usr/local/bin`. Finder-launched apps don't inherit the shell PATH, so `ug.rs` probes these locations.
 
 First launch:
@@ -61,7 +62,7 @@ Hugging Face. Answers never load images or open links. Rust ingests only files
 you dropped or picked, and the app refuses to start if another process holds
 its UI port. Retrieved passages reach the model as fenced, untrusted data.
 Model downloads are pinned to a Hugging Face commit and verified by sha256
-before loading, and `npm run audit` (npm + RustSec) gates CI and releases.
+before loading, and `bun run audit` (JS + RustSec) gates CI and releases.
 
 - What each protection means for users: [docs/security.md](docs/security.md)
 - Threat model and the checklist for every change: [AGENTS.md §9](AGENTS.md#9-security)
@@ -81,11 +82,11 @@ On macOS, Tauri uses **WKWebView**, which is the Safari engine:
 ## Tests
 
 ```bash
-npm run check            # typecheck + Vitest + Rust tests + clippy — run before calling anything done
-npm run test:ug          # Rust ↔ real ug round trip
-npm run test:e2e         # the real app in WKWebView: ingest fixtures → retrieve → grounded answer
-npm run test:e2e:release # the same against the release binary
-npm run audit            # known vulnerabilities in npm + Rust dependencies (CI and releases run it)
+bun run check            # typecheck + Vitest + Rust tests + clippy — run before calling anything done
+bun run test:ug          # Rust ↔ real ug round trip
+bun run test:e2e         # the real app in WKWebView: ingest fixtures → retrieve → grounded answer
+bun run test:e2e:release # the same against the release binary
+bun run audit            # known vulnerabilities in JS + Rust dependencies (CI and releases run it)
 ```
 
 The layers, the rules and the definition of done are in [AGENTS.md](AGENTS.md) §6.
@@ -95,8 +96,8 @@ Tests never touch your data: the e2e runner isolates knowledge-base files with
 ## Releasing
 
 ```bash
-npm run release -- --dry-run   # preview the next version and release notes
-npm run release                # bump, check, tag, push → GitHub Actions builds and publishes
+bun run release --dry-run      # preview the next version and release notes
+bun run release                # bump, check, tag, push → GitHub Actions builds and publishes
 ```
 
 Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which verifies

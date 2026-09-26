@@ -6,6 +6,13 @@ contract for anyone changing the code, human or AI agent. Read it before
 editing. When this file and your instincts disagree, this file wins. When it
 is wrong, fix it in the same change.
 
+> **Pre-launch status (no live users yet).** Breaking changes and significant
+> refactors are allowed. Don't add backward compatibility: no migrations for
+> old storage or data formats, no deprecated aliases, no compatibility shims.
+> Change the format and update every caller and test. The rules in §1 still
+> apply, including tests, truthfulness and §1.5 for data on the developer's
+> machine. Remove this note when Andai has its first real users.
+
 ---
 
 ## 1. Grounding rules (non-negotiable)
@@ -15,7 +22,7 @@ the product.
 
 1. **Verify, don't assume.** Before claiming something works, run it. "It
    compiles" is not "it works". Use the smallest check that proves the claim:
-   a unit test, `npm run test:e2e`, or a screenshot you actually looked at.
+   a unit test, `bun run test:e2e`, or a screenshot you actually looked at.
 2. **Report outcomes truthfully.** If a test fails, say so and quote the
    output. If you skipped a step (no network, no ug, no GPU), say which one and
    why. Never write "should work" about something you did not run.
@@ -39,12 +46,14 @@ the product.
    and `n` must match the n-th source in the UI (`agent/prompt.ts`). When
    retrieval finds nothing, the prompt says so. Never inject content the user
    did not provide.
-8. **Keep the tree green.** `npm run check` passes before any change is
+8. **Keep the tree green.** `bun run check` passes before any change is
    considered done. Do not disable, skip, or loosen a test to make a change
    pass. Fix the code, or fix the test with a written reason if the test was
    wrong.
-9. **Small, reviewable changes.** One concern per change. Don't refactor
-   unrelated code or reformat files you didn't otherwise touch.
+9. **Reviewable changes.** Keep each change focused enough to review.
+   Refactoring code you pass through is welcome when it makes the code
+   clearer, and larger refactors are fine (see the pre-launch note). Say what
+   you refactored and why. Don't mass-reformat files for style alone.
 10. **Ask when the decision is the user's.** Product scope, new dependencies
     with native code, data-format changes, and anything touching §1.4 or §1.5
     need a human decision. Everything else: make a sensible choice and state it.
@@ -214,15 +223,15 @@ section and FAQ (see §8).
 3. Add it to `COMMANDS` in `build.rs`
 4. Add `allow-<name-with-dashes>` to `capabilities/default.json`
 5. Add a typed wrapper in `src/kb/api.ts` (or a sibling module)
-6. `npm test` then checks steps 2–4 (`tauri-acl.test.ts`), and
-   `npm run test:e2e:release` proves it works in the shipped build.
+6. `bun run test` then checks steps 2–4 (`tauri-acl.test.ts`), and
+   `bun run test:e2e:release` proves it works in the shipped build.
 7. Go through the security checklist in §9. The caller is the webview, and
    the webview is untrusted.
 
 ### Dependencies
 - Pin exact versions in `package.json`. `@wllama/wllama` and
   `@wllama/wllama-compat` **must stay on the same version**. After bumping
-  them, run `npm install` (re-copies the wasm) and both e2e runs.
+  them, run `bun install` (re-copies the wasm) and both e2e runs.
 - No new runtime network dependencies (§1.4). Anything with native code needs
   a human decision (§1.10).
 
@@ -231,22 +240,45 @@ section and FAQ (see §8).
 ## 5. Commands
 
 ```bash
-npm install              # deps + copies wllama wasm into public/wllama/
-npm run tauri dev        # run the app (hot reload)
-npm run tauri build      # → src-tauri/target/release/bundle/macos/Andai.app
+bun install              # deps + copies wllama wasm into public/wllama/
+bun run tauri dev        # run the app (hot reload)
+bun run tauri build      # → src-tauri/target/release/bundle/macos/Andai.app
 
-npm run check            # typecheck + unit/component tests + Rust tests + clippy  ← before every change is "done"
-npm test                 # Vitest: unit, component, guard tests (~2 s)
-npm run test:coverage    # same, with a coverage report in coverage/
-npm run test:rust        # Rust unit tests
-npm run test:ug          # Rust ↔ real ug integration (needs ug)
-npm run test:e2e         # full app in WKWebView: ingest → retrieve → generate (needs ug; downloads model once)
-npm run audit            # npm audit (runtime deps) + cargo audit (RustSec); CI and releases run it
-npm run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
+bun run check            # typecheck + unit/component tests + Rust tests + clippy  ← before every change is "done"
+bun run test             # Vitest: unit, component, guard tests (~2 s)
+bun run test:coverage    # same, with a coverage report in coverage/
+bun run test:rust        # Rust unit tests
+bun run test:ug          # Rust ↔ real ug integration (needs ug)
+bun run test:e2e         # full app in WKWebView: ingest → retrieve → generate (needs ug; downloads model once)
+bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and releases run it
+bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
 ```
 
-`E2E_MODEL=stories-260k npm run test:e2e` checks the plumbing in seconds; the
-answer-grounding assertion only runs with a real model.
+**Run the e2e tests with the default model, `qwen3-0.6b`** (don't set
+`E2E_MODEL`). Only a pass with it counts toward the definition of done (§6).
+`E2E_MODEL=stories-260k` is a quick plumbing check, not a result. Its context
+is only 1024 tokens, so a grounded prompt overflows it (measured: 1033 tokens,
+"exceeds the available context size"). It also skips the answer-grounding
+check, so it fails or passes for reasons that say nothing about the app.
+
+**Bun is the package manager and script runner** (`packageManager` in
+`package.json`, lockfile `bun.lock`). Don't use npm, and don't commit a
+`package-lock.json`. Things to know:
+- Run the test suite with `bun run test`. Plain `bun test` starts Bun's own
+  test runner instead of Vitest and fails.
+- **Bun is also the runtime** for everything except Vitest: `scripts/*.mjs`,
+  `tsc`, Vite and the Tauri CLI run with `bun` / `bun --bun` (see the
+  `package.json` scripts). Don't add new `node` or `npx` calls. When a
+  package script has the same name as a binary, call the binary with
+  `bunx --bun <bin>`. Inside `"tauri": "bun --bun tauri"`, `tauri` resolves to
+  the script itself and bun keeps launching itself (seen once).
+- **Vitest stays on Node 22+.** Under `bun --bun vitest`, jsdom's `window`
+  isn't a valid `EventTarget` and every DOM test worker crashes (measured with
+  Bun 1.3.14 and Vitest 5). `bun run test` starts Vitest on Node through its
+  shebang. Re-measure before moving it.
+- Dependency lifecycle scripts only run for packages listed in
+  `trustedDependencies`. If a new dependency needs its install script, add it
+  there on purpose (`bun pm untrusted` lists the blocked ones).
 
 The RTK shell proxy on this machine can mangle test-runner output. Prefix a
 command with `rtk proxy` to see the raw output.
@@ -275,17 +307,17 @@ Rules:
 - The e2e harness **must not** touch user data: `ANDAI_DATA_DIR` isolates KB
   files, and the harness snapshots and restores chat and KB selection. The ug
   project it creates (`andai-e2e-docs`) is removed before it reports `OK`.
-- Visual checks: headless Chrome against `npm run dev` renders every screen
+- Visual checks: headless Chrome against `bun run dev` renders every screen
   (`/#command`, `/#knowledge`, …). Seed `localStorage` (`andai.theme`,
   `andai.chat`) to check both themes and populated states. Look at the images;
   don't just generate them.
 
 ### Definition of done
-- [ ] `npm run check` is green
+- [ ] `bun run check` is green
 - [ ] New or changed behavior has tests (§6 rules)
 - [ ] UI changes looked at in light **and** dark
-- [ ] Touching engine, ug, Tauri config or commands: `npm run test:e2e` and
-      `npm run test:e2e:release` pass
+- [ ] Touching engine, ug, Tauri config or commands: `bun run test:e2e` and
+      `bun run test:e2e:release` pass with the default model, `qwen3-0.6b` (§5)
 - [ ] Real vs. simulated table (§3) and platform facts (§2) still true, or updated
 - [ ] README / this file updated if commands, setup or behavior changed
 - [ ] **Docs and website updated** for any user-visible change (§8), in the same change
@@ -298,7 +330,7 @@ Rules:
 Releases are **tag-driven**. Pushing a `vX.Y.Z` tag runs
 `.github/workflows/release.yml`, which does three things:
 1. **verify:** the tag must equal the version in every manifest, the full
-   check suite must pass, and `npm run audit` must find no known
+   check suite must pass, and `bun run audit` must find no known
    vulnerability (§9).
 2. **build:** `Andai.app` + `.dmg` for Apple Silicon and Intel, with
    `.sha256` checksums. It also asserts that the built `Info.plist` reports the
@@ -309,17 +341,17 @@ Releases are **tag-driven**. Pushing a `vX.Y.Z` tag runs
 manually:
 
 ```bash
-npm run release -- --dry-run        # ALWAYS first: shows next version + grouped notes; changes nothing
-npm run release                     # patch bump (0.1.0 → 0.1.1), asks before pushing
-npm run release -- minor            # or: major, or an explicit 0.3.0
-npm run release -- minor --yes --watch   # non-interactive, then follows the workflow to the published release
+bun run release --dry-run             # ALWAYS first: shows next version + grouped notes; changes nothing
+bun run release                       # patch bump (0.1.0 → 0.1.1), asks before pushing
+bun run release minor                 # or: major, or an explicit 0.3.0
+bun run release minor --yes --watch   # non-interactive, then follows the workflow to the published release
 ```
 
 What the script does, in order:
 1. Preflight: a branch (not detached), a clean tree, not behind origin, and
    the tag free locally and on origin.
-2. `npm run check`.
-3. `node scripts/version.mjs set X.Y.Z` on all five manifests.
+2. `bun run check`.
+3. `bun scripts/version.mjs set X.Y.Z` on all four manifests.
 4. Confirm.
 5. Commit `release: vX.Y.Z`, create an annotated tag with the notes, and push
    branch and tag atomically.
@@ -340,7 +372,7 @@ Rules for agents:
   `gh run view <id> --log-failed`, fix the problem on `main`, then cut the
   next patch version. To rebuild an existing tag unchanged, use the
   workflow's *Run workflow* button with the tag (`workflow_dispatch`).
-- `npm run version` prints the version, and `npm run version -- check` checks
+- `bun run version` prints the version, and `bun run version check` checks
   that the manifests agree (also enforced by `tests/unit/version.test.ts` and
   CI).
 
@@ -350,7 +382,7 @@ Code signing: builds are **unsigned** until the repository has the secrets
 workflow detects them automatically, and the release notes say whether a
 build is unsigned.
 
-Before announcing a release, also run `npm run test:e2e:release` locally
+Before announcing a release, also run `bun run test:e2e:release` locally
 (CI can't run it: it needs ug and a model). Then launch the downloaded `.dmg`
 build, ask a grounded question and switch themes.
 
@@ -387,7 +419,7 @@ Rules:
   testimonials, user counts or benchmarks.
 - **Screenshots are real captures** of the current app, never mock-ups. Use
   2× WebP at 1440×920 viewport, named `<screen>-<theme>.webp`. Capture with
-  headless Chrome against `npm run dev`, seeding `localStorage`
+  headless Chrome against `bun run dev`, seeding `localStorage`
   (`andai.theme`, `andai.chat`, `andai.layout`). Look at every image before
   committing it. Don't capture screens that show browser-only states (e.g. the
   Knowledge screen's "desktop runtime required" notice) as if they were the app.
@@ -464,7 +496,7 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Model downloads pinned to a commit and verified (size + sha256) before load; mismatch → removed | `llm/models.ts`, `llm/integrity.ts`, `engine.loadModel` | `integrity.test.ts` (FIPS vectors, tamper), `engine.test.ts` (gate), `models.test.ts` (pinning); e2e logs the check |
 | Pre-pinning model copies removed only after the user confirms | `engine.removeLegacyCopies`, Settings | `Settings.test.tsx` |
 | Retrieved passages fenced as untrusted data; a passage can't close its fence | `agent/prompt.ts` | `prompt.test.ts` |
-| No known vulnerabilities in shipped dependencies | `npm run audit`, `ci.yml` (audit job), `release.yml` (verify) | CI |
+| No known vulnerabilities in shipped dependencies | `bun run audit`, `ci.yml` (audit job), `release.yml` (verify) | CI |
 
 `ANDAI_SMOKE` and `ANDAI_E2E_FILES` are read from the environment by Rust. The
 webview can't set them. Only the e2e runner does.

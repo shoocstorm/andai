@@ -1,6 +1,6 @@
 // Headless-ish end-to-end check of the engine inside the real Tauri webview:
-//   VITE_SMOKE=tiny npm run tauri dev     (1.2 MB model)
-//   VITE_SMOKE=qwen3-0.6b npm run tauri dev
+//   VITE_SMOKE=tiny bun run tauri dev     (1.2 MB model)
+//   VITE_SMOKE=qwen3-0.6b bun run tauri dev
 // Reports capabilities, load time and tok/s to the terminal, then exits.
 import { invoke } from '@tauri-apps/api/core';
 import { runTurn } from './agent/turn';
@@ -86,7 +86,7 @@ async function securityChecks(slug: string) {
  * Full pipeline inside the real app: create KB → ingest via ug → load model →
  * one RAG turn through the same orchestrator the UI uses. The App is rendered
  * alongside, so UI code runs in WKWebView too.
- *   VITE_SMOKE=e2e VITE_SMOKE_FILES=/abs/a.md,/abs/b.pdf npm run tauri dev
+ *   VITE_SMOKE=e2e VITE_SMOKE_FILES=/abs/a.md,/abs/b.pdf bun run tauri dev
  */
 export async function runE2E(files: string[], model = 'qwen3-0.6b') {
   // The harness shares webview storage with the real app on this machine, so

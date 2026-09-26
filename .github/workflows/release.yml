@@ -34,16 +34,20 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      - name: Tag matches every manifest
-        id: version
-        run: |
-          node scripts/version.mjs check "$TAG"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
+      # Node only runs Vitest (jsdom breaks on Bun's runtime); everything else runs on Bun
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Tag matches every manifest
+        id: version
+        run: |
+          bun scripts/version.mjs check "$TAG"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -51,16 +55,16 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run test:rust
-      - run: npm run lint:rust
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run test:rust
+      - run: bun run lint:rust
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
       # No release ships with a known vulnerability (AGENTS.md §9).
-      - run: npm run audit
+      - run: bun run audit
 
   # ── 2. build the macOS app for both architectures
   build:
@@ -80,17 +84,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
+      # Node only runs Vitest (jsdom breaks on Bun's runtime); everything else runs on Bun
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
           key: release-${{ matrix.arch }}
 
-      - run: npm ci
+      - run: bun install --frozen-lockfile
 
       # Signing/notarization activates only when these repository secrets exist:
       #   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
@@ -119,7 +126,7 @@ jobs:
           fi
 
       - name: Build Andai.app + dmg
-        run: npx tauri build --bundles app,dmg
+        run: bun run tauri build --bundles app,dmg
 
       - name: Package and checksum
         run: |

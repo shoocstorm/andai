@@ -21,7 +21,7 @@
 #   -y, --yes          skip the confirmation prompt
 #   -n, --dry-run      print the plan; no files changed, nothing pushed
 #   -w, --watch        wait for the release workflow and report its result (needs gh)
-#       --skip-checks  don't run `npm run check` first (CI still verifies)
+#       --skip-checks  don't run `bun run check` first (CI still verifies)
 #       --allow-dirty  include uncommitted changes in the release commit
 #   -h, --help         this text
 #
@@ -54,7 +54,7 @@ step() { printf '\n\033[1m▸ %s\033[0m\n' "$*"; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 # --- versions ----------------------------------------------------------------
-CUR_VERSION="$(node scripts/version.mjs)" || die "manifests disagree on the current version — fix with: node scripts/version.mjs set <X.Y.Z>"
+CUR_VERSION="$(bun scripts/version.mjs)" || die "manifests disagree on the current version — fix with: bun scripts/version.mjs set <X.Y.Z>"
 IFS='.' read -r MA MI PA <<<"$CUR_VERSION"
 case "$BUMP" in
   patch) NEW_VERSION="${MA}.${MI}.$((PA + 1))" ;;
@@ -126,23 +126,23 @@ say "$RELEASE_NOTES"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   say ""
-  say "[dry-run] nothing changed, nothing pushed. (Checks would run: $([[ $SKIP_CHECKS -eq 1 ]] && echo no || echo 'npm run check').)"
+  say "[dry-run] nothing changed, nothing pushed. (Checks would run: $([[ $SKIP_CHECKS -eq 1 ]] && echo no || echo 'bun run check').)"
   exit 0
 fi
 
 # --- checks (before touching any file) --------------------------------------------
 if [[ "$SKIP_CHECKS" -ne 1 ]]; then
-  step "npm run check"
-  npm run --silent check || die "checks failed — nothing was changed. Fix them, or pass --skip-checks (CI still verifies)."
+  step "bun run check"
+  bun run --silent check || die "checks failed — nothing was changed. Fix them, or pass --skip-checks (CI still verifies)."
 fi
 
 # --- bump ------------------------------------------------------------------------------
 step "Bumping manifests"
-node scripts/version.mjs set "$NEW_VERSION"
-git --no-pager diff --stat -- package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+bun scripts/version.mjs set "$NEW_VERSION"
+git --no-pager diff --stat -- package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 
 revert_bump() {
-  git checkout -- package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+  git checkout -- package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
   say "Reverted the version bump; nothing was committed."
 }
 

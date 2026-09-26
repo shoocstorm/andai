@@ -43,7 +43,7 @@ export function Knowledge() {
           {!inTauri ? (
             <Notice
               title="Desktop runtime required"
-              body="Knowledge bases are built by the native ug engine. Run Andai with `npm run tauri dev` to ingest documents."
+              body="Knowledge bases are built by the native ug engine. Run Andai with `bun run tauri dev` to ingest documents."
             />
           ) : ug && !ug.found ? (
             <Notice

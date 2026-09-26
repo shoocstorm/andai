@@ -20,7 +20,7 @@ only network traffic is a model download you start, from Hugging Face.
   must match a recorded sha256 before they load.
 - **Documents are data, not instructions.** Retrieved passages reach the model
   fenced and marked untrusted.
-- **Dependencies are audited.** `npm audit` and `cargo audit` run in CI, and a
+- **Dependencies are audited.** `bun audit` and `cargo audit` run in CI, and a
   release can't ship with a known vulnerability.
 
 The full user-facing explanation, including what isn't protected yet, is in

@@ -10,10 +10,13 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # Node only runs Vitest (jsdom breaks on Bun's runtime); everything else runs on Bun
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -21,13 +24,13 @@ jobs:
         with:
           workspaces: src-tauri
       - name: Versions agree across manifests
-        run: node scripts/version.mjs check
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run test:rust
-      - run: npm run lint:rust
-      - run: npm run build
+        run: bun scripts/version.mjs check
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run test:rust
+      - run: bun run lint:rust
+      - run: bun run build
       # test:ug and test:e2e need the ug CLI, an embedding model and a model
       # download; run them locally or on a self-hosted runner (see AGENTS.md §6).
 
@@ -37,14 +40,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
+          bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
-      - name: npm audit (runtime dependencies)
-        run: npm audit --omit=dev --audit-level=high
+      - name: bun audit (JS dependencies)
+        run: bun audit --audit-level=high
       - name: cargo audit (RustSec advisory DB)
         run: cargo audit --file src-tauri/Cargo.lock
 

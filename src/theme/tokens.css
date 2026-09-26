@@ -4,7 +4,7 @@
  *   :root[data-theme=light] → light
  * `src/state/theme.ts` sets data-theme on <html> from the user's choice
  * (system / light / dark). Components must use these tokens — never literal
- * colors — so both themes stay correct. `npm test` enforces that (theme.test).
+ * colors — so both themes stay correct. `bun run test` enforces that (theme.test).
  */
 :root {
   color-scheme: dark;

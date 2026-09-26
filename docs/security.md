@@ -16,7 +16,7 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 | Code in the app window being tricked | A crafted answer tries to read `~/.ssh` through the app | The native layer only reads files you dropped or picked. The window can't navigate away or open new windows. |
 | Another program on your Mac impersonating Andai's interface | An app grabs Andai's local port first | Andai refuses to start and tells you why. It never loads a page it didn't serve itself. |
 | A tampered or corrupted model download | A modified model file | Downloads come from a fixed Hugging Face commit and must match a recorded sha256 before they're loaded. |
-| A vulnerable dependency | A library with a known CVE | Every build and release is checked against the npm and RustSec advisory databases. |
+| A vulnerable dependency | A library with a known CVE | Every build and release is checked against the npm registry and RustSec advisory databases. |
 
 ## Protections
 
@@ -94,7 +94,7 @@ A document you index could contain hidden instructions aimed at the model
 
 ### Dependencies are audited
 
-- Every CI run checks runtime npm packages (`npm audit`) and Rust crates
+- Every CI run checks all JavaScript packages (`bun audit`) and Rust crates
   (`cargo audit`, RustSec) for known vulnerabilities, and a release can't be
   published while either reports one.
 - Current state: no known vulnerabilities. `cargo audit` reports advisory
