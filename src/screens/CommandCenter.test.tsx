@@ -244,6 +244,75 @@ describe('Command Center (agent mode)', () => {
     expect(report).toContain('1. kb_search @ 85%');
   });
 
+  it('shows how long each decision took, and the turn’s total, without opening details', () => {
+    turn([
+      { id: 's1', index: 0, at: 0, decision, action: 'kb_search', call: call() },
+      { id: 's2', index: 1, at: 0, decision: { ...decision, chosen: 'answer_now', ms: 1480 }, action: 'answer_now' },
+    ]);
+    render(<CommandCenter />);
+    const trace = within(screen.getByText('Execution Trace').closest('aside')!);
+    expect(trace.getByText('decided in 140 ms')).toBeInTheDocument();
+    expect(trace.getByText('decided in 1.48 s')).toBeInTheDocument();
+    expect(trace.getByLabelText('Decision time')).toHaveTextContent('2 decisions · 1.62 s total · 810 ms each on average · Qwen3 1.7B');
+    expect(screen.getByText(/decided 2× in 1\.62 s/)).toBeInTheDocument();
+  });
+
+  it('shows a decision call’s input and output in the details, and copies it', async () => {
+    const user = userEvent.setup();
+    const io = {
+      request: {
+        messages: [
+          { role: 'system', content: 'Make the requested decision.' },
+          { role: 'user', content: 'State:\nUser request:\nWhat headers?\n\nAllowed options:\nA. Answer now\nB. Search' },
+        ],
+        params: { max_tokens: 1, grammar: 'root ::= "A" | "B" | "C"' },
+      },
+      response: { sampled: 'B', topLogprobs: [{ token: 'B', logprob: Math.log(0.85) }, { token: 'A', logprob: Math.log(0.1) }] },
+    };
+    turn([{ id: 's1', index: 0, at: 0, decision: { ...decision, io }, action: 'kb_search', call: call() }]);
+    render(<CommandCenter />);
+    const trace = within(screen.getByText('Execution Trace').closest('aside')!);
+    await user.click(trace.getByRole('button', { name: 'Details' }));
+    expect(trace.getByText('Decision call')).toBeInTheDocument();
+    // the prompt reads as text, newlines intact, one block per message
+    expect(trace.getByText((_, el) => el?.tagName === 'PRE' && !!el.textContent?.startsWith('State:\nUser request:\nWhat headers?\n'))).toBeInTheDocument();
+    expect(trace.getByText(/"grammar": "root ::= \\"A\\"/)).toBeInTheDocument();
+    const table = trace.getByRole('table');
+    expect(within(table).getAllByRole('row').map((r) => r.textContent)).toEqual([
+      'TokenLogprobShare of listed',
+      expect.stringMatching(/^"B" Knowledge search-0\.163\d+%$/),
+      expect.stringMatching(/^"A" Answer now-2\.303\d+%$/),
+    ]);
+    await user.click(trace.getByRole('button', { name: 'Copy decision call' }));
+    expect(JSON.parse(await navigator.clipboard.readText())).toEqual(io);
+    await user.click(trace.getByRole('button', { name: 'Copy input: prompt' }));
+    expect(await navigator.clipboard.readText()).toBe(`[system]\nMake the requested decision.\n\n[user]\n${io.request.messages[1].content}`);
+  });
+
+  it('shows a failed decision call with its time, error and request', async () => {
+    const user = userEvent.setup();
+    const io = { request: { messages: [{ role: 'user', content: 'State: failing' }], params: {} }, response: null };
+    turn([
+      {
+        id: 's1',
+        index: 0,
+        at: 0,
+        decision: null,
+        action: 'kb_search',
+        fallback: 'decision-failed',
+        failedDecision: { error: 'context overflow', ms: 640, io },
+        note: 'Decision failed (context overflow), so searching the knowledge base instead.',
+        call: call(),
+      },
+    ]);
+    render(<CommandCenter />);
+    const trace = within(screen.getByText('Execution Trace').closest('aside')!);
+    expect(trace.getByText('Decision failed after 640 ms')).toBeInTheDocument();
+    await user.click(trace.getByRole('button', { name: 'Details' }));
+    expect(trace.getByText('State: failing')).toBeInTheDocument();
+    expect(trace.getByText(/No reply: the call failed/)).toBeInTheDocument();
+  });
+
   it('shows a fallback note when the loop overrode the decision', () => {
     turn([{ id: 's1', index: 0, at: 0, decision: null, action: 'kb_search', note: 'Decision failed (boom), so searching the knowledge base instead.', call: call() }]);
     render(<CommandCenter />);

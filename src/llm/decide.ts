@@ -33,7 +33,32 @@ export type Decision = {
   slot: Slot;
   ms: number;
   promptTokens: number | null;
+  /** The call as sent and the raw readout, for the Execution Trace. */
+  io: DecisionIO;
 };
+
+/**
+ * One decision call as the model saw it and as it answered: the messages and
+ * sampling parameters sent, and the first token's top candidates. Shown in the
+ * Execution Trace so an odd decision can be inspected and copied.
+ */
+export type DecisionIO = {
+  request: { messages: { role: string; content: string }[]; params: Record<string, unknown> };
+  /** Null when the call itself failed (no reply to read). */
+  response: { sampled: string | null; topLogprobs: { token: string; logprob: number }[] } | null;
+};
+
+/** A decision that was sent but couldn't be read out; carries the call for the trace. */
+export class DecisionError extends Error {
+  constructor(
+    message: string,
+    readonly io: DecisionIO,
+    readonly ms: number,
+  ) {
+    super(message);
+    this.name = 'DecisionError';
+  }
+}
 
 export const labelsFor = (n: number) => LETTERS.slice(0, n).split('');
 
@@ -116,8 +141,8 @@ export async function decide(
   const target = slotFor('decider');
   if (!target) throw new Error('No model loaded — open Settings → Models to load one.');
   if (!target.def.decider) throw new Error(`${target.def.name} can't make decisions; load a decision model in Settings → Models.`);
-  const { response, slot, def } = await complete(target.slot, {
-    messages: decisionMessages(state, question, options),
+  const messages = decisionMessages(state, question, options);
+  const params = {
     max_tokens: 1,
     // Neutral sampling, so the logprobs are a plain readout of the logits.
     temperature: 1,
@@ -133,9 +158,28 @@ export async function decide(
     // decisions with argument writing and answers, which would evict it.
     cache_prompt: target.slot === 'decider',
     chat_template_kwargs: { enable_thinking: false },
-    abortSignal: signal,
-  });
-  const { values: logprobs, bounded } = optionLogprobs(response, labels);
+  };
+  const io: DecisionIO = { request: { messages, params }, response: null };
+  let result: Awaited<ReturnType<typeof complete>>;
+  try {
+    result = await complete(target.slot, { messages, ...params, abortSignal: signal });
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw new DecisionError(e instanceof Error ? e.message : String(e), io, performance.now() - started);
+  }
+  const { response, slot, def } = result;
+  const first = response.choices?.[0]?.logprobs?.content?.[0];
+  io.response = {
+    sampled: first?.token ?? response.choices?.[0]?.message?.content ?? null,
+    topLogprobs: (first?.top_logprobs ?? []).map((t: TopLogprob) => ({ token: t.token, logprob: t.logprob })),
+  };
+  let readout: ReturnType<typeof optionLogprobs>;
+  try {
+    readout = optionLogprobs(response, labels);
+  } catch (e) {
+    throw new DecisionError(e instanceof Error ? e.message : String(e), io, performance.now() - started);
+  }
+  const { values: logprobs, bounded } = readout;
   const probs = softmax(logprobs);
   const scored = options.map((o, i) => ({ id: o.id, label: labels[i], text: o.text, probability: probs[i], logprob: logprobs[i] }));
   const best = scored.reduce((a, b) => (b.probability > a.probability ? b : a));
@@ -148,5 +192,6 @@ export async function decide(
     slot,
     ms: performance.now() - started,
     promptTokens: response.usage?.prompt_tokens ?? null,
+    io,
   };
 }

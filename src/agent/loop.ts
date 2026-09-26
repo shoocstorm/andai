@@ -8,7 +8,7 @@
 // as fenced passages (prompt.ts) and a clipped summary line.
 
 import { kbTool, type KbInfo, type SearchHit } from '../kb/api';
-import { decide, seededShuffle, type Decision, type DecisionOption } from '../llm/decide';
+import { decide, DecisionError, seededShuffle, type Decision, type DecisionOption } from '../llm/decide';
 import {
   addAgentStep,
   OUTPUT_KEEP,
@@ -135,6 +135,7 @@ const record = (d: Decision, seed: number): DecisionRecord => ({
   ms: Math.round(d.ms),
   seed,
   promptTokens: d.promptTokens,
+  io: d.io,
 });
 
 const argKey = (tool: string, args: Record<string, unknown>) =>
@@ -213,6 +214,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     let action: string;
     let note: string | undefined;
     let fallback: AgentStep['fallback'];
+    let failedDecision: AgentStep['failedDecision'];
     const searchTool = tools.find((t) => t.id === 'kb_search');
     // What to do when the decision can't be trusted: search once if nothing
     // was looked up yet (the fixed pipeline's behavior), else answer.
@@ -243,6 +245,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
         if (signal.aborted) throw aborted();
         action = fallbackAction();
         fallback = 'decision-failed';
+        failedDecision = e instanceof DecisionError ? { error: e.message, ms: Math.round(e.ms), io: e.io } : { error: errText(e), ms: 0 };
         note = `Decision failed (${errText(e)}), so ${action === ANSWER ? 'answering' : 'searching the knowledge base'} instead.`;
       }
     }
@@ -266,7 +269,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     }
 
     if (action === ANSWER || action === CLARIFY) {
-      step({ decision, action, note, fallback });
+      step({ decision, action, note, fallback, failedDecision });
       progress(action === CLARIFY ? 'Asking a clarifying question' : `Answering · ${calls} tool call${calls === 1 ? '' : 's'}`);
       return { hits: mergeEvidence(found), clarify: action === CLARIFY, calls };
     }
@@ -284,7 +287,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       startedAt: Date.now(),
       status: 'filling',
     };
-    const s = step({ decision, action, note, fallback, call });
+    const s = step({ decision, action, note, fallback, failedDecision, call });
     const patch = (p: Partial<ToolCallRecord>) => patchCall(msgId, s.id, p);
     calls++;
 

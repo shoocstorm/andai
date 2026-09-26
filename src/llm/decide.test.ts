@@ -8,6 +8,7 @@ const eng = vi.hoisted(() => ({
   modelIndex: 1,
   top: [] as { token: string; logprob: number; bytes?: number[] | null }[],
   seen: [] as Record<string, unknown>[],
+  fail: null as Error | null,
 }));
 
 vi.mock('./engine', async () => {
@@ -17,6 +18,7 @@ vi.mock('./engine', async () => {
     slotFor: target,
     complete: async (_: string, params: Record<string, unknown>) => {
       eng.seen.push(params);
+      if (eng.fail) throw eng.fail;
       return {
         ...target()!,
         response: { choices: [{ logprobs: { content: [{ token: 'A', logprob: 0, top_logprobs: eng.top }] } }], usage: { prompt_tokens: 321 } },
@@ -25,7 +27,7 @@ vi.mock('./engine', async () => {
   };
 });
 
-const { decide, decisionMessages, labelsFor, optionLogprobs, seededShuffle, softmax } = await import('./decide');
+const { decide, DecisionError, decisionMessages, labelsFor, optionLogprobs, seededShuffle, softmax } = await import('./decide');
 
 const opts = [
   { id: 'answer_now', text: 'Answer now' },
@@ -37,6 +39,7 @@ beforeEach(() => {
   eng.slot = 'decider';
   eng.modelIndex = 1;
   eng.seen = [];
+  eng.fail = null;
   eng.top = [
     { token: 'B', logprob: Math.log(0.6) },
     { token: 'A', logprob: Math.log(0.3) },
@@ -132,5 +135,32 @@ describe('decide', () => {
     await expect(decide('s', 'q', opts.slice(0, 1))).rejects.toThrow(/2–16/);
     const many = Array.from({ length: 17 }, (_, i) => ({ id: `o${i}`, text: `o${i}` }));
     await expect(decide('s', 'q', many)).rejects.toThrow(/2–16/);
+  });
+
+  it('returns the call as sent and the raw readout, for the trace', async () => {
+    const d = await decide('state here', 'Which?', opts);
+    expect(d.io.request.messages).toEqual(decisionMessages('state here', 'Which?', opts));
+    expect(d.io.request.params).toMatchObject({ max_tokens: 1, grammar: 'root ::= "A" | "B" | "C"', top_logprobs: 20 });
+    // the abort signal is plumbing, not part of what the model saw
+    expect(d.io.request.params).not.toHaveProperty('abortSignal');
+    expect(d.io.response).toEqual({ sampled: 'A', topLogprobs: eng.top.map(({ token, logprob }) => ({ token, logprob })) });
+  });
+
+  it('keeps the call on the error when the readout fails, so the trace can show it', async () => {
+    eng.top = [{ token: 'x', logprob: -1 }];
+    const e = await decide('s', 'q', opts).catch((err: unknown) => err);
+    expect(e).toBeInstanceOf(DecisionError);
+    expect((e as InstanceType<typeof DecisionError>).message).toMatch(/none of the options/);
+    expect((e as InstanceType<typeof DecisionError>).io.response?.topLogprobs).toEqual([{ token: 'x', logprob: -1 }]);
+    expect((e as InstanceType<typeof DecisionError>).ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it('keeps the request when the model call itself fails, with no reply', async () => {
+    eng.fail = new Error('context overflow');
+    const e = (await decide('s', 'q', opts).catch((err: unknown) => err)) as InstanceType<typeof DecisionError>;
+    expect(e).toBeInstanceOf(DecisionError);
+    expect(e.message).toBe('context overflow');
+    expect(e.io.request.messages).toHaveLength(2);
+    expect(e.io.response).toBeNull();
   });
 });

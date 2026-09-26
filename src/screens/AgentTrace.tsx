@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { toolById } from '../agent/tools/registry';
 import { CopyButton, fmtTime } from '../components/ui';
 import { shellCommand } from '../agent/debugReport';
+import type { DecisionIO } from '../llm/decide';
 import type { AgentStep, CallStatus, DecisionRecord, Message, ToolCallRecord } from '../state/chat';
 import { resolveApproval } from '../state/tools';
 import { toast } from '../state/ui';
@@ -39,6 +40,93 @@ export function argsInline(args: Record<string, unknown> | null, max = 60): stri
 }
 
 const pct = (p: number) => `${(p * 100).toFixed(p < 0.1 ? 1 : 0)}%`;
+
+/** `812 ms`, or `1.62 s` from a second on. */
+export const fmtMs = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`);
+
+/** Every decision call in a turn, scored or failed: how many, and the time they took. */
+export function decisionTiming(agent: AgentStep[] | undefined): { count: number; totalMs: number; avgMs: number; models: string[] } | null {
+  const timed = (agent ?? []).flatMap((s) =>
+    s.decision ? [{ ms: s.decision.ms, model: s.decision.model }] : s.failedDecision?.io ? [{ ms: s.failedDecision.ms, model: s.failedDecision.model }] : [],
+  );
+  if (!timed.length) return null;
+  const totalMs = timed.reduce((a, t) => a + t.ms, 0);
+  const models = [...new Set(timed.flatMap((t) => (t.model ? [t.model] : [])))];
+  return { count: timed.length, totalMs, avgMs: totalMs / timed.length, models };
+}
+
+/** The turn's decision time, above the steps in the Execution Trace. */
+export function DecisionSummary({ agent }: { agent: AgentStep[] | undefined }) {
+  const t = decisionTiming(agent);
+  if (!t) return null;
+  return (
+    <div className="ag-summary faint" aria-label="Decision time">
+      {t.count} decision{t.count === 1 ? '' : 's'} · {fmtMs(t.totalMs)} total · {fmtMs(t.avgMs)} each on average
+      {t.models.length ? ` · ${t.models.join(', ')}` : ''}
+    </div>
+  );
+}
+
+/** The prompt as plain text, one block per message: easy to read and to paste back. */
+export const ioPromptText = (io: DecisionIO) => io.request.messages.map((m) => `[${m.role}]\n${m.content}`).join('\n\n');
+
+/** What the decision model was sent and what it returned. Text from the model and the user's files, so plain text only. */
+export function DecisionCall({ io, labels }: { io: DecisionIO; labels?: Record<string, string> }) {
+  const r = io.response;
+  const total = r ? r.topLogprobs.reduce((a, t) => a + Math.exp(t.logprob), 0) : 0;
+  return (
+    <div className="ag-call ag-io">
+      <Field k="Decision call" copy={JSON.stringify(io, null, 2)}>
+        <span className="faint ag-small">What the decision model was sent, and its raw reply. Copy it to report an odd decision.</span>
+      </Field>
+      <Field k="Input: prompt" copy={ioPromptText(io)}>
+        {io.request.messages.map((m, i) => (
+          <div key={i} className="ag-msg">
+            <div className="mono faint ag-msg-role">{m.role}</div>
+            <pre className="ag-pre selectable">{m.content}</pre>
+          </div>
+        ))}
+      </Field>
+      <Field k="Input: parameters" copy={JSON.stringify(io.request.params)}>
+        <pre className="ag-pre selectable">{JSON.stringify(io.request.params, null, 2)}</pre>
+      </Field>
+      <Field k="Output" copy={r ? JSON.stringify(r, null, 2) : undefined}>
+        {!r ? (
+          <div className="ag-small ag-err">No reply: the call failed before the model answered.</div>
+        ) : (
+          <>
+            <div className="ag-small">
+              Sampled token <span className="mono">{JSON.stringify(r.sampled)}</span> · first token’s top {r.topLogprobs.length} candidates
+            </div>
+            {r.topLogprobs.length > 0 && (
+              <table className="ag-logprobs mono">
+                <thead>
+                  <tr>
+                    <th scope="col">Token</th>
+                    <th scope="col">Logprob</th>
+                    <th scope="col">Share of listed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.topLogprobs.map((t, i) => (
+                    <tr key={i} className={labels?.[t.token.trim()] ? 'option' : undefined}>
+                      <td className="selectable">
+                        {JSON.stringify(t.token)}
+                        {labels?.[t.token.trim()] && <span className="faint"> {labels[t.token.trim()]}</span>}
+                      </td>
+                      <td>{t.logprob.toFixed(3)}</td>
+                      <td>{total ? pct(Math.exp(t.logprob) / total) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+      </Field>
+    </div>
+  );
+}
 
 export function DecisionBars({ d }: { d: DecisionRecord }) {
   const sorted = [...d.options].sort((a, b) => b.probability - a.probability);
@@ -165,7 +253,13 @@ export function AgentStepCard({ s }: { s: AgentStep }) {
       </div>
       {s.decision && (
         <div className="trace-detail">
-          Chosen with {pct(s.decision.confidence)} of {s.decision.options.length} options
+          Chosen with {pct(s.decision.confidence)} of {s.decision.options.length} options ·{' '}
+          <span className="ag-ms">decided in {fmtMs(s.decision.ms)}</span> <span className="faint">· {s.decision.model}</span>
+        </div>
+      )}
+      {!s.decision && s.failedDecision?.io && (
+        <div className="trace-detail">
+          <span className="ag-ms">Decision failed after {fmtMs(s.failedDecision.ms)}</span>
         </div>
       )}
       {s.note && <div className="trace-detail ag-note">{s.note}</div>}
@@ -176,6 +270,13 @@ export function AgentStepCard({ s }: { s: AgentStep }) {
       {open && (
         <div className="ag-details">
           {s.decision ? <DecisionBars d={s.decision} /> : <div className="faint ag-small">No decision was scored for this step.</div>}
+          {s.decision?.io && <DecisionCall io={s.decision.io} labels={Object.fromEntries(s.decision.options.map((o) => [o.label, actionLabel(o.id)]))} />}
+          {!s.decision && s.failedDecision?.io && (
+            <>
+              <div className="ag-small ag-err selectable">{s.failedDecision.error}</div>
+              <DecisionCall io={s.failedDecision.io} />
+            </>
+          )}
           {c && <CallDetail c={c} />}
         </div>
       )}

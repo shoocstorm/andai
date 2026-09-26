@@ -84,8 +84,11 @@ pasting in whatever one search returns:
   clarifying question instead of answering.
 - **Every step is visible.** The Execution Trace lists each decision with
   its options and probabilities, and each tool call with its arguments, the
-  ug command that ran, timing and what it returned. **Copy trace** exports a
-  turn as JSON.
+  ug command that ran, timing and what it returned. Each step shows how long
+  its decision took, the turn shows the total, and a decision's details show
+  the exact prompt and parameters the decision model got and its raw reply
+  (the top candidate tokens), each with a copy button. A decision that failed
+  shows the same. **Copy trace** exports a turn as JSON.
 - **Read-only and on your computer.** Every tool only reads the selected
   knowledge base. Andai re-checks each call before running it, limits its
   time and output, and never lets a tool reach the network.

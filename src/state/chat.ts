@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { Policy } from '../agent/tools/types';
 import type { SearchHit } from '../kb/api';
+import type { DecisionIO } from '../llm/decide';
 
 /** `retrieve` belongs to the fixed pipeline; `plan` to agent mode, whose tool calls are in `Message.agent`. */
 export type StepKind = 'analyze' | 'retrieve' | 'plan' | 'build' | 'generate';
@@ -30,6 +31,8 @@ export type DecisionRecord = {
   /** Seed of the option shuffle, so the order can be reproduced. */
   seed: number;
   promptTokens: number | null;
+  /** What the decision model was sent and its raw readout (llm/decide.ts). */
+  io?: DecisionIO;
 };
 
 export type CallStatus = 'filling' | 'awaiting' | 'running' | 'done' | 'error' | 'denied' | 'skipped';
@@ -80,6 +83,8 @@ export type AgentStep = {
    * shown yet: a symbol (look symbols up first) or a line range (search first).
    */
   fallback?: 'low-confidence' | 'decision-failed' | 'needs-symbol' | 'needs-range';
+  /** A decision that was sent but couldn't be read: the error, its time and the call, when it got that far. */
+  failedDecision?: { error: string; ms: number; model?: string; io?: DecisionIO };
   call?: ToolCallRecord;
 };
 

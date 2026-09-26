@@ -557,6 +557,15 @@ describe('runTurn (agent mode)', () => {
     expect(steps()[0].fallback).toBe('decision-failed');
   });
 
+  it('records a failed decision call on the trace, with its time and what was sent', async () => {
+    const { DecisionError } = await import('../llm/decide');
+    const io = { request: { messages: [{ role: 'user', content: 'State: …' }], params: { max_tokens: 1 } }, response: { sampled: 'x', topLogprobs: [{ token: 'x', logprob: -1 }] } };
+    agent.decisions = [new DecisionError('The decision model scored none of the options (A, B).', io, 640), { chosen: 'answer_now' }];
+    await runTurn('headers?');
+    expect(steps()[0].failedDecision).toEqual({ error: 'The decision model scored none of the options (A, B).', ms: 640, io });
+    expect(steps()[1].failedDecision).toBeUndefined();
+  });
+
   it('searches with the question as written when the arguments are invalid', async () => {
     agent.fillFail = 'query is too short';
     agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];

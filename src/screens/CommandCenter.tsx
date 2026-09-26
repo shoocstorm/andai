@@ -36,7 +36,7 @@ import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
-import { AgentStepCard, ApprovalCard, CopyTraceButton, ToolChips } from './AgentTrace';
+import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 import { shortcut } from '../lib/platform';
 
@@ -274,6 +274,7 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
             {fmtTime(m.createdAt)} · {m.stats?.model ?? 'Andai'}
             {m.stats && ` · ${m.stats.tokens} tok · ${m.stats.tokPerSec.toFixed(1)} tok/s`}
             {m.stats?.promptTokPerSec ? ` · prompt ${Math.round(m.stats.promptTokPerSec)} tok/s` : ''}
+            {decisionLine(m)}
             {m.stopped && ' · stopped'}
             <CopyButton text={() => reportFor(m)} label="Copy debug report" />
           </div>
@@ -281,6 +282,12 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
       )}
     </div>
   );
+}
+
+/** ` · decided 2× in 1.62 s`, when the turn scored any decisions. */
+function decisionLine(m: Message): string {
+  const t = decisionTiming(m.agent);
+  return t ? ` · decided ${t.count}× in ${fmtMs(t.totalMs)}` : '';
 }
 
 /** The user question a reply answers. */
@@ -641,9 +648,11 @@ function TracePanel({ msg }: { msg?: Message }) {
     <>
       <div className="cc-head">
         <Network size={22} color="var(--blue)" />
-        <h1 className="display">Execution Trace</h1>
+        <div className="cc-title-row">
+          <h1 className="display">Execution Trace</h1>
+          {msg && <CopyTraceButton m={msg} question={title} />}
+        </div>
         {msg && <CopyButton text={() => reportFor(msg)} label="Copy debug report" size={14} />}
-        {msg && <CopyTraceButton m={msg} question={title} />}
         <span className="label cc-session" style={{ color: active ? 'var(--blue)' : undefined }}>
           <span className={`dot${active ? ' pulse' : ''}`} style={{ display: 'inline-block', marginRight: 8, color: active ? 'var(--blue)' : 'var(--text-4)' }} />
           {active ? 'Active task' : msg ? 'Last task' : 'Idle'}
@@ -689,6 +698,7 @@ function TracePanel({ msg }: { msg?: Message }) {
                 </div>
                 {s.kind === 'plan' && !!msg.agent?.length && (
                   <div className="trace-subs ag-subs">
+                    <DecisionSummary agent={msg.agent} />
                     {msg.agent.map((a) => (
                       <AgentStepCard key={a.id} s={a} />
                     ))}
