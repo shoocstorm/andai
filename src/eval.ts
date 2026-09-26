@@ -7,7 +7,7 @@
 // Loaded only when VITE_SMOKE=eval (main.tsx), so none of it ships in the app.
 import { invoke } from '@tauri-apps/api/core';
 import { runTurn } from './agent/turn';
-import { loadModel, useEngine } from './llm/engine';
+import { loadDecider, loadModel, unloadDecider, useEngine } from './llm/engine';
 import { clearChat, uid, useChat, type Message } from './state/chat';
 import { addFiles, createKb, deleteKb, useKb } from './state/kb';
 import { usePersona } from './state/persona';
@@ -24,6 +24,8 @@ export type EvalCase = {
 
 export type EvalInput = {
   model: string;
+  /** Decision model; null runs decisions on the chat model. Set explicitly, or the app's saved choice would leak in. */
+  decider: string | null;
   /** Fixes the agent's option shuffle, so two runs see the same prompts. */
   seed: number;
   /** Knowledge base key → absolute paths of its (granted) files. */
@@ -49,6 +51,7 @@ function report(c: EvalCase, msg: Message | undefined, error: string | null, ms:
         ms: a.decision.ms,
         promptTokens: a.decision.promptTokens,
         model: a.decision.model,
+        slot: a.decision.slot,
       },
       call: a.call && {
         tool: a.call.tool,
@@ -78,8 +81,17 @@ export async function runEval(input: EvalInput) {
   const { agentMode, maxSteps, minConfidence, policies, stats } = useTools.getState();
   const savedTools = { agentMode, maxSteps, minConfidence, policies, stats };
   const { set: _set, reset: _reset, ...savedPersona } = usePersona.getState();
+  // unloadDecider forgets the user's saved decision model; put it back for their next launch.
+  let savedDecider: string | null = null;
+  try {
+    savedDecider = localStorage.getItem('andai.lastDecider');
+  } catch {}
   const slugs: string[] = [];
   const cleanup = async () => {
+    try {
+      if (savedDecider) localStorage.setItem('andai.lastDecider', savedDecider);
+      else localStorage.removeItem('andai.lastDecider');
+    } catch {}
     if (!import.meta.env.VITE_SMOKE_KEEP) for (const slug of slugs) await deleteKb(slug);
     useChat.setState(savedChat);
     useKb.setState(savedKb);
@@ -109,13 +121,19 @@ export async function runEval(input: EvalInput) {
     while (useEngine.getState().status === 'loading') await new Promise((r) => setTimeout(r, 200));
     if (useEngine.getState().loadedId !== input.model) await loadModel(input.model);
     if (useEngine.getState().status !== 'ready') throw new Error(`load failed: ${useEngine.getState().error}`);
+    // App startup may be restoring the user's decision model (engine.autoload); let it finish, then override it.
+    while (useEngine.getState().decider.status === 'loading') await new Promise((r) => setTimeout(r, 200));
+    if (input.decider) {
+      await loadDecider(input.decider);
+      if (useEngine.getState().decider.loadedId !== input.decider) throw new Error(`decider load failed: ${useEngine.getState().decider.error}`);
+    } else await unloadDecider();
 
     // The shipped defaults, with a greedy answer so a run is repeatable.
     useTools.setState({ ...TOOL_DEFAULTS, agentMode: true, policies: {}, stats: {} });
     useKb.setState({ k: 8, maxChars: 6000 });
     usePersona.getState().reset();
     usePersona.setState({ temperature: 0 });
-    await log(`START ${JSON.stringify({ model: input.model, seed: input.seed, cases: input.cases.length, engine: useEngine.getState().info })}`);
+    await log(`START ${JSON.stringify({ model: input.model, decider: useEngine.getState().decider.loadedId, seed: input.seed, cases: input.cases.length, engine: useEngine.getState().info })}`);
 
     for (const c of input.cases) {
       const slug = slugOf[c.kb];

@@ -60,15 +60,32 @@ change can only be argued about, not measured.
 knowledge bases (documents, code, both) built from `tests/fixtures/eval/`,
 a fictional ferry operator, so the model can't answer from general
 knowledge. The option shuffle is seeded (`runTurn(text, { seed })`), the
-answer is greedy, and each run writes a full report to `.eval/`. How to run
+answer is greedy, and each run writes a full report to `eval/`. How to run
 it and the metrics: [performance.md](performance.md#agent-eval-bun-run-evalagent-section-agent-eval).
-Two runs gave the same outcome on every question.
+Three runs gave the same outcome on every question. `bun run eval:view`
+reads and compares the reports.
+
+Other setups (2026-09-26, same questions and seed; each has its own baseline
+section in `perf/baseline.json`, `agent-eval:<setup>`):
+
+| Setup (answers + decisions) | First action | Answer facts | Grounded | ms / decision | s / q |
+|---|---|---|---|---|---|
+| Qwen3 0.6B + 0.6B (the default) | 96.3% | 83.3% | 56.5% | 668 | 3.84 |
+| Qwen3 1.7B + 0.6B decision model | 96.3% | 95.8% | 91.3% | 726 | 6.47 |
+| Qwen3 1.7B + 1.7B | 77.8% | 87.5% | 90.5% | 1,662 | 7.88 |
+
+A bigger *answer* model fixed most of what items 4 and 5 aimed at. A bigger
+*decision* model made decisions worse: Qwen3 1.7B chose *ask a clarifying
+question* first for all 3 small-talk questions and 3 lookups, and after a
+search it often asked instead of answering. The option wording in `loop.ts`
+was tuned on 0.6B (AGENTS.md §2), so this is a first result for item 8, not
+its conclusion.
 
 Baseline (Qwen3 0.6B chat and decision model, Apple M5 Max):
 
 | First action | Answer facts | Grounded | Wasted calls | Decisions / q | ms / decision | Prompt tokens / decision | s / q |
 |---|---|---|---|---|---|---|---|
-| 96.3% | 83.3% | 56.5% | 0 | 1.85 | 710 | 302 | 4.04 |
+| 96.3% | 83.3% | 56.5% | 0 | 1.85 | 668 | 302 | 3.84 |
 
 What it says about the later items:
 - **Items 2 and 3** have little to show yet: every lookup question started

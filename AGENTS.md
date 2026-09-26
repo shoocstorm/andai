@@ -353,7 +353,7 @@ bun run test:e2e         # full app in WKWebView: ingest → retrieve → genera
 bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and releases run it
 bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
 bun run perf             # bundle size (CI too) + micro-benchmarks vs. perf/baseline.json
-bun run eval:agent       # agent eval: 27 questions through the real agent → scorecard vs. perf/baseline.json (needs ug + model)
+bun run eval:agent       # agent eval: 27 questions through the real agent → scorecard vs. perf/baseline.json (needs ug + model); read and compare reports with bun run eval:view
 ```
 
 **Run the e2e tests with the default model, `qwen3-0.6b`** (don't set

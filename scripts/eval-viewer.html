@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Andai Agent Evaluation</title>
+<!--
+  Reads the JSON reports `bun run eval:agent` writes to eval/ and presents one
+  run, or two compared, as an evaluation report. `bun run eval:view` serves it
+  with every report in eval/ listed (scripts/eval-view.mjs). Opened as a plain
+  file it still works: drop reports on it. Everything is inline; nothing goes
+  online. Dropped reports stay in this browser's localStorage until cleared.
+-->
+<style>
+/* Colours mirror src/theme/tokens.css: light first, dark in the two blocks after. */
+:root {
+  --canvas: #f3f5f9; --paper: #ffffff; --raised: #eef1f6; --inset: #f6f8fb; --selected: #eaf1ff;
+  --rule: #0b12201a; --rule-strong: #0b122033;
+  --text: #111827; --text-2: #465063; --text-3: #687286; --text-4: #9aa2b1; --code: #1f4fa8;
+  --blue: #2f6fe0; --blue-soft: #2f6fe01a; --violet: #7a4bd8; --violet-soft: #7a4bd81a;
+  --amber: #b45309; --amber-soft: #b453091a; --red: #d33c3c; --red-soft: #d33c3c14; --green: #13875a; --green-soft: #13875a17;
+  --mark-fact: #13875a2e; --mark-cite: #2f6fe024;
+  --serif: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --canvas: #0e1116; --paper: #151a22; --raised: #1d2330; --inset: #0f1318; --selected: #1c2a40;
+    --rule: #ffffff12; --rule-strong: #ffffff26;
+    --text: #e6e9ef; --text-2: #a9b1c0; --text-3: #7c8596; --text-4: #4a5260; --code: #cfe2ff;
+    --blue: #7db4ff; --blue-soft: #7db4ff1f; --violet: #c9a2ff; --violet-soft: #c9a2ff1f;
+    --amber: #f5a524; --amber-soft: #f5a5241f; --red: #ff7a7a; --red-soft: #ff7a7a1c; --green: #5ee0a0; --green-soft: #5ee0a01c;
+    --mark-fact: #5ee0a033; --mark-cite: #7db4ff2e;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0e1116; --paper: #151a22; --raised: #1d2330; --inset: #0f1318; --selected: #1c2a40;
+  --rule: #ffffff12; --rule-strong: #ffffff26;
+  --text: #e6e9ef; --text-2: #a9b1c0; --text-3: #7c8596; --text-4: #4a5260; --code: #cfe2ff;
+  --blue: #7db4ff; --blue-soft: #7db4ff1f; --violet: #c9a2ff; --violet-soft: #c9a2ff1f;
+  --amber: #f5a524; --amber-soft: #f5a5241f; --red: #ff7a7a; --red-soft: #ff7a7a1c; --green: #5ee0a0; --green-soft: #5ee0a01c;
+  --mark-fact: #5ee0a033; --mark-cite: #7db4ff2e;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { color-scheme: light; }
+body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.55 var(--sans); padding-inline: 16px; }
+.page { max-width: 1180px; margin: 0 auto; padding-block: 28px 72px; display: grid; gap: 28px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+code, .mono { font-family: var(--mono); font-size: 12px; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+.eyebrow { font: 600 10.5px/1.2 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); }
+.muted { color: var(--text-3); }
+.small { font-size: 12.5px; }
+.up { color: var(--green); } .down { color: var(--red); } .flat { color: var(--text-3); }
+
+/* ── masthead ── */
+.mast { display: grid; gap: 12px; border-bottom: 2px solid var(--text); padding-bottom: 18px; }
+.mast-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mast h1 { font: 600 30px/1.15 var(--serif); letter-spacing: -0.01em; }
+.mast h1 .vs { font-style: italic; font-weight: 400; color: var(--text-3); padding-inline: 8px; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 18px; color: var(--text-2); font-size: 13px; }
+.meta b { font-weight: 600; color: var(--text); }
+.tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn { border: 1px solid var(--rule-strong); background: var(--paper); border-radius: 6px; padding: 5px 11px; font-size: 12.5px; }
+.btn:hover { background: var(--raised); }
+
+/* ── run selection ── */
+.runs-bar { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px 14px; align-items: end; }
+.runsel { display: grid; gap: 5px; min-width: 0; }
+.runsel label { display: flex; align-items: center; gap: 8px; }
+.runsel select { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--rule-strong); background: var(--paper); min-width: 0; }
+.runsel .setup { font-size: 12px; color: var(--text-3); min-height: 1.4em; }
+.runsel .setup b { color: var(--text-2); font-weight: 600; }
+.key { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; font: 700 10.5px var(--mono); vertical-align: middle; }
+.key.a { background: var(--violet-soft); color: var(--violet); }
+.key.b { background: var(--blue-soft); color: var(--blue); }
+.swap { margin-bottom: 26px; }
+.source-note { grid-column: 1 / -1; font-size: 12.5px; color: var(--text-3); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.source-note label { color: var(--blue); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.load-err { color: var(--red); }
+@media (max-width: 720px) { .runs-bar { grid-template-columns: 1fr; } .swap { margin: 0; justify-self: start; } }
+
+.dropzone { position: fixed; inset: 0; background: color-mix(in srgb, var(--canvas) 88%, transparent); border: 2px dashed var(--blue); display: grid; place-items: center; font: 600 16px var(--sans); color: var(--blue); z-index: 10; }
+
+/* ── sections ── */
+section.block { display: grid; gap: 12px; }
+.block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--rule-strong); padding-bottom: 6px; }
+.block-head h2 { font: 600 18px/1.3 var(--serif); }
+.paper { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; }
+
+/* verdict */
+.verdict { padding: 20px 22px; display: grid; gap: 14px; border-left: 4px solid var(--text-3); }
+.verdict.good { border-left-color: var(--green); }
+.verdict.bad { border-left-color: var(--red); }
+.verdict.mixed { border-left-color: var(--amber); }
+.verdict .headline { margin: 0; font: 400 20px/1.4 var(--serif); max-width: 72ch; }
+.verdict .headline b { font-weight: 600; }
+.findings { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.findings li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; color: var(--text-2); max-width: 92ch; }
+.findings li::before { content: "—"; color: var(--text-4); }
+.findings b { color: var(--text); font-weight: 600; }
+.findings b.up { color: var(--green); } .findings b.down { color: var(--red); }
+.stat { margin: 0; font-size: 12.5px; color: var(--text-3); border-top: 1px solid var(--rule); padding-top: 10px; }
+.stat .warnline { color: var(--amber); font-weight: 600; }
+
+/* tables */
+.tbl-wrap { overflow-x: auto; }
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.tbl th { text-align: left; font: 600 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); padding: 10px 14px; border-bottom: 1px solid var(--rule-strong); white-space: nowrap; }
+.tbl td { padding: 9px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.tbl tbody tr:last-child td { border-bottom: 0; }
+.tbl th.r, .tbl td.r { text-align: right; }
+.tbl tr.group td { font: 600 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); background: var(--inset); padding-block: 6px; }
+.metric-name { font-weight: 500; }
+.metric-help { font-size: 12px; color: var(--text-3); }
+.bars { display: grid; gap: 3px; width: 120px; padding-top: 5px; }
+.bars span { display: block; height: 5px; border-radius: 3px; background: var(--raised); overflow: hidden; }
+.bars i { display: block; height: 100%; }
+.bars .a i { background: var(--violet); } .bars .b i { background: var(--blue); }
+.chg { font: 600 12px var(--mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pairs { font: 12px var(--mono); color: var(--text-3); white-space: nowrap; }
+
+/* question table */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; background: var(--paper); }
+.seg button { border: 0; background: transparent; padding: 5px 11px; font-size: 12.5px; border-right: 1px solid var(--rule); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--text); color: var(--paper); }
+.seg .ct { font: 11px var(--mono); opacity: 0.7; margin-left: 5px; }
+.search { flex: 1 1 200px; min-width: 0; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--rule-strong); background: var(--paper); }
+table.q td { padding-block: 10px; }
+table.q tr.row { cursor: pointer; }
+table.q tr.row:hover td { background: var(--inset); }
+table.q tr.row.open td { background: var(--selected); }
+table.q th.stripe, table.q td.stripe { padding: 0; width: 4px; }
+table.q td.stripe { background-clip: content-box; }
+table.q tr.row td.s-improved { box-shadow: inset 4px 0 var(--green); }
+table.q tr.row td.s-regressed { box-shadow: inset 4px 0 var(--red); }
+table.q tr.row td.s-mixed { box-shadow: inset 4px 0 var(--amber); }
+table.q tr.row td.s-changed { box-shadow: inset 4px 0 var(--blue); }
+.qid { font: 500 12px var(--mono); white-space: nowrap; }
+.qprompt { color: var(--text-2); margin-top: 1px; max-width: 48ch; }
+.kb { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; padding: 2px 6px; border-radius: 3px; background: var(--raised); color: var(--text-2); white-space: nowrap; }
+.cell-ab { white-space: nowrap; font: 600 13px var(--mono); }
+.cell-ab .arrow { color: var(--text-4); font-weight: 400; padding-inline: 3px; }
+.ok { color: var(--green); } .no { color: var(--red); } .na { color: var(--text-4); font-weight: 400; }
+.chain { font: 11.5px var(--mono); color: var(--text-2); white-space: nowrap; }
+.chain .tool { color: var(--violet); } .chain .ans { color: var(--text-3); }
+.outcome { font: 600 11px var(--mono); white-space: nowrap; }
+.outcome.improved { color: var(--green); } .outcome.regressed { color: var(--red); } .outcome.mixed { color: var(--amber); } .outcome.changed { color: var(--blue); } .outcome.same { color: var(--text-4); font-weight: 400; }
+.empty-row td { text-align: center; color: var(--text-3); padding: 28px; }
+
+/* question detail */
+td.detail { background: var(--inset); padding: 18px 18px 20px !important; cursor: default; }
+.dgrid { display: grid; gap: 14px; }
+.dq { font: 500 16px/1.45 var(--serif); }
+.spec { display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: 12.5px; color: var(--text-2); align-items: center; }
+.chip { font: 12px var(--mono); padding: 1px 7px; border-radius: 4px; background: var(--raised); color: var(--text-2); }
+.history { border-left: 2px solid var(--rule-strong); padding-left: 12px; display: grid; gap: 2px; color: var(--text-2); font-size: 12.5px; }
+.cmp { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+.run { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.run-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; border-bottom: 1px solid var(--rule); padding-bottom: 8px; }
+.run-head b { font-weight: 600; }
+.run-score { margin-left: auto; font: 12px var(--mono); color: var(--text-3); display: flex; gap: 10px; }
+.steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.step { display: grid; grid-template-columns: 20px 1fr; gap: 8px; }
+.step .n { font: 600 11px var(--mono); color: var(--text-4); padding-top: 2px; }
+.step .body { display: grid; gap: 3px; min-width: 0; }
+.step .act { font: 600 12.5px var(--mono); }
+.step .meta { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.step pre { margin: 0; font: 11.5px/1.45 var(--mono); color: var(--code); background: var(--inset); border-radius: 4px; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; }
+.warn { color: var(--amber); font-size: 12px; } .err { color: var(--red); font-size: 12px; }
+.conf { height: 4px; border-radius: 2px; background: var(--raised); overflow: hidden; width: 64px; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.conf i { display: block; height: 100%; background: var(--text-3); }
+.sources { display: flex; flex-wrap: wrap; gap: 3px 12px; font: 11.5px var(--mono); color: var(--text-3); }
+.answer { white-space: pre-wrap; word-break: break-word; border-left: 2px solid var(--rule-strong); padding: 2px 0 2px 12px; font-size: 13.5px; line-height: 1.6; }
+mark { color: inherit; border-radius: 2px; padding: 0 1px; }
+mark.fact { background: var(--mark-fact); }
+mark.cite { background: var(--mark-cite); font: 12px var(--mono); }
+mark.badcite { background: var(--red-soft); color: var(--red); font: 12px var(--mono); }
+.missing { font-size: 12.5px; color: var(--red); }
+
+/* method */
+.method { columns: 2 320px; column-gap: 32px; font-size: 13px; color: var(--text-2); }
+.method p { margin: 0 0 10px; break-inside: avoid; }
+.method b { color: var(--text); font-weight: 600; }
+
+.empty { padding: 28px; display: grid; gap: 10px; justify-items: start; }
+.empty h2 { font: 600 20px var(--serif); }
+.empty ol { margin: 0; padding-left: 20px; color: var(--text-2); display: grid; gap: 4px; }
+footer { font-size: 12px; color: var(--text-4); border-top: 1px solid var(--rule); padding-top: 12px; }
+@media (max-width: 600px) { .mast h1 { font-size: 24px; } .cmp { grid-template-columns: 1fr; } .qprompt { max-width: 30ch; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="mast">
+    <div class="mast-top">
+      <span class="eyebrow">Andai · Agent evaluation report</span>
+      <div class="tools">
+        <button class="btn" id="reload" type="button" hidden>Reload eval/</button>
+        <button class="btn" id="theme" type="button" aria-label="Switch theme">Theme: system</button>
+      </div>
+    </div>
+    <h1 id="title">Agent evaluation</h1>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <div class="runs-bar" aria-label="Runs">
+    <div class="runsel">
+      <label for="pickA"><span class="key a">A</span><span class="eyebrow">Baseline run</span></label>
+      <select id="pickA"></select>
+      <div class="setup" id="infoA"></div>
+    </div>
+    <button class="btn swap" id="swap" type="button" title="Swap baseline and candidate">⇄ Swap</button>
+    <div class="runsel">
+      <label for="pickB"><span class="key b">B</span><span class="eyebrow">Candidate run (optional)</span></label>
+      <select id="pickB"></select>
+      <div class="setup" id="infoB"></div>
+    </div>
+    <div class="source-note">
+      <span id="folderNote"></span>
+      <span>Drop report files anywhere on the page, or <label for="files">choose files</label>.</span>
+      <input type="file" id="files" accept=".json,application/json" multiple hidden>
+      <button class="btn" id="clear" type="button" hidden style="padding:1px 8px;font-size:12px">Forget dropped reports</button>
+      <span class="load-err" id="loadErr" hidden></span>
+    </div>
+  </div>
+
+  <main id="main" style="display:grid;gap:32px"></main>
+  <footer>Generated locally from <code>bun run eval:agent</code> reports. Nothing on this page leaves your computer.</footer>
+</div>
+<div class="dropzone" id="dropzone" hidden>Drop evaluation reports to load them</div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const STORE = 'andai.evalReports';
+// Same pattern as cases.json `notFound`, for reports written before it was saved in them.
+const NOT_FOUND = "(not (mention|contain|include|specif|state|say|provide|list|found|available|have|find|know|able)|no (information|mention|details?|data|record)|does(n't| not) (mention|contain|include|specif|state|say|provide|list|have)|unable|cannot|can't|unknown)";
+const served = location.protocol.startsWith('http'); // by scripts/eval-view.mjs
+
+let reports = []; // { key, name, data, from: 'folder' | 'dropped' }
+const state = { a: null, b: null, filter: 'all', kb: 'all', q: '', open: new Set() };
+
+// ── storage: only dropped reports; the folder is read on every visit ──────
+function save() {
+  try { localStorage.setItem(STORE, JSON.stringify(reports.filter((r) => r.from !== 'folder'))); } catch { /* full or blocked */ }
+}
+function restore() {
+  try { reports = JSON.parse(localStorage.getItem(STORE) || '[]').map((r) => ({ ...r, from: 'dropped' })); } catch { reports = []; }
+}
+const byTime = () => reports.sort((x, y) => String(x.data.at).localeCompare(String(y.data.at)));
+const newestTwo = () => {
+  if (reports.length >= 2) { state.a = reports.at(-2).key; state.b = reports.at(-1).key; }
+  else { state.a = reports[0]?.key ?? null; state.b = null; }
+};
+const valid = (d) => d && typeof d === 'object' && Array.isArray(d.scored) && Array.isArray(d.records) && d.scorecard;
+const get = (key) => reports.find((r) => r.key === key)?.data ?? null;
+
+async function loadFolder() {
+  const note = $('folderNote');
+  try {
+    const list = await (await fetch('reports', { cache: 'no-store' })).json();
+    const loaded = await Promise.all(list.map(async ({ name }) => {
+      try {
+        const data = await (await fetch(`reports/${encodeURIComponent(name)}`, { cache: 'no-store' })).json();
+        return valid(data) ? { key: `folder|${name}`, name, data, from: 'folder' } : null;
+      } catch { return null; }
+    }));
+    const found = loaded.filter(Boolean);
+    reports = [...reports.filter((r) => r.from !== 'folder'), ...found];
+    byTime();
+    note.innerHTML = `<b>${found.length}</b> report${found.length === 1 ? '' : 's'} in <code>eval/</code>.`;
+    if (!get(state.a)) newestTwo();
+  } catch (e) {
+    note.textContent = `Couldn't read the eval/ folder (${e.message}).`;
+  }
+  render();
+}
+
+async function addFiles(fileList) {
+  const errors = [];
+  for (const f of fileList) {
+    try {
+      const data = JSON.parse(await f.text());
+      if (!valid(data)) throw new Error('not an agent evaluation report');
+      const key = `drop|${data.at}|${f.name}`;
+      reports = reports.filter((r) => r.key !== key);
+      reports.push({ key, name: f.name, data, from: 'dropped' });
+    } catch (e) { errors.push(`${f.name}: ${e.message}`); }
+  }
+  byTime();
+  save();
+  $('loadErr').hidden = !errors.length;
+  $('loadErr').textContent = errors.join(' · ');
+  newestTwo();
+  state.open.clear();
+  render();
+}
+
+// ── controls ───────────────────────────────────────────────────────────────
+$('files').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
+let dragDepth = 0;
+document.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; $('dropzone').hidden = false; });
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('dropzone').hidden = true; } });
+document.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; $('dropzone').hidden = true; if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files); });
+$('clear').addEventListener('click', () => {
+  reports = reports.filter((r) => r.from === 'folder');
+  try { localStorage.removeItem(STORE); } catch {}
+  state.open.clear(); newestTwo(); render();
+});
+$('reload').addEventListener('click', loadFolder);
+$('swap').addEventListener('click', () => { if (!state.b) return; [state.a, state.b] = [state.b, state.a]; state.open.clear(); render(); });
+$('pickA').addEventListener('change', (e) => { state.a = e.target.value; state.open.clear(); render(); });
+$('pickB').addEventListener('change', (e) => { state.b = e.target.value || null; state.open.clear(); render(); });
+
+const THEMES = ['system', 'light', 'dark'];
+let theme = 'system';
+try { theme = localStorage.getItem('andai.evalTheme') || 'system'; } catch {}
+function applyTheme() {
+  if (theme === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.dataset.theme = theme;
+  $('theme').textContent = `Theme: ${theme}`;
+}
+$('theme').addEventListener('click', () => {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  try { localStorage.setItem('andai.evalTheme', theme); } catch {}
+  applyTheme();
+});
+applyTheme();
+
+// ── facts about a run ──────────────────────────────────────────────────────
+const deciderOf = (d) => {
+  if (d.decider !== undefined) return d.decider; // null: decisions on the chat model
+  const models = [...new Set(d.records.flatMap((r) => r.steps.map((s) => s.decision?.model).filter(Boolean)))];
+  return models.length ? `${models.join(', ')} (from records)` : null;
+};
+const setupName = (d) => `${d.model}${d.decider ? ` + ${d.decider}` : ''}`;
+const when = (at, long) => {
+  const t = new Date(at);
+  if (isNaN(t)) return String(at ?? '');
+  return t.toLocaleString(undefined, long ? { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+const optionLabel = (r) => `${r.name} — ${setupName(r.data)}, ${when(r.data.at)}${r.from === 'dropped' ? ' (dropped)' : ''}`;
+function setupLine(d) {
+  if (!d) return '';
+  const dec = deciderOf(d);
+  const e = d.engine || {};
+  return `Answers <b>${esc(d.model)}</b> · decisions <b>${esc(dec ?? 'same model')}</b> · seed ${esc(d.seed)}${e.backend ? ` · ${esc(e.backend)}` : ''}${d.only ? ` · <span style="color:var(--amber)">subset of ${d.only.length}</span>` : ''}`;
+}
+const caseMap = () => {
+  const m = new Map();
+  for (const key of [state.a, state.b]) for (const c of get(key)?.cases ?? []) if (!m.has(c.id)) m.set(c.id, c);
+  return m;
+};
+const byId = (d) => new Map((d?.scored ?? []).map((s) => [s.id, s]));
+const recById = (d) => new Map((d?.records ?? []).map((r) => [r.id, r]));
+const isMiss = (s) => !!s && (!s.firstOk || s.factsOk === false || s.grounded === false || !!s.error);
+
+// ── metrics ────────────────────────────────────────────────────────────────
+const METRICS = [
+  { group: 'Answer quality' },
+  { key: 'factHitRate', pair: 'factsOk', label: 'Answer facts found', help: 'Answers that state every expected fact', kind: 'pct', better: 'higher' },
+  { key: 'groundedRate', pair: 'grounded', label: 'Grounded answers', help: 'Answers that cite their sources, and only listed ones', kind: 'pct', better: 'higher' },
+  { key: 'firstActionAccuracy', pair: 'firstOk', label: 'Right first action', help: 'First action is one the question allows', kind: 'pct', better: 'higher' },
+  { group: 'Efficiency' },
+  { key: 'secondsPerQuestion', label: 'Time per question', help: 'Whole turn, answer included', kind: 's', better: 'lower' },
+  { key: 'decisionsPerQuestion', label: 'Decisions per question', kind: 'num', better: 'lower' },
+  { key: 'msPerDecision', label: 'Time per decision', kind: 'ms', better: 'lower' },
+  { key: 'promptTokensPerDecision', label: 'Prompt tokens per decision', kind: 'int', better: 'lower' },
+  { key: 'wastedPerQuestion', label: 'Wasted calls per question', help: 'Errors, empty results and skipped repeats', kind: 'num', better: 'lower' },
+  { key: 'calls', label: 'Tool calls', kind: 'int', better: null },
+  { group: 'Reliability' },
+  { key: 'argsInvalid', label: 'Invalid tool arguments', kind: 'int', better: 'lower' },
+  { key: 'noSymbolErrors', label: '“No symbol named” errors', kind: 'int', better: 'lower' },
+  { key: 'fallbacks', label: 'Decision fallbacks', kind: 'int', better: 'lower' },
+  { key: 'errors', label: 'Turn errors', kind: 'int', better: 'lower' },
+];
+function fmt(v, kind) {
+  if (v == null || Number.isNaN(v)) return '—';
+  if (kind === 'pct') return `${(v * 100).toFixed(1)}%`;
+  if (kind === 'ms') return `${Math.round(v)} ms`;
+  if (kind === 's') return `${v.toFixed(2)} s`;
+  if (kind === 'int') return String(Math.round(v));
+  return v.toFixed(2);
+}
+// Under 1% (or 0.1 pts) is noise, not a change.
+function change(a, b, m) {
+  if (a == null || b == null) return null;
+  const d = b - a;
+  const same = m.kind === 'pct' ? Math.abs(d) < 0.001 : Math.abs(d) < 1e-9 || (a !== 0 && Math.abs(d / a) < 0.01);
+  const dir = same || !m.better ? 'flat' : (d > 0) === (m.better === 'higher') ? 'up' : 'down';
+  let text;
+  if (same) text = '±0';
+  else if (m.kind === 'pct') text = `${d > 0 ? '+' : '−'}${Math.abs(d * 100).toFixed(1)} pts`;
+  else if (a !== 0) text = `${d > 0 ? '+' : '−'}${Math.abs((d / a) * 100).toFixed(0)}%`;
+  else text = `${d > 0 ? '+' : '−'}${fmt(Math.abs(d), m.kind)}`;
+  return { dir, text, d };
+}
+
+// Exact two-sided sign test: k of n flips went one way.
+function signTest(k, n) {
+  if (!n) return null;
+  const lo = Math.min(k, n - k);
+  let p = 0, c = 1;
+  for (let i = 0; i <= lo; i++) { if (i > 0) c = (c * (n - i + 1)) / i; p += c; }
+  return Math.min(1, (2 * p) / 2 ** n);
+}
+const pText = (p) => (p == null ? '' : p < 0.001 ? 'p < 0.001' : `p = ${p.toFixed(p < 0.01 ? 3 : 2)}`);
+function pairs(A, B, field) {
+  const sb = byId(B);
+  let up = 0, down = 0;
+  for (const [id, a] of byId(A)) {
+    const b = sb.get(id);
+    if (!b || a[field] == null || b[field] == null || a[field] === b[field]) continue;
+    b[field] ? up++ : down++;
+  }
+  return { up, down, p: signTest(up, up + down) };
+}
+function shift(a, b) {
+  if (!a || !b) return a ? 'removed' : 'new';
+  let up = 0, down = 0;
+  for (const k of ['firstOk', 'factsOk', 'grounded']) {
+    if (a[k] == null || b[k] == null || a[k] === b[k]) continue;
+    b[k] ? up++ : down++;
+  }
+  if (up && down) return 'mixed';
+  if (up) return 'improved';
+  if (down) return 'regressed';
+  return a.actions.join() !== b.actions.join() ? 'changed' : 'same';
+}
+function shiftCounts(A, B) {
+  const sa = byId(A), sb = byId(B), counts = {};
+  for (const id of new Set([...sa.keys(), ...sb.keys()])) { const k = shift(sa.get(id), sb.get(id)); counts[k] = (counts[k] || 0) + 1; }
+  return counts;
+}
+
+// ── verdict ────────────────────────────────────────────────────────────────
+const joinList = (xs) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+function renderVerdict(A, B) {
+  const sc = A.scorecard;
+  if (!B) {
+    const withFacts = A.scored.filter((s) => s.factsOk !== null);
+    const misses = A.scored.filter(isMiss);
+    const cls = misses.length ? 'mixed' : 'good';
+    return `<section class="block"><div class="paper verdict ${cls}">
+      <p class="headline"><b>${esc(setupName(A))}</b> found every expected fact in ${withFacts.filter((s) => s.factsOk).length} of ${withFacts.length} answers and took the right first action on ${A.scored.filter((s) => s.firstOk).length} of ${A.scored.length} questions.</p>
+      <ul class="findings">
+        <li><span><b>${fmt(sc.groundedRate, 'pct')}</b> of answers with sources cited them correctly.</span></li>
+        <li><span><b>${fmt(sc.secondsPerQuestion, 's')}</b> per question, with ${fmt(sc.decisionsPerQuestion, 'num')} decisions of ${fmt(sc.msPerDecision, 'ms')} each.</span></li>
+        <li><span>${sc.wastedCalls ? `<b>${sc.wastedCalls}</b> of ${sc.calls} tool calls were wasted.` : `No wasted tool calls out of ${sc.calls}.`} ${sc.errors ? `<b class="down">${sc.errors} turn error${sc.errors > 1 ? 's' : ''}.</b>` : 'No turn errors.'}</span></li>
+        <li><span>${misses.length ? `<b>${misses.length}</b> question${misses.length > 1 ? 's' : ''} missed something: ${misses.map((s) => `<code>${esc(s.id)}</code>`).join(', ')}.` : 'No question missed anything.'}</span></li>
+      </ul>
+    </div></section>`;
+  }
+  const gains = [], losses = [];
+  for (const m of METRICS.filter((x) => x.pair)) {
+    const c = change(A.scorecard[m.key], B.scorecard[m.key], m);
+    if (!c || c.dir === 'flat') continue;
+    (c.dir === 'up' ? gains : losses).push(`${m.label.toLowerCase()} ${c.text}`);
+  }
+  const t = change(A.scorecard.secondsPerQuestion, B.scorecard.secondsPerQuestion, { kind: 's', better: 'lower' });
+  const speed = !t || t.dir === 'flat' ? 'at the same speed' : t.dir === 'down' ? `at the cost of ${t.text.replace('+', '')} more time per question` : `and it is ${t.text.replace('−', '')} faster per question`;
+  const counts = shiftCounts(A, B);
+  const up = counts.improved || 0, down = counts.regressed || 0;
+  const p = signTest(up, up + down);
+  const nameA = esc(setupName(A)), nameB = `<b>${esc(setupName(B))}</b>`;
+  let cls, headline;
+  if (gains.length && !losses.length) { cls = 'good'; headline = `${nameB} answers better than ${nameA}, with no quality metric worse, ${speed}.`; }
+  else if (losses.length && !gains.length) { cls = 'bad'; headline = `${nameB} answers worse than ${nameA}, ${speed}.`; }
+  else if (gains.length) { cls = 'mixed'; headline = `${nameB} is mixed against ${nameA}: better on some quality metrics and worse on others, ${speed}.`; }
+  else { cls = ''; headline = `${nameB} and ${nameA} don’t differ measurably in answer quality; B runs ${speed.replace(/^(and it is|at the cost of) /, '')}.`; }
+  const sig = up + down
+    ? `${up} question${up === 1 ? '' : 's'} improved and ${down} regressed (exact sign test on the ${up + down} that changed: ${pText(p)}). ${p < 0.05 ? 'A split this one-sided is unlikely to be chance.' : 'With this few changes, the split could be chance.'}`
+    : 'No question changed outcome.';
+  const comparable = A.seed === B.seed && !A.only && !B.only && A.scored.length === B.scored.length;
+  return `<section class="block"><div class="paper verdict ${cls}">
+    <p class="headline">${headline}</p>
+    <ul class="findings">
+      ${gains.length ? `<li><span><b class="up">Better:</b> ${esc(joinList(gains))}.</span></li>` : ''}
+      ${losses.length ? `<li><span><b class="down">Worse:</b> ${esc(joinList(losses))}.</span></li>` : ''}
+      <li><span><b>Per question:</b> ${up} improved, ${down} regressed${counts.mixed ? `, ${counts.mixed} mixed` : ''}, ${(counts.same || 0) + (counts.changed || 0)} unchanged${counts.changed ? ` (${counts.changed} of them took different actions)` : ''}.</span></li>
+      <li><span><b>Cost:</b> ${fmt(A.scorecard.secondsPerQuestion, 's')} → ${fmt(B.scorecard.secondsPerQuestion, 's')} per question; ${fmt(A.scorecard.msPerDecision, 'ms')} → ${fmt(B.scorecard.msPerDecision, 'ms')} per decision.</span></li>
+    </ul>
+    <p class="stat">${sig}${comparable ? '' : ' <span class="warnline">The runs differ in seed or question set, so they are not strictly comparable.</span>'}</p>
+  </div></section>`;
+}
+
+// ── scorecard ──────────────────────────────────────────────────────────────
+function renderScorecard(A, B) {
+  const cols = B ? 6 : 3;
+  const rows = METRICS.map((m) => {
+    if (m.group) return `<tr class="group"><td colspan="${cols}">${esc(m.group)}</td></tr>`;
+    const a = A.scorecard[m.key], b = B?.scorecard[m.key];
+    if (a == null && b == null) return '';
+    const name = `<div class="metric-name">${esc(m.label)}</div>${m.help ? `<div class="metric-help">${esc(m.help)}</div>` : ''}`;
+    const bar = (cls, v) => `<span class="${cls}"><i style="width:${Math.max(0, Math.min(1, v ?? 0)) * 100}%"></i></span>`;
+    if (!B) return `<tr><td>${name}</td><td class="r num"><b>${fmt(a, m.kind)}</b></td><td>${m.kind === 'pct' ? `<div class="bars" aria-hidden="true">${bar('a', a)}</div>` : ''}</td></tr>`;
+    const c = change(a, b, m);
+    const pr = m.pair ? pairs(A, B, m.pair) : null;
+    return `<tr>
+      <td>${name}</td>
+      <td class="r num">${fmt(a, m.kind)}</td>
+      <td class="r num"><b>${fmt(b, m.kind)}</b></td>
+      <td>${m.kind === 'pct' ? `<div class="bars" aria-hidden="true">${bar('a', a)}${bar('b', b)}</div>` : ''}</td>
+      <td class="r"><span class="chg ${c?.dir ?? 'flat'}">${c ? esc(c.text) : '—'}</span></td>
+      <td class="r">${pr ? (pr.up + pr.down ? `<span class="pairs" title="Questions that flipped on this metric, with an exact sign test"><span class="up">↑${pr.up}</span> <span class="down">↓${pr.down}</span> · ${pText(pr.p)}</span>` : '<span class="pairs">none</span>') : ''}</td>
+    </tr>`;
+  }).join('');
+  const head = B
+    ? `<tr><th>Metric</th><th class="r"><span class="key a">A</span></th><th class="r"><span class="key b">B</span></th><th></th><th class="r">Change</th><th class="r">Questions flipped</th></tr>`
+    : `<tr><th>Metric</th><th class="r">Value</th><th></th></tr>`;
+  return `<section class="block">
+    <div class="block-head"><h2>Scorecard</h2><span class="small muted">${B ? 'Green favours B, red favours A. Changes under 1% count as none.' : `${A.scored.length} questions`}</span></div>
+    <div class="paper tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
+  </section>`;
+}
+
+// ── by knowledge base ──────────────────────────────────────────────────────
+function renderByKb(A, B) {
+  const runs = B ? [A, B] : [A];
+  const kbs = [...new Set(runs.flatMap((d) => d.scored.map((s) => s.kb)))];
+  const rate = (d, kb, k) => {
+    const xs = d.scored.filter((s) => s.kb === kb && s[k] != null);
+    return xs.length ? { hit: xs.filter((s) => s[k]).length, n: xs.length } : null;
+  };
+  const cell = (r) => (r ? `${r.hit}<span class="muted"> / ${r.n}</span>` : '<span class="muted">—</span>');
+  const pair = (kb, k) => {
+    const a = rate(A, kb, k);
+    if (!B) return `<td class="r num">${cell(a)}</td>`;
+    const b = rate(B, kb, k);
+    const dir = a && b ? (b.hit > a.hit ? 'up' : b.hit < a.hit ? 'down' : '') : '';
+    return `<td class="r num">${cell(a)}</td><td class="r num"><span class="${dir}">${cell(b)}</span></td>`;
+  };
+  const cols = [['factsOk', 'Facts'], ['grounded', 'Grounded'], ['firstOk', 'First action']];
+  const head = `<tr><th>Knowledge base</th><th class="r">Questions</th>${cols.map(([, l]) => (B ? `<th class="r">${l} <span class="key a">A</span></th><th class="r">${l} <span class="key b">B</span></th>` : `<th class="r">${l}</th>`)).join('')}</tr>`;
+  const label = { docs: 'Documents', code: 'Source code', mixed: 'Documents and code' };
+  const rows = kbs.map((kb) => `<tr><td><span class="kb">${esc(kb)}</span> <span class="small muted">${esc(label[kb] ?? '')}</span></td><td class="r num">${A.scored.filter((s) => s.kb === kb).length}</td>${cols.map(([k]) => pair(kb, k)).join('')}</tr>`).join('');
+  return `<section class="block">
+    <div class="block-head"><h2>Results by knowledge base</h2><span class="small muted">Questions passing / questions the check applies to</span></div>
+    <div class="paper tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
+  </section>`;
+}
+
+// ── questions ──────────────────────────────────────────────────────────────
+const mark = (v) => (v == null ? '<span class="na" title="Not applicable">·</span>' : v ? '<span class="ok" title="Yes">✓</span>' : '<span class="no" title="No">✗</span>');
+const abMark = (a, b, k, compare) => (!compare ? mark(a?.[k]) : `${a ? mark(a[k]) : '<span class="na">—</span>'}<span class="arrow">→</span>${b ? mark(b[k]) : '<span class="na">—</span>'}`);
+function chain(s) {
+  if (!s) return '<span class="na">—</span>';
+  return `<span class="chain">${s.actions.map((a) => (a === 'answer_now' || a === 'ask_clarification' ? `<span class="ans">${esc(a)}</span>` : `<span class="tool">${esc(a)}</span>`)).join(' → ')}</span>`;
+}
+function filtered(A, B) {
+  const sa = byId(A), sb = byId(B), cases = caseMap();
+  const q = state.q.trim().toLowerCase();
+  return [...new Set([...sa.keys(), ...sb.keys()])].filter((id) => {
+    const a = sa.get(id), b = sb.get(id), c = cases.get(id);
+    if (state.kb !== 'all' && (a ?? b).kb !== state.kb) return false;
+    if (q && !`${id} ${c?.prompt ?? ''}`.toLowerCase().includes(q)) return false;
+    const f = state.filter;
+    if (f === 'all') return true;
+    if (f === 'misses') return B ? isMiss(b) : isMiss(a);
+    if (f === 'changed') return shift(a, b) !== 'same';
+    return shift(a, b) === f;
+  });
+}
+function renderQuestions(A, B) {
+  const sa = byId(A), sb = byId(B), cases = caseMap();
+  const kbs = [...new Set(A.scored.map((s) => s.kb).concat(B ? B.scored.map((s) => s.kb) : []))];
+  const counts = B ? shiftCounts(A, B) : {};
+  const misses = (B ?? A).scored.filter(isMiss).length;
+  const filters = B
+    ? [['all', 'All', new Set([...sa.keys(), ...sb.keys()]).size], ['changed', 'Changed', Object.entries(counts).filter(([k]) => k !== 'same').reduce((n, [, v]) => n + v, 0)], ['improved', 'Improved', counts.improved || 0], ['regressed', 'Regressed', counts.regressed || 0], ['misses', 'Misses in B', misses]]
+    : [['all', 'All', sa.size], ['misses', 'Misses', misses]];
+  if (!filters.some(([k]) => k === state.filter)) state.filter = 'all';
+  const ids = filtered(A, B);
+  const cols = 8;
+  const head = `<tr><th class="stripe"></th><th>Question</th><th>KB</th><th>First action</th><th>Facts</th><th>Cited</th><th>${B ? 'Actions (A, then B if different)' : 'Actions'}</th><th class="r">${B ? 'Outcome' : 'Time'}</th></tr>`;
+  const rows = ids.map((id) => {
+    const a = sa.get(id), b = sb.get(id), c = cases.get(id);
+    const open = state.open.has(id);
+    const sh = B ? shift(a, b) : isMiss(a) ? 'regressed' : 'same';
+    const q = `<div class="qid">${esc(id)}</div>${c?.prompt ? `<div class="qprompt">${esc(c.prompt)}</div>` : ''}`;
+    const actions = B ? `<div>${chain(a)}</div>${a && b && a.actions.join() === b.actions.join() ? '' : `<div>${chain(b)}</div>`}` : chain(a);
+    const last = B
+      ? `<td class="r"><span class="outcome ${sh}">${sh === 'same' ? 'unchanged' : sh}</span><div class="small muted num">${a ? a.seconds.toFixed(1) : '—'} → ${b ? b.seconds.toFixed(1) : '—'} s</div></td>`
+      : `<td class="r num">${a.seconds.toFixed(1)} s</td>`;
+    return `<tr class="row${open ? ' open' : ''}" data-id="${esc(id)}" tabindex="0" aria-expanded="${open}">
+      <td class="stripe s-${sh}"></td><td>${q}</td><td><span class="kb">${esc((a ?? b).kb)}</span></td>
+      <td class="cell-ab">${abMark(a, b, 'firstOk', !!B)}</td><td class="cell-ab">${abMark(a, b, 'factsOk', !!B)}</td><td class="cell-ab">${abMark(a, b, 'grounded', !!B)}</td>
+      <td>${actions}</td>${last}</tr>${open ? `<tr><td class="detail" colspan="${cols}">${renderDetail(id, A, B)}</td></tr>` : ''}`;
+  }).join('') || `<tr class="empty-row"><td colspan="${cols}">No question matches these filters.</td></tr>`;
+  return `<section class="block">
+    <div class="block-head"><h2>Question-level results</h2><span class="small muted">${ids.length} shown · select a row for its trace and answer${B ? ' in both runs' : ''}</span></div>
+    <div class="filters">
+      <div class="seg" role="group" aria-label="Filter by outcome">${filters.map(([k, l, n]) => `<button type="button" data-filter="${k}" aria-pressed="${state.filter === k}">${l}<span class="ct">${n}</span></button>`).join('')}</div>
+      <div class="seg" role="group" aria-label="Filter by knowledge base">${['all', ...kbs].map((k) => `<button type="button" data-kb="${esc(k)}" aria-pressed="${state.kb === k}">${k === 'all' ? 'All KBs' : esc(k)}</button>`).join('')}</div>
+      <input class="search" id="search" type="search" placeholder="Search by id or question" value="${esc(state.q)}" aria-label="Search questions">
+      <button class="btn" type="button" id="expandAll">${ids.length && ids.every((id) => state.open.has(id)) ? 'Collapse all' : 'Expand all'}</button>
+    </div>
+    <div class="paper tbl-wrap"><table class="tbl q"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
+  </section>`;
+}
+
+// Highlights fact matches and [n] citations; a citation past the source list is flagged.
+function highlight(text, facts, nSources) {
+  const marks = [];
+  for (const re of facts) {
+    const g = new RegExp(re.source, 'gi');
+    let m;
+    while ((m = g.exec(text)) && marks.length < 200) { if (!m[0]) { g.lastIndex++; continue; } marks.push([m.index, m.index + m[0].length, 'fact']); }
+  }
+  const cite = /\[(\d+)\]/g;
+  let m;
+  while ((m = cite.exec(text))) { const n = Number(m[1]); marks.push([m.index, m.index + m[0].length, n >= 1 && n <= nSources ? 'cite' : 'badcite']); }
+  marks.sort((x, y) => x[0] - y[0] || y[1] - x[1]);
+  let out = '', at = 0;
+  for (const [s, e, cls] of marks) {
+    if (s < at) continue;
+    out += esc(text.slice(at, s)) + `<mark class="${cls}">${esc(text.slice(s, e))}</mark>`;
+    at = e;
+  }
+  return out + esc(text.slice(at));
+}
+const stripThink = (s) => String(s ?? '').replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
+
+function renderRun(tag, d, id, c) {
+  const s = byId(d).get(id), r = recById(d).get(id);
+  if (!s || !r) return `<div class="run"><div class="run-head"><span class="key ${tag}">${tag.toUpperCase()}</span> Not in this run</div></div>`;
+  const facts = (c?.facts ?? []).map((f) => { try { return new RegExp(f === '$notFound' ? (d.notFound ?? NOT_FOUND) : f, 'i'); } catch { return null; } }).filter(Boolean);
+  const steps = r.steps.map((st, i) => {
+    const dec = st.decision, call = st.call;
+    const conf = dec ? Math.round(dec.confidence * 100) : null;
+    return `<li class="step"><span class="n">${i + 1}</span><div class="body">
+      <span class="act">${esc(st.action)}</span>
+      <span class="meta">${dec ? `<span class="conf" aria-hidden="true"><i style="width:${conf}%"></i></span>${conf}% confidence · ${esc(dec.model)}${dec.slot ? ` (${esc(dec.slot)} slot)` : ''} · ${dec.ms} ms · ${dec.promptTokens ?? '?'} prompt tokens` : 'No decision'}</span>
+      ${st.fallback || st.note ? `<span class="warn">${esc(st.fallback ? `Fallback (${st.fallback}): ` : '')}${esc(st.note ?? '')}</span>` : ''}
+      ${call ? `<span class="meta">${esc(call.status)} · ${call.hits ?? 0} passage${call.hits === 1 ? '' : 's'}${call.ms != null ? ` · ${call.ms} ms` : ''}${call.argAttempts > 1 ? ` · ${call.argAttempts} tries at the arguments` : ''}${call.argsFallback ? ' · <span class="err">fallback arguments</span>' : ''}</span>
+        ${call.args ? `<pre>${esc(JSON.stringify(call.args))}</pre>` : ''}
+        ${call.error ? `<span class="err">${esc(call.error)}</span>` : ''}
+        ${call.observation ? `<span class="meta">${esc(call.observation)}</span>` : ''}` : ''}
+    </div></li>`;
+  }).join('');
+  return `<div class="run">
+    <div class="run-head"><span class="key ${tag}">${tag.toUpperCase()}</span><b>${esc(setupName(d))}</b>
+      <span class="run-score">first ${mark(s.firstOk)} facts ${mark(s.factsOk)} cited ${mark(s.grounded)} · ${s.seconds.toFixed(1)} s</span></div>
+    ${r.error ? `<span class="err">Turn error: ${esc(r.error)}</span>` : ''}
+    <ol class="steps">${steps}</ol>
+    ${r.sources.length ? `<div><div class="eyebrow" style="margin-bottom:4px">Sources</div><div class="sources">${r.sources.map((x, i) => `<span>[${i + 1}] ${esc(x)}</span>`).join('')}</div></div>` : ''}
+    <div><div class="eyebrow" style="margin-bottom:6px">Answer</div><div class="answer">${highlight(stripThink(r.answer), facts, r.sources.length) || '<span class="muted">(empty)</span>'}</div></div>
+    ${s.missing?.length ? `<div class="missing">Missing: ${s.missing.map((m) => `<code>${esc(m.length > 60 ? 'says the knowledge base doesn’t cover it' : m)}</code>`).join(', ')}</div>` : ''}
+    ${r.stats ? `<div class="small muted">${r.stats.promptTokens ?? '?'} prompt tokens · ${r.stats.tokens} answer tokens · first token after ${r.stats.firstTokenMs != null ? `${(r.stats.firstTokenMs / 1000).toFixed(1)} s` : '—'}</div>` : ''}
+  </div>`;
+}
+function renderDetail(id, A, B) {
+  const c = caseMap().get(id);
+  const head = c
+    ? `<div class="dq">${esc(c.prompt)}</div>
+       ${c.history?.length ? `<div><div class="eyebrow" style="margin-bottom:4px">Earlier in the conversation</div><div class="history">${c.history.map((h) => `<div><b>${esc(h.role)}:</b> ${esc(h.content)}</div>`).join('')}</div></div>` : ''}
+       <div class="spec"><span class="eyebrow">Expected first action</span>${c.first.map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div>
+       <div class="spec"><span class="eyebrow">Expected facts</span>${c.facts.length ? c.facts.map((f) => `<span class="chip">${esc(f === '$notFound' ? 'says the KB doesn’t cover it' : f)}</span>`).join('') : '<span class="muted">None (small talk)</span>'}</div>`
+    : `<p class="small muted" style="margin:0">This report predates saving questions in reports, so only the id <code>${esc(id)}</code> is known.</p>`;
+  return `<div class="dgrid">${head}<div class="cmp">${renderRun('a', A, id, c)}${B ? renderRun('b', B, id, c) : ''}</div></div>`;
+}
+
+function renderMethod(A, B) {
+  const d = B ?? A;
+  const nFacts = d.scored.filter((s) => s.factsOk !== null).length;
+  return `<section class="block">
+    <div class="block-head"><h2>Method</h2></div>
+    <div class="method">
+      <p><b>Questions.</b> ${d.scored.length} fixed questions over three knowledge bases built from <code>tests/fixtures/eval/</code>: documents, source code, and both. The content describes a fictional ferry operator, so a model can’t answer from general knowledge. The set includes small talk, follow-ups and questions the knowledge base can’t answer.</p>
+      <p><b>Procedure.</b> Each question goes through the real agent in the app with the shipped defaults. The option order is shuffled with a fixed seed and answers are generated at temperature 0, so a run is repeatable: repeated runs of one setup agreed on every question.</p>
+      <p><b>Right first action.</b> The first action the agent took, after any fallback, is one the question lists as acceptable.</p>
+      <p><b>Answer facts.</b> Each question lists case-insensitive patterns the answer must all match, for example <code>30 days</code>. For an unanswerable question the answer must say the knowledge base doesn’t cover it. The rate is over the ${nFacts} questions that expect facts.</p>
+      <p><b>Grounded.</b> An answer with sources cites at least one <code>[n]</code>, and every <code>[n]</code> names a source the app listed.</p>
+      <p><b>Wasted calls.</b> Tool calls that errored, returned nothing, or were skipped as repeats.</p>
+      <p><b>Significance.</b> One question moves a rate by ${(100 / d.scored.length).toFixed(1)} points. “Questions flipped” counts the questions whose result differs between A and B; the exact two-sided sign test gives the chance of a split at least that one-sided if neither setup were better. Timings depend on the machine and vary by up to about 15% between runs.</p>
+    </div>
+  </section>`;
+}
+
+function renderEmpty() {
+  return `<div class="paper empty">
+    <h2>No evaluation report loaded</h2>
+    <ol>
+      <li>Run the eval: <code>bun run eval:agent</code> (or <code>EVAL_MODEL=qwen3-1.7b bun run eval:agent</code>).</li>
+      <li>It writes a report to <code>eval/agent-eval-&lt;time&gt;.json</code> in the Andai folder.</li>
+      <li>Open this page with <code>bun run eval:view</code> to list every report in <code>eval/</code>, or drop report files here.</li>
+    </ol>
+  </div>`;
+}
+
+// ── page ───────────────────────────────────────────────────────────────────
+function renderHeader(A, B) {
+  const title = $('title'), meta = $('meta');
+  if (!A) { title.textContent = 'Agent evaluation'; meta.innerHTML = ''; document.title = 'Andai Agent Evaluation'; return; }
+  title.innerHTML = B ? `${esc(setupName(A))}<span class="vs">vs</span>${esc(setupName(B))}` : esc(setupName(A));
+  document.title = B ? `${setupName(A)} vs ${setupName(B)} · Andai eval` : `${setupName(A)} · Andai eval`;
+  const kbs = new Set(A.scored.map((s) => s.kb)).size;
+  meta.innerHTML = [
+    `<span><b>${A.scored.length}</b> questions</span>`,
+    `<span><b>${kbs}</b> knowledge bases</span>`,
+    `<span>Seed <b>${esc(A.seed)}</b>${B && B.seed !== A.seed ? ` / <b>${esc(B.seed)}</b>` : ''}</span>`,
+    `<span>Run ${B ? `${esc(when(A.at, true))} and ${esc(when(B.at, true))}` : esc(when(A.at, true))}</span>`,
+  ].join('');
+}
+function renderPicker() {
+  const opts = (sel, none) => (none ? '<option value="">None: report on A alone</option>' : '') +
+    reports.slice().reverse().map((r) => `<option value="${esc(r.key)}"${r.key === sel ? ' selected' : ''}>${esc(optionLabel(r))}</option>`).join('');
+  $('pickA').innerHTML = reports.length ? opts(state.a, false) : '<option>No reports yet</option>';
+  $('pickB').innerHTML = opts(state.b, true);
+  $('infoA').innerHTML = setupLine(get(state.a));
+  $('infoB').innerHTML = setupLine(get(state.b));
+  $('clear').hidden = !reports.some((r) => r.from === 'dropped');
+}
+function current() {
+  const A = get(state.a);
+  return [A, A && state.b && state.b !== state.a ? get(state.b) : null];
+}
+function render() {
+  renderPicker();
+  const [A, B] = current();
+  renderHeader(A, B);
+  $('main').innerHTML = A ? [renderVerdict(A, B), renderScorecard(A, B), renderByKb(A, B), renderQuestions(A, B), renderMethod(A, B)].join('') : renderEmpty();
+}
+
+$('main').addEventListener('click', (e) => {
+  const f = e.target.closest('[data-filter]');
+  if (f) { state.filter = f.dataset.filter; render(); return; }
+  const k = e.target.closest('[data-kb]');
+  if (k) { state.kb = k.dataset.kb; render(); return; }
+  if (e.target.id === 'expandAll') {
+    const ids = filtered(...current());
+    const all = ids.every((id) => state.open.has(id));
+    ids.forEach((id) => (all ? state.open.delete(id) : state.open.add(id)));
+    render();
+    return;
+  }
+  const row = e.target.closest('tr.row');
+  if (row) { const id = row.dataset.id; state.open.has(id) ? state.open.delete(id) : state.open.add(id); render(); }
+});
+$('main').addEventListener('keydown', (e) => {
+  const row = e.target.closest?.('tr.row');
+  if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); row.click(); }
+});
+$('main').addEventListener('input', (e) => {
+  if (e.target.id !== 'search') return;
+  state.q = e.target.value;
+  const pos = e.target.selectionStart;
+  render();
+  const s = $('search');
+  s.focus();
+  s.setSelectionRange(pos, pos);
+});
+
+restore();
+byTime();
+newestTwo();
+render();
+if (served) { $('reload').hidden = false; loadFolder(); }
+</script>
+</body>
+</html>

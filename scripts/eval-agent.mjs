@@ -7,9 +7,10 @@
 //
 //   bun run eval:agent                          # all questions, compared with perf/baseline.json
 //   bun run eval:agent --update                 # record this run as the "agent-eval" baseline
-//   bun run eval:agent --against .eval/a.json   # also list the questions whose outcome changed
+//   bun run eval:agent --against eval/a.json   # also list the questions whose outcome changed
 //   bun run eval:agent --only doc-wind,code-peak
-//   EVAL_MODEL=qwen3-1.7b EVAL_SEED=7 …
+//   EVAL_MODEL=qwen3-1.7b EVAL_SEED=7 …         # chat (answer + argument) model, option-shuffle seed
+//   EVAL_DECIDER=qwen3-1.7b …                   # a separate decision model (default: decisions on the chat model)
 //
 // Needs ug and the model (downloaded once), like the e2e run. Machine- and
 // model-bound, and not part of `bun run check`.
@@ -28,6 +29,7 @@ const value = (name) => {
   return i === -1 ? undefined : argv[i + 1];
 };
 const model = process.env.EVAL_MODEL ?? 'qwen3-0.6b';
+const decider = process.env.EVAL_DECIDER || null;
 const seed = Number(process.env.EVAL_SEED ?? 7);
 const timeoutMs = Number(process.env.EVAL_TIMEOUT_MS ?? 1_800_000);
 const only = value('--only')?.split(',');
@@ -62,13 +64,13 @@ const files = Object.values(kbs).flat();
 const env = {
   ...process.env,
   VITE_SMOKE: 'eval',
-  VITE_EVAL: JSON.stringify({ model, seed, kbs, cases: cases.map(({ id, kb, prompt, history }) => ({ id, kb, prompt, history })) }),
+  VITE_EVAL: JSON.stringify({ model, decider, seed, kbs, cases: cases.map(({ id, kb, prompt, history }) => ({ id, kb, prompt, history })) }),
   ANDAI_DATA_DIR: join(dataDir, 'app'),
   ANDAI_SMOKE: '1',
   ANDAI_E2E_FILES: files.join(','),
 };
 
-console.log(`[eval] ${cases.length} question(s), model ${model}, seed ${seed}`);
+console.log(`[eval] ${cases.length} question(s), model ${model}, decisions on ${decider ?? 'the chat model'}, seed ${seed}`);
 const child = spawn('bun', ['run', 'tauri', 'dev'], { cwd: root, env, detached: true });
 const records = [];
 let failure = null;
@@ -118,13 +120,16 @@ if (failure || records.length !== cases.length) {
 const scored = records.map((r) => scoreCase(byId.get(r.id), r, notFound));
 const card = scorecard(scored);
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-const out = value('--out') ?? join(root, '.eval', `agent-eval-${stamp}.json`);
+const out = value('--out') ?? join(root, 'eval', `agent-eval-${stamp}.json`);
 mkdirSync(resolve(out, '..'), { recursive: true });
-writeFileSync(out, `${JSON.stringify({ at: new Date().toISOString(), model, seed, engine: start?.engine ?? null, only: only ?? null, scorecard: card, scored, records }, null, 2)}\n`);
+writeFileSync(
+  out,
+  `${JSON.stringify({ at: new Date().toISOString(), model, decider, seed, engine: start?.engine ?? null, only: only ?? null, notFound, cases, scorecard: card, scored, records }, null, 2)}\n`,
+);
 
 const pct = (v) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`);
 const num = (v, d = 2) => (v == null ? '—' : v.toFixed(d));
-console.log(`\n── agent eval · ${model} · ${card.questions} questions ──`);
+console.log(`\n── agent eval · ${model}${decider ? ` + decider ${decider}` : ''} · ${card.questions} questions ──`);
 console.log(`first-action accuracy   ${pct(card.firstActionAccuracy)}`);
 console.log(`answer-fact hit rate    ${pct(card.factHitRate)}`);
 console.log(`grounded answers        ${pct(card.groundedRate)}  (cites at least one source, and only listed ones)`);
@@ -139,7 +144,7 @@ if (misses.length) {
     console.log(`  ${s.id}: ${!s.firstOk ? `first ${s.first}, expected ${byId.get(s.id).first.join('|')}` : ''}${!s.firstOk && s.factsOk === false ? '; ' : ''}${s.factsOk === false ? `missing ${s.missing.join(', ')}` : ''}`);
   }
 }
-console.log(`\nreport: ${out}`);
+console.log(`\nreport: ${out}  (bun run eval:view to read or compare reports)`);
 
 const against = value('--against');
 if (against) {
@@ -149,11 +154,16 @@ if (against) {
 }
 
 // ── baseline (docs/performance.md) ────────────────────────────────────────
-// Only a full run with the default model is comparable to the baseline.
-if (only || model !== 'qwen3-0.6b') {
-  console.log('\n(baseline not compared: a subset or another model)');
+// One baseline per model setup: "agent-eval" is the default (Qwen3 0.6B,
+// decisions on it); any other gets its own section, e.g.
+// "agent-eval:qwen3-1.7b" or "agent-eval:qwen3-0.6b+qwen3-1.7b". A subset
+// isn't comparable to anything.
+if (only) {
+  console.log('\n(baseline not compared: a subset of the questions)');
   process.exit(0);
 }
+const setup = `${model}${decider ? `+${decider}` : ''}`;
+const section = setup === 'qwen3-0.6b' ? 'agent-eval' : `agent-eval:${setup}`;
 const higher = (v, unit = '%') => ({ value: v == null ? null : v * 100, unit, better: 'higher', tolerance: 1.1 });
 const lower = (v, unit, tolerance, slack) => ({ value: v, unit, better: 'lower', tolerance, slack });
 const metrics = {
@@ -167,5 +177,5 @@ const metrics = {
   'prompt-tokens-per-decision': lower(card.promptTokensPerDecision, 'tokens', 1.25),
 };
 for (const [k, m] of Object.entries(metrics)) if (m.value == null || Number.isNaN(m.value)) delete metrics[k];
-const failed = compare('agent-eval', metrics, { update: flag('--update'), label: `agent eval (${model})` });
+const failed = compare(section, metrics, { update: flag('--update'), label: `agent eval (${setup})` });
 process.exit(failed ? 1 : 0);

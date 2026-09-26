@@ -213,14 +213,14 @@
         "slack": 0.1
       },
       "seconds-per-question": {
-        "value": 4.039,
+        "value": 3.836,
         "unit": "s",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 1
       },
       "ms-per-decision": {
-        "value": 710,
+        "value": 668,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
@@ -228,6 +228,122 @@
       },
       "prompt-tokens-per-decision": {
         "value": 302,
+        "unit": "tokens",
+        "better": "lower",
+        "tolerance": 1.25
+      }
+    }
+  },
+  "agent-eval:qwen3-1.7b": {
+    "machine": "Apple M5 Max · 18 cores · 128 GB",
+    "recorded": "2026-09-26",
+    "metrics": {
+      "first-action-accuracy": {
+        "value": 77.778,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "fact-hit-rate": {
+        "value": 87.5,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "grounded-rate": {
+        "value": 90.476,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "wasted-calls-per-question": {
+        "value": 0.037,
+        "unit": "calls",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 0.2
+      },
+      "decisions-per-question": {
+        "value": 1.963,
+        "unit": "decisions",
+        "better": "lower",
+        "tolerance": 1.25,
+        "slack": 0.1
+      },
+      "seconds-per-question": {
+        "value": 7.88,
+        "unit": "s",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1
+      },
+      "ms-per-decision": {
+        "value": 1662,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 100
+      },
+      "prompt-tokens-per-decision": {
+        "value": 311,
+        "unit": "tokens",
+        "better": "lower",
+        "tolerance": 1.25
+      }
+    }
+  },
+  "agent-eval:qwen3-1.7b+qwen3-0.6b": {
+    "machine": "Apple M5 Max · 18 cores · 128 GB",
+    "recorded": "2026-09-26",
+    "metrics": {
+      "first-action-accuracy": {
+        "value": 96.296,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "fact-hit-rate": {
+        "value": 95.833,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "grounded-rate": {
+        "value": 91.304,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "wasted-calls-per-question": {
+        "value": 0,
+        "unit": "calls",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 0.2
+      },
+      "decisions-per-question": {
+        "value": 1.852,
+        "unit": "decisions",
+        "better": "lower",
+        "tolerance": 1.25,
+        "slack": 0.1
+      },
+      "seconds-per-question": {
+        "value": 6.469,
+        "unit": "s",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1
+      },
+      "ms-per-decision": {
+        "value": 726,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 100
+      },
+      "prompt-tokens-per-decision": {
+        "value": 303,
         "unit": "tokens",
         "better": "lower",
         "tolerance": 1.25

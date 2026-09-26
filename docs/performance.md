@@ -119,19 +119,33 @@ Recorded on Apple M5 Max · 18 cores · 128 GB with Qwen3 0.6B.
 | `grounded-rate` | 56.5% | 1.1 (higher) | Answers with sources that cite at least one `[n]`, and only listed ones |
 | `wasted-calls-per-question` | 0.00 | 1.5 + 0.2 | Tool calls that errored, came back empty, or were skipped as repeats |
 | `decisions-per-question` | 1.85 | 1.25 + 0.1 | Decision readouts per turn |
-| `seconds-per-question` | 4.04 s | 1.5 + 1 s | Whole turn, answer included |
-| `ms-per-decision` | 710 ms | 1.5 + 100 ms | One decision readout |
+| `seconds-per-question` | 3.84 s | 1.5 + 1 s | Whole turn, answer included |
+| `ms-per-decision` | 668 ms | 1.5 + 100 ms | One decision readout |
 | `prompt-tokens-per-decision` | 302 | 1.25 | Size of the decision prompt |
 
-Two runs gave the same outcome on every question (`--against` listed no
-change); only timings moved (3.45 and 4.04 s per question). Each run writes a
-full report (every step, argument, source and answer) to `.eval/`.
+Other model setups have their own sections, `agent-eval:<answers>[+<decider>]`,
+recorded the same day: Qwen3 1.7B answering with 0.6B deciding scored 96.3%
+first action, 95.8% facts, 91.3% grounded at 6.47 s per question; 1.7B for
+both scored 77.8%, 87.5% and 90.5% at 7.88 s (details in
+[agentic-rag-improvements.md](agentic-rag-improvements.md#1-agent-eval-set)).
+
+Decisions run on the chat model unless `EVAL_DECIDER` names a decision
+model: the harness sets it explicitly, because the app otherwise restores the
+decision model saved in Settings, which would leak into the run. Three runs
+gave the same outcome on every question (`--against` listed no change); only
+timings moved (3.45–4.04 s per question). Each run writes a full report
+(the questions, every step, argument, source and answer) to `eval/`.
+`bun run eval:view` opens a viewer with every report there listed, to read one or compare two
+(scorecard deltas, which questions improved or regressed, and both traces
+and answers side by side).
 
 ```bash
 bun run eval:agent                                # scorecard, compared with the baseline
-bun run eval:agent --against .eval/<earlier>.json # which questions changed
+bun run eval:agent --against eval/<earlier>.json # which questions changed
 bun run eval:agent --only doc-wind,code-peak      # a subset (not compared)
 bun run eval:agent --update                       # re-record the baseline
+EVAL_MODEL=qwen3-1.7b bun run eval:agent          # another answer model (not compared with the baseline)
+EVAL_DECIDER=qwen3-1.7b bun run eval:agent        # a separate decision model
 ```
 
 ## Workflow
