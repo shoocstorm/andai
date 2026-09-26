@@ -296,6 +296,15 @@ level defaults to *Ask*.
   multilingual, 192 English; each option at most 48), and the state gets the
   rest of `max_len` (1024 / 512), cut from the end. The agent's ~476-token
   state with 9 options fits both; `truncated` in the trace says when not.
+- **Laya agent eval (2026-09-26, `bun run eval:agent`, Qwen3 0.6B answering,
+  34 questions, seed fixed):** Qwen deciding: first action 100%, facts 86.2%,
+  1.09 decisions and 4.16 s per question (756 ms per decision). Laya English:
+  94.1%, 82.8%, 1.74 decisions (62 ms each), 4.67 s. Laya Multilingual:
+  85.3%, 93.1%, 4.62 decisions (48 ms each), 8.13 s, 14 wasted calls. With
+  Laya the loop rarely picks *answer* after results: it takes every other
+  tool until `offered()` runs out (eval reports `eval/laya-*.json`). Its
+  small-talk first actions also miss (searches or clarifies). Laya's decision
+  is fast; its option wording and stopping rule aren't tuned for it yet.
 - **ug's lookups fail with the useful message in stdout JSON** (`"error":
   "No symbol named …, try find_symbols"`) and exit 1 with a bare `error:` on
   stderr. `tools::run` surfaces the JSON message.
