@@ -1,4 +1,5 @@
 mod grants;
+mod tools;
 mod ug;
 #[cfg_attr(debug_assertions, allow(dead_code))]
 mod ui_server;
@@ -100,6 +101,8 @@ pub fn run() {
             ug::kb_delete,
             ug::kb_index,
             ug::kb_search,
+            ug::kb_set_kind,
+            tools::kb_tool,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Andai");

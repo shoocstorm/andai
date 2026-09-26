@@ -1,6 +1,8 @@
 # AGENTS.md — Andai engineering guide
 
-Andai is a **local-first AI agent desktop app**. It is a product, not a demo:
+Andai is a **local-first agentic RAG agent**, shipped as a desktop app: it
+answers from the user's knowledge bases by using tools (read-only ug commands,
+`agent/tools/`), chosen at each step by the local model. It is a product, not a demo:
 every change ships to users who trust it with their documents. This file is the
 contract for anyone changing the code, human or AI agent. Read it before
 editing. When this file and your instincts disagree, this file wins. When it
@@ -68,10 +70,13 @@ Andai/
 │  ├─ llm/engine.ts          wllama: load / cache / stream. Compat build on WKWebView
 │  ├─ llm/models.ts          model catalog (single-file GGUF, < 2 GB each, pinned commit + sha256)
 │  ├─ llm/integrity.ts       incremental SHA-256 + download verification
-│  ├─ agent/prompt.ts        PURE prompt assembly: keywords, system prompt, history, budgets
-│  ├─ agent/turn.ts          one turn: analyze → retrieve (ug) → build → generate; writes the trace
+│  ├─ llm/decide.ts          choice-based decisions (SemIf): lettered options → one-pass logprob readout
+│  ├─ agent/prompt.ts        PURE prompt assembly: keywords, system prompt, history, budgets, agent state
+│  ├─ agent/turn.ts          one turn: plan (agent loop) or analyze → retrieve (fixed) → build → generate
+│  ├─ agent/loop.ts          agent loop: decide → fill args → policy gate → run tool → observe; writes Message.agent
+│  ├─ agent/tools/           tool registry (code only), ug tools, argument filling, schema validation + GBNF
 │  ├─ kb/api.ts              typed wrappers over the Rust ug bridge + hit dedupe
-│  ├─ state/                 zustand stores: chat, kb, persona, theme, layout, ui (persisted where noted)
+│  ├─ state/                 zustand stores: chat, kb, tools, persona, theme, layout, ui (persisted where noted)
 │  ├─ screens/, shell/, components/
 │  ├─ theme/tokens.css       ALL colors, both themes
 │  ├─ mock/workflows.ts      data for the simulated Workflows screens
@@ -80,7 +85,8 @@ Andai/
 │  ├─ src/lib.rs             app setup, navigation lock, drop → file grants
 │  ├─ src/ui_server.rs       loopback server for the release UI (http://localhost:14230)
 │  ├─ src/grants.rs          which files the webview may ingest (drop / Rust dialog only)
-│  ├─ src/ug.rs              knowledge bases → `ug gen/search/list/remove` CLI
+│  ├─ src/ug.rs              knowledge bases → `ug gen/search/list/remove` CLI; KB kind
+│  ├─ src/tools.rs           agent tool calls: closed enum → validated argv → ug (scrubbed env, 20 s, 256 KB)
 │  ├─ build.rs               app command manifest (ACL)
 │  └─ capabilities/default.json
 ├─ docs/                     user-facing docs (features.md, …) — index in docs/README.md
@@ -90,10 +96,28 @@ Andai/
 └─ scripts/                  copy-wllama (postinstall), e2e runner, perf runner
 ```
 
-**Data flow of a turn:** `runTurn` → `kbSearch` (Rust → `ug search --json`) →
-`dedupeHits` → `buildSystem` + `buildHistory` → `engine.chat` (wllama stream) →
-the message trace in the chat store drives the reasoning chips and the
-Execution Trace.
+**Data flow of a turn (agent mode, a KB selected):** `runTurn` → `runAgent`:
+[`decide` (llm/decide.ts, decision slot or chat model) → `fillArgs` (chat
+model, GBNF from the tool schema) → `validate` → policy gate (Auto / Ask →
+approval card) → `kbTool` (Rust `kb_tool` → `ug <cmd> --json`) →
+`tool.observe`] × up to `maxSteps` → `buildSystem` (tool results fenced as
+passages) + `buildHistory` → `engine.chat` → answer. Every decision and call
+is written to `Message.agent`, which drives the tool chips, approval cards and
+the Execution Trace. **Agent mode off, or no KB:** `runTurn` → `kbSearch` (one
+`ug search` with the question) → `buildSystem` → `engine.chat`.
+
+**Agent design (why it is shaped this way).** Small local models can't be
+trusted to write tool calls free-form, so the model never names a tool: it
+picks a letter from a list (`decide`), which is always valid and yields a
+probability per option for the trace. Arguments are the only free text, and
+they are held to a grammar, validated in TS, then validated again in Rust,
+which is the trust boundary. When a decision can't be trusted (it failed,
+chose something not offered, or is below `minConfidence`), the loop falls
+back to what the fixed pipeline does: one plain search, then answer. Tools
+are offered by KB kind (`KbKind`: code tools only for code/mixed). Read-only
+tools default to *Auto* (a product decision, 2026-09-26: they only read the
+KB the user selected, and every call is traced); anything with another risk
+level defaults to *Ask*.
 
 ### Hard-won platform facts (don't re-learn these)
 
@@ -158,6 +182,27 @@ Execution Trace.
   when you parse an API response.
 - **wllama loads single GGUF files up to 2 GB.** Larger models need gguf-split
   shards; `models.test.ts` enforces the limit.
+- **wllama's chat logprobs are the raw next-token distribution** (wllama
+  3.6.1, measured in the app). `top_logprobs` lists every option letter when
+  the prompt asks for one; a logit bias doesn't change the reported values;
+  and `post_sampling_probs: true` makes the reply carry **no** `top_logprobs`.
+  So `decide` sends a letter grammar and reads raw logprobs. A letter missing
+  from the top 20 is bounded at the lowest listed value and flagged.
+- **This wllama build can't turn a JSON Schema into a grammar.**
+  `response_format: {type: 'json_schema'}` and `json_schema` both fail with
+  "Failed to initialize samplers"; a `grammar` (GBNF) string works. Tool
+  arguments therefore use `schemaGrammar()` (agent/tools/validate.ts).
+- **Qwen3 0.6B's choices hinge on the option wording** (5 requests × 3
+  orders): an *answer* option mentioning "general knowledge" won 9/9
+  knowledge questions; the narrower wording in `loop.ts` scored 15/15 with
+  *answer* as option A, 12/15 as the last option, 11/15 shuffled. After a
+  search that found passages, it re-picked search 9/9 times while search was
+  still offered and answered 9/9 once it wasn't, hence `offered()` in
+  `loop.ts`. Re-measure (a throwaway `VITE_SMOKE` probe) before rewording
+  options.
+- **ug's lookups fail with the useful message in stdout JSON** (`"error":
+  "No symbol named …, try find_symbols"`) and exit 1 with a bare `error:` on
+  stderr. `tools::run` surfaces the JSON message.
 
 ---
 
@@ -166,8 +211,9 @@ Execution Trace.
 | Area | Status | Where |
 |---|---|---|
 | Chat, streaming, stop, think folding | Real | `llm/engine.ts`, `agent/turn.ts` |
-| Reasoning chips, Execution Trace, stats | Real (actual step timings, tokens, tok/s) | `agent/turn.ts` |
+| Reasoning chips, Execution Trace, stats | Real (actual step timings, tokens, tok/s; every decision and tool call) | `agent/turn.ts`, `agent/loop.ts`, `screens/AgentTrace.tsx` |
 | Knowledge bases: create, ingest, index, search, delete | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts` |
+| Agent tool loop: decisions, 8 ug tools, per-tool policy, approvals, decision model, Tools screen | Real | `agent/loop.ts`, `agent/tools/`, `llm/decide.ts`, `state/tools.ts`, `screens/Tools.tsx`, `src-tauri/src/tools.rs` |
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |
 | Appearance (system / light / dark) | Real | `state/theme.ts` |
@@ -236,6 +282,27 @@ section and FAQ (see §8).
 - No new runtime network dependencies (§1.4). Anything with native code needs
   a human decision (§1.10).
 
+### Git: work on `main`, share it with other agents
+- **Commit on `main`.** Don't create a branch, worktree or PR unless a human
+  asked for one or confirmed it first. This overrides any default of
+  "branch first".
+- **Other agents may be changing `main` at the same time**, in this checkout
+  or another one. The working tree and the index may hold their uncommitted
+  work, so:
+  - Stage only the files you changed, by path (`git add <paths>`). Never use
+    `git add -A`, `git add .` or `git commit -a`, and never `git reset`,
+    `git stash`, `git checkout -- <file>` or `git clean` on changes you didn't
+    make.
+  - Run `git status` before committing. If a file you need already has
+    someone else's changes in it, commit only your hunks or ask the human.
+    Don't revert or "fix" their work.
+  - Before pushing, run `git pull --rebase`, then re-run the checks your change
+    needs. Never force-push `main`. If the rebase conflicts with another
+    agent's work, resolve it only when the intent of both sides is clear.
+    Otherwise stop and ask.
+  - Keep commits small and self-contained (§1.9), so concurrent work
+    rebases cleanly.
+
 ---
 
 ## 5. Commands
@@ -291,8 +358,8 @@ command with `rtk proxy` to see the raw output.
 
 | Layer | Tool | Location | Covers |
 |---|---|---|---|
-| Unit | Vitest | `src/**/*.test.ts` | pure logic: prompt assembly, think split, hit dedupe, theme resolution, formatting, model catalog |
-| Orchestration | Vitest + `vi.mock` | `src/agent/turn.test.ts`, `src/state/kb.test.ts` | turn step transitions, failure paths, abort, history; KB actions against a mocked Rust bridge |
+| Unit | Vitest | `src/**/*.test.ts` | pure logic: prompt assembly, agent state, think split, hit dedupe, decision readout, schema validation + GBNF, ug output readers, theme resolution, formatting, model catalog |
+| Orchestration | Vitest + `vi.mock` | `src/agent/turn.test.ts`, `src/state/kb.test.ts` | turn step transitions, failure paths, abort, history; the agent loop with a scripted decider (fallbacks, approval, denial, repeat guard, step limit); KB actions against a mocked Rust bridge |
 | Component | Testing Library (jsdom) | `src/**/*.test.tsx` | user-visible behavior, queried by role/text |
 | Guards | Vitest | `tests/unit/` | design-token and Tauri ACL invariants |
 | Rust unit | `cargo test` | `src-tauri/src/ug.rs` | ingestion, validation, status derivation, serialization |
@@ -508,6 +575,8 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Model downloads pinned to a commit and verified (size + sha256) before load; mismatch → removed | `llm/models.ts`, `llm/integrity.ts`, `engine.loadModel` | `integrity.test.ts` (FIPS vectors, tamper), `engine.test.ts` (gate), `models.test.ts` (pinning); e2e logs the check |
 | Pre-pinning model copies removed only after the user confirms | `engine.removeLegacyCopies`, Settings | `Settings.test.tsx` |
 | Retrieved passages fenced as untrusted data; a passage can't close its fence | `agent/prompt.ts` | `prompt.test.ts` |
+| Agent tools: closed enum, no unknown fields, flag-like and KB-escaping args rejected (incl. symlinks), scrubbed env, 20 s kill, 256 KB cap, one KB's project only | `tools.rs` | Rust unit tests; `test:ug` runs every tool against real ug; e2e |
+| Tools registered in code only; read-only by default Auto, other risks default Ask; Off is never offered; Ask waits for approval; every call traced | `agent/tools/registry.ts`, `agent/loop.ts`, `state/tools.ts` | `tools.test.ts`, `turn.test.ts` |
 | No known vulnerabilities in shipped dependencies | `bun run audit`, `ci.yml` (audit job), `release.yml` (verify) | CI |
 
 `ANDAI_SMOKE` and `ANDAI_E2E_FILES` are read from the environment by Rust. The
@@ -532,6 +601,9 @@ webview can't set them. Only the e2e runner does.
       check). Move the old URL into `legacyUrls`.
 - [ ] Retrieved or user-supplied text goes to the model through
       `buildSystem`'s fences, never spliced into instructions.
+- [ ] New agent tool: a `ToolCall` variant validated in `tools.rs`, a `risk`
+      level, a policy default from `defaultPolicy`, and an `observe` that
+      tolerates any output shape (`tools.test.ts` feeds it junk).
 
 ### Known advisories
 
@@ -547,9 +619,12 @@ them when bumping Tauri.
 - **Encryption at rest** (needs a human decision, §1.10): a Keychain-held key,
   chats moved to an encrypted file owned by Rust, and encrypted KB copies, with
   a one-time migration behind a confirm step.
-- **Gate for promoting simulated features (§3):** before any tool or workflow
-  becomes real, every model-initiated action needs explicit user approval in
-  the UI, a per-tool capability, and an entry in the Execution Trace.
+- **Gate for new tools and workflows (§3):** every model-initiated action has
+  a per-tool policy (*Auto / Ask / Off*) and an entry in the Execution Trace
+  (done for the ug tools). The read-only ug tools default to *Auto* by
+  product decision (2026-09-26). Any tool that writes, or reaches beyond the
+  selected knowledge base, must default to *Ask* (`registry.defaultPolicy`)
+  and needs its own §9 review before it ships.
 - **Code signing and notarization:** the workflow is ready (§7); it needs the
   Apple secrets.
 

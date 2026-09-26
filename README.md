@@ -1,25 +1,66 @@
-# Andai — a local-first AI agent
+# Andai — a local-first agentic RAG agent
 
 > Contributors and coding agents: read **[AGENTS.md](AGENTS.md)** first. It has the grounding rules, architecture, conventions and testing strategy.
 > Users: see **[docs/features.md](docs/features.md)** and the product site in **[docs/andai-website/](docs/andai-website/index.html)**.
 
-Andai merges two demos into one desktop app:
+Andai is a desktop AI agent that answers from **your own knowledge bases**, and the
+model runs on your Mac. It does *agentic* RAG: instead of pasting the top-k
+chunks into a prompt, the agent works its knowledge base with tools. It searches,
+reads the lines around a hit, outlines a file, or follows a code symbol to its
+callers until it has enough evidence. Then it writes an answer that cites every
+passage it used.
 
-- **wllama-chat**, llama.cpp compiled to WebAssembly. Here it serves as the on-device LLM.
-- **gpuix-demo**. Only its UX ideas carried over; the UI runtime is Tauri (see *Why Tauri*).
-- **ug** is the knowledge engine. It turns your documents into a searchable knowledge graph used for GraphRAG.
+- **wllama** (llama.cpp compiled to WebAssembly) is the on-device LLM. It
+  writes the answers and makes the agent's decisions.
+- **[ug](https://github.com/shoocstorm/ug)** is the knowledge engine and the agent's toolbox. It turns documents
+  and code into a local knowledge graph, and its commands (`search`,
+  `get_code`, `file_context`, `context`, `find_usages`, …) are the tools the
+  agent calls.
+- **Tauri** hosts the UI. The UX ideas come from the earlier gpuix demo (see *Why Tauri*).
 
 Nothing leaves the machine. The one exception is the first model download from Hugging Face.
+
+### How a turn works
+
+With a knowledge base selected, each question runs the **agent loop**
+(`agent/loop.ts`):
+
+1. **Decide.** The model picks the next action (a ug tool, *answer now* or
+   *ask a clarifying question*) from a lettered list. It doesn't write the
+   choice: one forward pass is read out as a probability per option
+   (SemIf-style, `llm/decide.ts`). An optional, separate *decision model* can
+   do this while a smaller model writes.
+2. **Fill arguments.** The model writes the tool's arguments as JSON, held to
+   the tool's schema by a grammar. This is where the question becomes a search
+   phrase (or a symbol name, a file, a line range).
+3. **Gate and run.** The tool's policy applies (*Auto / Ask / Off*); *Ask*
+   shows an approval card. Rust re-validates the call and runs ug.
+4. **Observe**, then decide again, for up to *N* calls. The answer is then
+   written from everything the tools returned, cited as `[n]`.
+
+| | |
+|---|---|
+| Tools | 8 read-only ug tools, offered by knowledge-base kind (documents, code, mixed) |
+| Control | Per-tool policy, step limit, minimum confidence, one plain search as the fallback when a decision can't be trusted, and agent mode off → the fixed pipeline (one `ug search` with the question, then answer) |
+| Transparency | Every decision (all options and their probabilities) and every tool call (arguments, approval, ug command, timing, output) in the Execution Trace, copyable as JSON |
+
+Tools are registered in code only: no plugins, no MCP, nothing the webview can
+add. Rust re-validates every call and runs ug read-only, scoped to one
+knowledge base, time-boxed and output-capped (see [AGENTS.md §9](AGENTS.md#9-security)).
 
 ```
 Andai (Tauri 2)
 ├─ src/                 React 19 + Vite UI
 │  ├─ llm/engine.ts     wllama in the webview: load / cache / stream (compat build on WKWebView)
-│  ├─ agent/turn.ts     one agent turn: analyze → ug retrieval → prompt assembly → generate
+│  ├─ llm/decide.ts     choice-based decisions: lettered options → one-pass probability readout
+│  ├─ agent/turn.ts     one turn: agent loop (or the fixed search) → prompt assembly → generate
+│  ├─ agent/loop.ts     decide → fill arguments → gate → run tool → observe
+│  ├─ agent/tools/      tool registry, the 8 ug tools, argument filling, schema validation
 │  ├─ state/            zustand stores: chat, knowledge bases, persona, ui
-│  └─ screens/          Command Center, Knowledge, Persona, Settings, Workflows (mock), Workflow Detail (mock)
+│  └─ screens/          Command Center, Knowledge, Tools, Persona, Settings, Workflows (mock), Workflow Detail (mock)
 └─ src-tauri/
    ├─ src/ug.rs         knowledge bases: shells out to `ug gen / search / list / remove`
+   ├─ src/tools.rs      agent tool calls: validated, read-only ug commands, time-boxed and capped
    └─ src/lib.rs        app setup; release builds serve the UI from http://localhost:14230
 ```
 
@@ -40,16 +81,18 @@ Requirements:
 First launch:
 1. In **Settings → Models**, load **Qwen3 0.6B**. It is a 639 MB one-time download, cached in the webview's OPFS; a cached load takes about 1 s.
 2. In **Knowledge**, create a knowledge base and drop in PDFs, Markdown, TXT, CSV or source files.
-3. Chat in **Command Center**. The knowledge-base chip in the composer picks which KB grounds the answers.
+3. Chat in **Command Center**. The knowledge-base chip in the composer picks which KB the agent works from.
+4. Optional: **Tools** (`⌘5`) shows every tool and its policy; **Settings → Decision model** loads a second model (e.g. Qwen3 1.7B) to make the agent's choices.
 
 ## What's real and what's simulated
 
 | Area | Status |
 |---|---|
 | Chat, streaming, `<think>` folding, stop | **Real**: wllama `createChatCompletion` |
-| Reasoning chips and Execution Trace | **Real**: each step of `agent/turn.ts`, with timings, hits and tok/s |
+| Reasoning chips and Execution Trace | **Real**: each step of the turn, every decision and tool call, with timings, hits and tok/s |
 | Knowledge bases (create, ingest, re-index, remove, delete) | **Real**: `ug gen --with-embed`, with progress streamed from ug |
 | RAG retrieval (K, context budget) | **Real**: `ug search --snippets --json`; hits are cited as `[n]` |
+| Agentic tool loop (model-chosen ug tools, per-tool policy, approvals) | **Real**: `agent/loop.ts`, `llm/decide.ts`, `src-tauri/src/tools.rs` |
 | Persona (prompt, tone, temperature, max tokens, reasoning) | **Real**, persisted. *Auto-optimize* rewrites the prompt with the local model |
 | Model registry (download, load, unload, evict) | **Real**: wllama `ModelManager` |
 | Workflows, approvals, tool library, node editor, run simulation | **Simulated**: mock data in `src/mock/workflows.ts` |
@@ -114,4 +157,4 @@ checks WCAG-AA contrast for the light theme.
 
 ## Shortcuts
 
-`⌘K` focuses the composer · the top-bar sun/moon button cycles the theme · `⌘1–4` switch screens · `⌘B` collapses the sidebar · `⌘J` shows/hides the Execution Trace · `⌘,` opens Settings · `Enter` sends · `Shift+Enter` adds a newline · `Esc` stops generating.
+`⌘K` focuses the composer · the top-bar sun/moon button cycles the theme · `⌘1–5` switch screens · `⌘B` collapses the sidebar · `⌘J` shows/hides the Execution Trace · `⌘,` opens Settings · `Enter` sends · `Shift+Enter` adds a newline · `Esc` stops generating.

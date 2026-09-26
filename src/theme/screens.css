@@ -1803,6 +1803,295 @@ tr:hover .kn-remove {
   margin: 16px 0 6px;
 }
 
+/* ── agent trace (AgentTrace.tsx) ─────────────────────────────────────── */
+.ag-subs {
+  gap: 10px;
+}
+.ag-step .trace-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 14.5px;
+}
+.ag-args {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.ag-note {
+  color: var(--amber);
+}
+.ag-toggle {
+  margin-top: 8px;
+}
+.ag-details {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.ag-decision-head,
+.ag-seed,
+.ag-small {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ag-bars {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ag-bars li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(36px, 0.6fr) 46px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.ag-bars li.chosen {
+  color: var(--text);
+  font-weight: 600;
+}
+.ag-bar-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ag-bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--inset);
+  overflow: hidden;
+}
+.ag-bar-track i {
+  display: block;
+  height: 100%;
+  background: var(--text-4);
+}
+.ag-bars li.chosen .ag-bar-track i {
+  background: var(--violet);
+}
+.ag-bar-value {
+  text-align: right;
+  font-size: 11.5px;
+}
+.ag-call {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ag-field .label {
+  margin-bottom: 4px;
+}
+.ag-field-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ag-step-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ag-pre {
+  margin: 0;
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font: 400 11.5px/1.55 var(--font-mono);
+  color: var(--code-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+.ag-out {
+  max-height: 340px;
+}
+.ag-err {
+  color: var(--red);
+}
+.ag-raw summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-3);
+  margin: 6px 0 4px;
+}
+.ag-approval {
+  margin: 10px 0 4px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  border-left: 4px solid var(--amber);
+  border-radius: var(--r-md);
+  background: var(--amber-soft);
+}
+.ag-approval-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ag-approval p {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+.ag-approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ── tools screen (Tools.tsx) ─────────────────────────────────────────── */
+.tl-top {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+.tl-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.tl-row.col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.tl-row-head {
+  display: flex;
+  justify-content: space-between;
+}
+.tl-row-title {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.tl-small {
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.tl-rules {
+  margin: 0 0 14px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+.tl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px;
+}
+.tl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 22px;
+  transition: opacity 0.2s;
+}
+.tl-card.off {
+  opacity: 0.55;
+}
+.tl-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tl-card-top h3 {
+  margin: 0;
+  flex: 1;
+  font: 600 16px/1.3 var(--font-display);
+}
+.tl-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.tl-kinds {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tl-field .label {
+  margin-bottom: 4px;
+}
+.tl-cmd {
+  display: block;
+  font: 400 11.5px/1.5 var(--font-mono);
+  color: var(--code-text);
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 6px 9px;
+  overflow-wrap: anywhere;
+}
+.tl-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* decision model (Settings) and KB kind (Knowledge) */
+.st-decider {
+  margin-top: 20px;
+}
+.st-decider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.st-decider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--inset);
+}
+.kn-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.kn-kind select {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--inset);
+  color: var(--text);
+  font: 500 12.5px var(--font-body);
+}
+
+@media (max-width: 1100px) {
+  .tl-top {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1500px) {
   .wd-minimap {
     display: none;
@@ -1888,3 +2177,16 @@ tr:hover .kn-remove {
   background: linear-gradient(135deg, #2f6fe0 50%, #7db4ff 50%);
 }
 /* theme-literal: end */
+
+/* copy buttons in the thread */
+.cc-answer-meta .copy-btn {
+  margin-left: 6px;
+}
+.cc-error {
+  position: relative;
+}
+.cc-error > .copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}

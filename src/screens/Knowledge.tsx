@@ -17,8 +17,8 @@ import {
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { Bar, Modal, Segmented, Slider, fmtAgo, fmtBytes } from '../components/ui';
-import { inTauri, kbPickFiles, type KbInfo, type Source } from '../kb/api';
-import { addFiles, createKb, deleteKb, indexKb, removeSource, useKb } from '../state/kb';
+import { inTauri, kbPickFiles, type KbInfo, type KbKind, type Source } from '../kb/api';
+import { addFiles, createKb, deleteKb, indexKb, removeSource, setKind, useKb } from '../state/kb';
 import { toast, useUi } from '../state/ui';
 
 export async function pickFiles(title: string): Promise<string[]> {
@@ -199,6 +199,7 @@ function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) {
         </span>
         <span className="pill violet">Total: {kb.sources.length}</span>
         <span className="pill blue">Healthy: {healthy}</span>
+        <KindPicker kb={kb} />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button
             className={`btn sm ${grounding === kb.slug ? 'secondary' : 'ghost'}`}
@@ -273,6 +274,36 @@ function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) {
       )}
     </div>
   );
+}
+
+const KIND_LABEL: Record<KbKind, string> = { document: 'Documents', code: 'Code', mixed: 'Mixed' };
+
+/**
+ * What the knowledge base holds decides which agent tools it gets (code
+ * navigation only for code). Derived from the sources unless overridden.
+ */
+function KindPicker({ kb }: { kb: KbInfo }) {
+  return (
+    <label className="kn-kind" title="Decides which agent tools apply: code tools need code">
+      <span className="label">Kind</span>
+      <select
+        aria-label="Knowledge base kind"
+        value={kb.kindOverride ?? 'auto'}
+        onChange={(e) => void setKind(kb.slug, e.target.value === 'auto' ? null : (e.target.value as KbKind))}
+      >
+        <option value="auto">Auto · {KIND_LABEL[kb.kindOverride ? deriveLabel(kb) : kb.kind]}</option>
+        <option value="document">Documents</option>
+        <option value="code">Code</option>
+        <option value="mixed">Mixed</option>
+      </select>
+    </label>
+  );
+}
+
+/** Same rule as `derive_kind` in src-tauri/src/ug.rs, to label the Auto option while an override is set. */
+function deriveLabel(kb: KbInfo): KbKind {
+  const code = kb.sources.filter((s) => s.kind === 'CODE').length;
+  return code === 0 ? 'document' : code === kb.sources.length ? 'code' : 'mixed';
 }
 
 function SyncStatus({ status }: { status: string }) {

@@ -11,6 +11,9 @@ export type Source = {
   status: 'pending' | 'indexed' | 'failed';
 };
 
+/** What a KB holds; decides which agent tools apply (src-tauri/src/ug.rs `KbKind`). */
+export type KbKind = 'document' | 'code' | 'mixed';
+
 export type KbInfo = {
   slug: string;
   name: string;
@@ -18,8 +21,11 @@ export type KbInfo = {
   sources: Source[];
   lastIndexedAt: number | null;
   lastError: string | null;
+  /** The user's override; null when `kind` is derived from the sources. */
+  kindOverride: KbKind | null;
   dir: string;
   status: 'empty' | 'pending' | 'indexing' | 'ready' | 'failed';
+  kind: KbKind;
   nodes: number;
   edges: number;
   sizeBytes: number;
@@ -60,6 +66,31 @@ export const kbAddFiles = (slug: string, paths: string[]) =>
 export const kbRemoveSource = (slug: string, file: string) => call<KbInfo>('kb_remove_source', { slug, file });
 export const kbDelete = (slug: string) => call<void>('kb_delete', { slug });
 export const kbIndex = (slug: string) => call<KbInfo>('kb_index', { slug });
+
+export const kbSetKind = (slug: string, kind: KbKind | null) => call<KbInfo>('kb_set_kind', { slug, kind });
+
+/** One read-only ug tool call; mirrors `ToolCall` in src-tauri/src/tools.rs, which re-validates it. */
+export type KbToolCall =
+  | { tool: 'kb_search'; query: string; k: number; expand: boolean; max_chars: number }
+  | { tool: 'kb_find_symbols'; names: string[]; node_type: string | null; file_prefix: string | null }
+  | { tool: 'kb_symbol_context'; symbol: string; max_chars: number }
+  | { tool: 'kb_get_code'; symbol: string | null; file: string | null; start: number | null; end: number | null }
+  | { tool: 'kb_find_usages'; symbol: string }
+  | { tool: 'kb_file_context'; file: string; max_chars: number }
+  | { tool: 'kb_overview' };
+
+export type KbToolOutput = {
+  /** ug's JSON, or its clipped text when the output was cut at the cap. */
+  output: unknown;
+  truncated: boolean;
+  bytes: number;
+  ms: number;
+  /** The ug arguments as run. */
+  argv: string[];
+};
+
+export const kbTool = (slug: string, toolCall: KbToolCall) =>
+  call<KbToolOutput>('kb_tool', { slug, call: toolCall });
 
 export async function kbSearch(slug: string, query: string, k: number, maxChars: number): Promise<SearchHit[]> {
   const res = await call<{ items?: SearchHit[] }>('kb_search', { slug, query, k, maxChars });

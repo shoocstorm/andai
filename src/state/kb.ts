@@ -9,8 +9,10 @@ import {
   kbIndex,
   kbList,
   kbRemoveSource,
+  kbSetKind,
   ugStatus,
   type KbInfo,
+  type KbKind,
   type UgStatus,
 } from '../kb/api';
 import { toast } from './ui';
@@ -147,6 +149,15 @@ export async function deleteKb(slug: string) {
     toast({ tone: 'info', title: 'Knowledge base deleted' });
   } catch (e) {
     toast({ tone: 'error', title: 'Could not delete', body: errText(e) });
+  }
+}
+
+/** Overrides what the KB is taken to hold (null: derive it from the sources); decides which agent tools apply. */
+export async function setKind(slug: string, kind: KbKind | null) {
+  try {
+    upsert(await kbSetKind(slug, kind));
+  } catch (e) {
+    toast({ tone: 'error', title: 'Could not change the knowledge base kind', body: errText(e) });
   }
 }
 

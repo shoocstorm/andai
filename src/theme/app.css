@@ -875,3 +875,28 @@ select.field {
   border-radius: 4px;
   padding: 3px 5px;
 }
+
+/* copy-to-clipboard icon (components/ui.tsx CopyButton) */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.copy-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--raised);
+}
+.copy-btn.done {
+  color: var(--green);
+}

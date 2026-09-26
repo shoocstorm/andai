@@ -17,6 +17,12 @@ export type ModelDef = {
   /** Qwen3-style `<think>` support, toggled by `enable_thinking`. */
   thinking: boolean;
   n_ctx: number;
+  /**
+   * Can score decisions (llm/decide.ts): a chat model that answers a lettered
+   * choice with the letter. Every readout still checks that each letter was
+   * scored, so a model that can't fails closed.
+   */
+  decider?: boolean;
 };
 
 // A commit URL always serves the same bytes; `main` can be moved under us.
@@ -36,6 +42,7 @@ export const MODELS: ModelDef[] = [
     note: 'Fast default. Good for grounded Q&A over your knowledge base.',
     thinking: true,
     n_ctx: 4096,
+    decider: true,
   },
   {
     id: 'qwen3-1.7b',
@@ -49,6 +56,7 @@ export const MODELS: ModelDef[] = [
     note: 'Noticeably smarter, about half the speed. Best answers on a fast Mac.',
     thinking: true,
     n_ctx: 4096,
+    decider: true,
   },
   {
     id: 'stories-260k',

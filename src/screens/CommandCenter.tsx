@@ -25,8 +25,10 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { available, policyOf } from '../agent/tools/registry';
 import { runTurn, stopTurn } from '../agent/turn';
-import { Bar, Markdown, Stat, fmtTime } from '../components/ui';
+import { Bar, CopyButton, Markdown, Stat, fmtTime } from '../components/ui';
+import { debugReport } from '../agent/debugReport';
 import { inTauri } from '../kb/api';
 import { loadModel, useEngine } from '../llm/engine';
 import { MODELS, modelById } from '../llm/models';
@@ -34,7 +36,9 @@ import { clearChat, splitThink, useChat, type Message, type TraceStep } from '..
 import { addFiles, createKb, useKb } from '../state/kb';
 import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
+import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
+import { AgentStepCard, ApprovalCard, CopyTraceButton, ToolChips } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 
 export const composerRef: { current: HTMLTextAreaElement | null } = { current: null };
@@ -42,6 +46,7 @@ export const composerRef: { current: HTMLTextAreaElement | null } = { current: n
 const STEP_STYLE: Record<TraceStep['kind'], { color: string; icon: typeof Search }> = {
   analyze: { color: 'var(--blue)', icon: BarChart3 },
   retrieve: { color: 'var(--violet)', icon: Search },
+  plan: { color: 'var(--violet)', icon: Wrench },
   build: { color: 'var(--blue)', icon: Network },
   generate: { color: 'var(--amber)', icon: Code2 },
 };
@@ -146,7 +151,7 @@ function Thread({
   useLayoutEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [messages.length, last?.content, last?.steps]);
+  }, [messages.length, last?.content, last?.steps, last?.agent]);
 
   if (!messages.length) return <EmptyHub />;
 
@@ -166,6 +171,7 @@ function Thread({
           ) : m.role === 'error' ? (
             <div key={m.id} className="cc-error">
               <Markdown text={m.content} />
+              <CopyButton text={m.content} label="Copy error" />
             </div>
           ) : (
             <AssistantMsg key={m.id} m={m} focused={m.id === focusedId} onFocus={() => onFocus(m.id)} />
@@ -218,7 +224,11 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
             );
           })}
         </AnimatePresence>
+        <ToolChips m={m} />
       </div>
+      {m.agent
+        ?.filter((a) => a.call?.status === 'awaiting')
+        .map((a) => <ApprovalCard key={a.id} s={a} />)}
 
       {(answer || thinking || waiting || m.stopped) && (
         <motion.div className="cc-answer" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
@@ -262,11 +272,36 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
             {fmtTime(m.createdAt)} · {m.stats?.model ?? 'Andai'}
             {m.stats && ` · ${m.stats.tokens} tok · ${m.stats.tokPerSec.toFixed(1)} tok/s`}
             {m.stopped && ' · stopped'}
+            <CopyButton text={() => reportFor(m)} label="Copy debug report" />
           </div>
         </motion.div>
       )}
     </div>
   );
+}
+
+/** The user question a reply answers. */
+function questionFor(m: Message): string {
+  const msgs = useChat.getState().messages;
+  const i = msgs.findIndex((x) => x.id === m.id);
+  for (let j = i - 1; j >= 0; j--) if (msgs[j].role === 'user') return msgs[j].content;
+  return '';
+}
+
+/** A turn as plain text with the current setup (agent/debugReport.ts), read at click time. */
+function reportFor(m: Message): string {
+  const e = useEngine.getState();
+  const t = useTools.getState();
+  const k = useKb.getState();
+  const kb = k.kbs.find((x) => x.name === m.kbName) ?? null;
+  return debugReport(m, questionFor(m), {
+    chatModel: modelById(e.loadedId)?.name ?? null,
+    deciderModel: modelById(e.decider.loadedId)?.name ?? null,
+    engine: e.info ? `${e.info.backend} · ${e.info.threads} threads${e.info.compat ? ' · compat' : ''}` : null,
+    ug: k.ug?.version ?? null,
+    agent: { agentMode: t.agentMode, maxSteps: t.maxSteps, minConfidence: t.minConfidence, policies: t.policies },
+    kb,
+  });
 }
 
 function chipText(s: TraceStep) {
@@ -275,6 +310,8 @@ function chipText(s: TraceStep) {
       return `Analyzing query: ${s.detail.replace(/^Identifying/, 'identifying')}`;
     case 'retrieve':
       return s.status === 'running' ? s.detail : `Searching knowledge base: ${s.detail}`;
+    case 'plan':
+      return s.status === 'running' ? `Planning: ${s.detail}` : `Plan complete: ${s.detail}`;
     case 'build':
       return `Assembling context: ${s.detail}`;
     case 'generate':
@@ -372,8 +409,7 @@ function EmptyHub() {
 
 // ── composer ─────────────────────────────────────────────────────────────
 
-const TOOLS = [
-  { id: 'kb', icon: Database, name: 'Knowledge search', sub: 'ug GraphRAG · live', live: true },
+const SIMULATED_TOOLS = [
   { id: 'py', icon: Code2, name: 'Python interpreter', sub: 'Simulated in this build', live: false },
   { id: 'web', icon: Globe, name: 'Web search', sub: 'Simulated in this build', live: false },
   { id: 'mail', icon: Mail, name: 'Email dispatcher', sub: 'Requires approval · simulated', live: false },
@@ -387,6 +423,10 @@ function Composer() {
   const name = usePersona((s) => s.agentName);
   const { kbs, grounding } = useKb();
   const kb = kbs.find((k) => k.slug === grounding);
+  const policies = useTools((s) => s.policies);
+  const agentMode = useTools((s) => s.agentMode);
+  const go = useUi((s) => s.go);
+  const kbTools = available(kb?.kind ?? 'document', policies);
   const ta = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -434,22 +474,54 @@ function Composer() {
           </button>
           {menu === 'tools' && (
             <Menu onClose={() => setMenu(null)}>
-              {TOOLS.map((t) => (
+              <div className="menu-item sub" aria-hidden>
+                {agentMode
+                  ? kb
+                    ? `The agent picks from these tools for “${kb.name}” (${kb.kind})`
+                    : 'Select a knowledge base to give the agent its tools'
+                  : 'Agent mode is off: each question runs one knowledge search'}
+              </div>
+              {kbTools.map((t) => (
                 <button
                   key={t.id}
                   className="menu-item"
                   onClick={() => {
                     setMenu(null);
-                    if (t.live) setMenu('kb');
-                    else toast({ tone: 'info', title: `${t.name} is simulated`, body: 'Tool routing is mocked in this build — see Workflows.' });
+                    go('tools');
                   }}
                 >
-                  <t.icon size={16} color={t.live ? 'var(--violet)' : 'var(--text-3)'} />
+                  <Wrench size={16} color="var(--violet)" />
+                  <div style={{ flex: 1 }}>
+                    <div>{t.title}</div>
+                    <div className="sub">{t.option}</div>
+                  </div>
+                  <span className="pill violet">{policyOf(t, policies) === 'ask' ? 'Ask' : 'Auto'}</span>
+                </button>
+              ))}
+              <button
+                className="menu-item"
+                onClick={() => {
+                  setMenu(null);
+                  go('tools');
+                }}
+              >
+                <Database size={16} color="var(--blue)" />
+                <div style={{ flex: 1 }}>Manage tools…</div>
+              </button>
+              {SIMULATED_TOOLS.map((t) => (
+                <button
+                  key={t.id}
+                  className="menu-item"
+                  onClick={() => {
+                    setMenu(null);
+                    toast({ tone: 'info', title: `${t.name} is simulated`, body: 'Tool routing is mocked in this build — see Workflows.' });
+                  }}
+                >
+                  <t.icon size={16} color="var(--text-3)" />
                   <div style={{ flex: 1 }}>
                     <div>{t.name}</div>
                     <div className="sub">{t.sub}</div>
                   </div>
-                  {t.live && <span className="pill violet">Live</span>}
                 </button>
               ))}
             </Menu>
@@ -589,6 +661,8 @@ function TracePanel({ msg }: { msg?: Message }) {
       <div className="cc-head">
         <Network size={22} color="var(--blue)" />
         <h1 className="display">Execution Trace</h1>
+        {msg && <CopyButton text={() => reportFor(msg)} label="Copy debug report" size={14} />}
+        {msg && <CopyTraceButton m={msg} question={title} />}
         <span className="label cc-session" style={{ color: active ? 'var(--blue)' : undefined }}>
           <span className={`dot${active ? ' pulse' : ''}`} style={{ display: 'inline-block', marginRight: 8, color: active ? 'var(--blue)' : 'var(--text-4)' }} />
           {active ? 'Active task' : msg ? 'Last task' : 'Idle'}
@@ -600,7 +674,7 @@ function TracePanel({ msg }: { msg?: Message }) {
             <CircleDashed size={30} />
             <div>No task yet</div>
             <div style={{ fontSize: 12.5, maxWidth: 240 }}>
-              Each transmission is traced here — retrieval, context assembly and generation, step by step.
+              Each transmission is traced here — every decision and tool call, context assembly and generation, step by step.
             </div>
           </div>
         ) : (
@@ -632,7 +706,14 @@ function TracePanel({ msg }: { msg?: Message }) {
                     </div>
                   )}
                 </div>
-                {s.kind === 'retrieve' && !!msg.sources?.length && (
+                {s.kind === 'plan' && !!msg.agent?.length && (
+                  <div className="trace-subs ag-subs">
+                    {msg.agent.map((a) => (
+                      <AgentStepCard key={a.id} s={a} />
+                    ))}
+                  </div>
+                )}
+                {(s.kind === 'retrieve' || s.kind === 'plan') && !!msg.sources?.length && (
                   <div className="trace-subs">
                     {msg.sources.slice(0, 5).map((h, j) => (
                       <div key={h.id + j} className="trace-sub">

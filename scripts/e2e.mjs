@@ -124,6 +124,29 @@ if (failure || !result) {
   if (model !== 'stories-260k') {
     check('answer is grounded in the retrieved passage', /cross-origin|coop|coep/i.test(answer ?? ''), answer?.slice(0, 200));
   }
+  // Agent mode. The model's choices aren't asserted (a small model picks
+  // loosely); the machinery is: every option scored, arguments valid,
+  // ug run through the Rust boundary, and every step traced.
+  const a = result.agent ?? {};
+  if (model !== 'stories-260k') {
+    const probs = (a.decision?.options ?? []).map(([, p]) => p);
+    check(
+      'decision readout scores every option',
+      !a.decision?.error && probs.length === (a.tools?.length ?? 0) + 2 && Math.abs(probs.reduce((x, y) => x + y, 0) - 1) < 1e-6,
+      JSON.stringify(a.decision),
+    );
+    check('tool arguments come back schema-valid', a.fill?.ok === true, JSON.stringify(a.fill));
+  }
+  check('kb_tool runs ug through the Rust boundary', a.overview?.ok && a.overview.argv?.[0] === 'project_overview', JSON.stringify(a.overview));
+  check(
+    'agent turn completes with every step traced',
+    a.turn?.steps?.every((s) => s.status === 'done') && a.turn?.agent?.length > 0 &&
+      a.turn.agent.every((s) => !s.call || ['done', 'error', 'skipped'].includes(s.call.status)),
+    JSON.stringify(a.turn?.agent),
+  );
+  if (a.turn?.agent) {
+    console.log(`[e2e] agent actions: ${a.turn.agent.map((s) => `${s.action}${s.confidence != null ? `@${Math.round(s.confidence * 100)}%` : ''}${s.note ? ' (fallback)' : ''}`).join(' → ')}`);
+  }
 }
 
 // ── performance (docs/performance.md) ─────────────────────────────────────

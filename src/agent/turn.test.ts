@@ -1,5 +1,6 @@
 // The agent turn orchestrator with the LLM engine and ug mocked out: verifies
-// the step sequence the Execution Trace shows, and every failure path.
+// the step sequence the Execution Trace shows, and every failure path, for
+// both the fixed pipeline and agent mode (a scripted decider and tools).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KbInfo, SearchHit } from '../kb/api';
 import { MODELS } from '../llm/models';
@@ -14,6 +15,58 @@ const engine = vi.hoisted(() => ({
   seen: [] as { messages: { role: string; content: string }[]; opts: Record<string, unknown> }[],
 }));
 const search = vi.hoisted(() => ({ hits: [] as unknown[], fail: null as Error | null, calls: 0 }));
+type Scripted = { chosen: string; confidence?: number } | Error;
+const agent = vi.hoisted(() => ({
+  decisions: [] as Scripted[],
+  seenStates: [] as string[],
+  seenOptions: [] as string[][],
+  fills: {} as Record<string, unknown>,
+  fillFail: null as string | null,
+  fillFiles: [] as (string[] | undefined)[],
+  failTools: [] as string[],
+  tool: [] as { slug: string; call: Record<string, unknown> }[],
+  output: {} as Record<string, unknown>,
+  toolFail: null as Error | null,
+  toolDelayMs: 0,
+}));
+
+vi.mock('../llm/decide', async (orig) => ({
+  ...(await orig<typeof import('../llm/decide')>()),
+  decide: async (state: string, _question: string, options: { id: string; text: string }[]) => {
+    agent.seenStates.push(state);
+    agent.seenOptions.push(options.map((o) => o.id));
+    const next = agent.decisions.shift() ?? { chosen: 'answer_now' };
+    if (next instanceof Error) throw next;
+    const confidence = next.confidence ?? 0.9;
+    return {
+      options: options.map((o, i) => ({
+        ...o,
+        label: 'ABCDEFGHIJKLMNOP'[i],
+        probability: o.id === next.chosen ? confidence : (1 - confidence) / (options.length - 1),
+        logprob: 0,
+      })),
+      chosen: next.chosen,
+      confidence,
+      bounded: [],
+      model: 'Qwen3 1.7B',
+      slot: 'decider',
+      ms: 12,
+      promptTokens: 300,
+    };
+  },
+}));
+
+vi.mock('./tools/argfill', () => ({
+  fillArgs: async (tool: { id: string; schema: unknown }, ctx: { files?: string[] }) => {
+    agent.fillFiles.push(ctx.files);
+    if (!tool.schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null };
+    if (agent.fillFail) return { ok: false, errors: [agent.fillFail], raw: 'nope', attempts: 2, model: 'Qwen3 0.6B' };
+    // a list is consumed one fill per call
+    const f = agent.fills[tool.id];
+    const args = (Array.isArray(f) ? f.shift() : f) as Record<string, unknown>;
+    return { ok: true, args, raw: JSON.stringify(args), attempts: 1, model: 'Qwen3 0.6B' };
+  },
+}));
 
 vi.mock('../llm/engine', async () => {
   const { create } = await import('zustand');
@@ -45,9 +98,17 @@ vi.mock('../kb/api', async (orig) => ({
     if (search.fail) throw search.fail;
     return search.hits;
   },
+  kbTool: async (slug: string, call: Record<string, unknown>) => {
+    agent.tool.push({ slug, call });
+    if (agent.toolDelayMs) await new Promise((r) => setTimeout(r, agent.toolDelayMs));
+    if (agent.toolFail) throw agent.toolFail;
+    if (agent.failTools.includes(call.tool as string)) throw new Error(`No indexed file matches '${call.file}'.`);
+    return { output: agent.output[call.tool as string] ?? {}, truncated: false, bytes: 10, ms: 3, argv: ['search', 'x'] };
+  },
 }));
 
 const { runTurn, stopTurn } = await import('./turn');
+const { resolveApproval, setAgent, setPolicy, useTools } = await import('../state/tools');
 
 const kb = (over: Partial<KbInfo> = {}): KbInfo => ({
   slug: 'docs',
@@ -56,6 +117,8 @@ const kb = (over: Partial<KbInfo> = {}): KbInfo => ({
   sources: [],
   lastIndexedAt: 1,
   lastError: null,
+  kindOverride: null,
+  kind: 'document',
   dir: '/tmp/docs',
   status: 'ready',
   nodes: 12,
@@ -87,9 +150,23 @@ beforeEach(() => {
   search.calls = 0;
   useKb.setState({ kbs: [kb()], grounding: 'docs', k: 8, maxChars: 6000 });
   usePersona.getState().reset();
+  useTools.setState({ agentMode: false, maxSteps: 4, minConfidence: 0.3, policies: {}, stats: {} });
+  Object.assign(agent, {
+    decisions: [],
+    seenStates: [],
+    seenOptions: [],
+    fills: { kb_search: { query: 'wllama COOP COEP headers', scope: 'broad' }, kb_find_usages: { symbol: 'add' } },
+    fillFail: null,
+    fillFiles: [],
+    failTools: [],
+    tool: [],
+    output: { kb_search: { items: [hit] } },
+    toolFail: null,
+    toolDelayMs: 0,
+  });
 });
 
-describe('runTurn', () => {
+describe('runTurn (fixed pipeline)', () => {
   it('runs analyze → retrieve → build → generate and records the answer, sources and stats', async () => {
     await runTurn('What headers does wllama need?');
     const m = assistant();
@@ -199,3 +276,224 @@ describe('runTurn', () => {
     ]);
   });
 });
+
+describe('runTurn (agent mode)', () => {
+  beforeEach(() => setAgent({ agentMode: true }));
+  const steps = () => assistant().agent!;
+
+  it('answers without tools when the decision is to answer, and says the KB was not consulted', async () => {
+    agent.decisions = [{ chosen: 'answer_now' }];
+    await runTurn('hi there');
+    expect(agent.tool).toHaveLength(0);
+    expect(search.calls).toBe(0);
+    expect(Object.fromEntries(assistant().steps!.map((s) => [s.kind, s.status]))).toEqual({ plan: 'done', build: 'done', generate: 'done' });
+    expect(steps()).toHaveLength(1);
+    expect(steps()[0]).toMatchObject({ action: 'answer_now', decision: { chosen: 'answer_now', model: 'Qwen3 1.7B', slot: 'decider' } });
+    expect(engine.seen[0].messages[0].content).toContain('“Docs” was not consulted');
+  });
+
+  it('searches with the rewritten query, then answers grounded in the results', async () => {
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    await runTurn('What headers does wllama need?');
+    expect(agent.tool).toEqual([
+      { slug: 'docs', call: { tool: 'kb_search', query: 'wllama COOP COEP headers', k: 8, expand: true, max_chars: 6000 } },
+    ]);
+    const call = steps()[0].call!;
+    expect(call).toMatchObject({ tool: 'kb_search', status: 'done', args: { query: 'wllama COOP COEP headers' }, argv: ['search', 'x'], hits: 1 });
+    expect(call.output).toContain('serve.json adds the COOP/COEP headers');
+    expect(call.observation).toMatch(/^1 passage/);
+    expect(assistant().sources).toHaveLength(1);
+    expect(engine.seen[0].messages[0].content).toContain('[1] README.md (lines 11-33)');
+    // the second decision saw the first result
+    expect(agent.seenStates[1]).toContain('kb_search {"query":"wllama COOP COEP headers","scope":"broad"} → 1 passage');
+    expect(useTools.getState().stats.kb_search.calls).toBe(1);
+  });
+
+  it('offers only the tools that fit the knowledge base, answer first and clarify last', async () => {
+    await runTurn('q');
+    const docOptions = agent.seenOptions[0];
+    expect(docOptions[0]).toBe('answer_now');
+    expect(docOptions.at(-1)).toBe('ask_clarification');
+    expect(docOptions).not.toContain('kb_find_usages');
+    useKb.setState({ kbs: [kb({ kind: 'code' })] });
+    await runTurn('who calls add?');
+    expect(agent.seenOptions[1]).toContain('kb_find_usages');
+  });
+
+  it('never offers a tool the user switched off', async () => {
+    setPolicy('kb_search', 'off');
+    await runTurn('q');
+    expect(agent.seenOptions[0]).not.toContain('kb_search');
+  });
+
+  it('asks for approval under the Ask policy, and runs only once approved', async () => {
+    setPolicy('kb_search', 'ask');
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    const p = runTurn('headers?');
+    await vi.waitFor(() => expect(steps()[0].call?.status).toBe('awaiting'));
+    expect(agent.tool).toHaveLength(0);
+    expect(steps()[0].call!.approval).toBe('pending');
+    resolveApproval(steps()[0].id, true);
+    await p;
+    expect(agent.tool).toHaveLength(1);
+    expect(steps()[0].call).toMatchObject({ status: 'done', approval: 'approved' });
+  });
+
+  it('records a denial, tells the decider, and does not offer that tool again', async () => {
+    setPolicy('kb_search', 'ask');
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    const p = runTurn('headers?');
+    await vi.waitFor(() => expect(steps()[0].call?.status).toBe('awaiting'));
+    resolveApproval(steps()[0].id, false);
+    await p;
+    expect(agent.tool).toHaveLength(0);
+    expect(steps()[0].call).toMatchObject({ status: 'denied', approval: 'denied' });
+    expect(agent.seenStates[1]).toContain('The user declined this call');
+    expect(agent.seenOptions[1]).not.toContain('kb_search');
+  });
+
+  it('does not offer a tool again once it returned results, and switches the answer option to use them', async () => {
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    await runTurn('headers?');
+    expect(agent.seenOptions[0]).toContain('kb_search');
+    expect(agent.seenOptions[1]).not.toContain('kb_search');
+  });
+
+  it('lets an empty search be retried once, then stops offering it', async () => {
+    agent.output = { kb_search: { items: [] } };
+    agent.fills.kb_search = [
+      { query: 'first', scope: 'broad' },
+      { query: 'second', scope: 'broad' },
+    ];
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    await runTurn('headers?');
+    expect(agent.tool.map((t) => t.call.query)).toEqual(['first', 'second']);
+    expect(agent.seenOptions[1]).toContain('kb_search');
+    expect(agent.seenOptions[2]).not.toContain('kb_search');
+  });
+
+  it('treats a choice that was not offered as a failed decision', async () => {
+    setPolicy('kb_overview', 'off');
+    agent.decisions = [{ chosen: 'kb_overview' }, { chosen: 'answer_now' }];
+    await runTurn('headers?');
+    expect(steps()[0].note).toMatch(/wasn't offered/);
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
+  });
+
+  it('does not run the same call twice in a turn', async () => {
+    agent.output = { kb_search: { items: [] } };
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    await runTurn('headers?');
+    expect(agent.tool).toHaveLength(1);
+    expect(steps()[1].call).toMatchObject({ status: 'skipped' });
+    expect(steps()[1].call!.error).toMatch(/already ran at step 1/);
+  });
+
+  it('stops when the model keeps repeating a failed call, instead of looping to the step limit', async () => {
+    // Reported: "show an overview of kb1" → overview, then File outline with
+    // {"file":"kb1"} failed and was re-chosen, skipped, over and over.
+    setAgent({ maxSteps: 8 });
+    agent.failTools = ['kb_file_context'];
+    agent.fills.kb_file_context = { file: 'kb1' };
+    agent.decisions = [{ chosen: 'kb_overview' }, ...Array.from({ length: 7 }, () => ({ chosen: 'kb_file_context' }))];
+    await runTurn('show an overview of kb1');
+    expect(steps().map((s) => s.call?.status ?? s.action)).toEqual(['done', 'error', 'skipped', 'answer_now']);
+    expect(steps().at(-1)!.note).toMatch(/kept repeating/);
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_overview', 'kb_file_context']);
+  });
+
+  it('tells the argument writer which files exist: indexed sources, then files in the results', async () => {
+    const src = (file: string, status: 'indexed' | 'failed') =>
+      ({ file, original: file, kind: 'MD', bytes: 1, approxTokens: 1, addedAt: 0, status }) as const;
+    useKb.setState({ kbs: [kb({ sources: [src('notes.md', 'indexed'), src('broken.md', 'failed')] })] });
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_file_context' }, { chosen: 'answer_now' }];
+    agent.fills.kb_file_context = { file: 'README.md' };
+    await runTurn('outline the readme');
+    expect(agent.fillFiles).toEqual([['notes.md'], ['notes.md', 'README.md']]);
+  });
+
+  it('stops at the step limit and answers with what it has', async () => {
+    setAgent({ maxSteps: 2 });
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview' }, { chosen: 'kb_file_context' }];
+    agent.fills.kb_file_context = { file: 'README.md' };
+    await runTurn('everything');
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search', 'kb_overview']);
+    expect(steps().at(-1)).toMatchObject({ action: 'answer_now', decision: null });
+    expect(steps().at(-1)!.note).toMatch(/limit of 2 tool calls/);
+    expect(statusesOf(assistant()).generate).toBe('done');
+  });
+
+  it('falls back to one search when the decision is not confident enough', async () => {
+    agent.decisions = [{ chosen: 'kb_overview', confidence: 0.2 }, { chosen: 'answer_now' }];
+    await runTurn('headers?');
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
+    expect(steps()[0].note).toMatch(/Low confidence \(20% < 30%\) in “kb_overview”/);
+  });
+
+  it('falls back to the fixed search when the decision model fails, with the reason on the trace', async () => {
+    agent.decisions = [new Error('no scores for every option'), { chosen: 'answer_now' }];
+    await runTurn('headers?');
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
+    expect(steps()[0].note).toMatch(/Decision failed \(no scores for every option\)/);
+  });
+
+  it('searches with the question as written when the arguments are invalid', async () => {
+    agent.fillFail = 'query is too short';
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    await runTurn('What headers does wllama need?');
+    expect(agent.tool[0].call).toMatchObject({ query: 'What headers does wllama need?' });
+    expect(steps()[0].call!.error).toMatch(/searched with the question as written/);
+  });
+
+  it('keeps going after a tool error, then stops after repeated errors', async () => {
+    agent.toolFail = new Error('No symbol named add');
+    useKb.setState({ kbs: [kb({ kind: 'code' })] });
+    agent.decisions = [{ chosen: 'kb_find_usages' }, { chosen: 'kb_search' }, { chosen: 'kb_overview' }];
+    await runTurn('who calls add?');
+    expect(steps().map((s) => s.call?.status ?? s.action)).toEqual(['error', 'error', 'answer_now']);
+    expect(steps()[0].call!.error).toBe('No symbol named add');
+    expect(agent.seenStates[1]).toContain('kb_find_usages {"symbol":"add"} → Failed: No symbol named add');
+    expect(steps().at(-1)!.note).toMatch(/repeated tool errors/);
+    expect(statusesOf(assistant()).generate).toBe('done');
+  });
+
+  it('asks a clarifying question when that is the decision', async () => {
+    agent.decisions = [{ chosen: 'ask_clarification' }];
+    await runTurn('do the thing');
+    expect(engine.seen[0].messages[0].content).toContain('Ask the user one short clarifying question');
+  });
+
+  it('stops mid-tool when the operator aborts, leaving nothing marked running', async () => {
+    agent.toolDelayMs = 50;
+    agent.decisions = [{ chosen: 'kb_search' }];
+    const p = runTurn('headers?');
+    await vi.waitFor(() => expect(steps()[0]?.call?.status).toBe('running'));
+    stopTurn();
+    await p;
+    expect(assistant().stopped).toBe(true);
+    expect(steps()[0].call!.status).toBe('skipped');
+    expect(engine.seen).toHaveLength(0);
+  });
+
+  it('stops while waiting for approval', async () => {
+    setPolicy('kb_search', 'ask');
+    agent.decisions = [{ chosen: 'kb_search' }];
+    const p = runTurn('headers?');
+    await vi.waitFor(() => expect(steps()[0]?.call?.status).toBe('awaiting'));
+    stopTurn();
+    await p;
+    expect(steps()[0].call).toMatchObject({ status: 'skipped', approval: undefined });
+    expect(agent.tool).toHaveLength(0);
+  });
+
+  it('uses the fixed pipeline when no knowledge base grounds the chat', async () => {
+    useKb.setState({ grounding: null });
+    await runTurn('hi');
+    expect(agent.seenStates).toHaveLength(0);
+    expect(assistant().agent).toBeUndefined();
+  });
+});
+
+function statusesOf(m: ReturnType<typeof assistant>) {
+  return Object.fromEntries(m.steps!.map((s) => [s.kind, s.status]));
+}

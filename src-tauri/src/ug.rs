@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::grants::FileGrants;
 
-const PROJECT_PREFIX: &str = "andai-";
+pub(crate) const PROJECT_PREFIX: &str = "andai-";
 /// Longest search query passed to ug; anything larger is not a question.
 const MAX_QUERY_BYTES: usize = 2048;
 /// Largest file a knowledge base accepts, so one drop can't fill the disk.
@@ -58,6 +58,30 @@ pub struct KbMeta {
     pub sources: Vec<Source>,
     pub last_indexed_at: Option<u64>,
     pub last_error: Option<String>,
+    /// The user's choice of kind; `None` derives it from the sources.
+    #[serde(default)]
+    pub kind_override: Option<KbKind>,
+}
+
+/// What a knowledge base holds. It decides which agent tools apply: code
+/// navigation (symbols, callers) only makes sense over source code.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum KbKind {
+    Document,
+    Code,
+    Mixed,
+}
+
+/// Documents only → document; code only → code; both → mixed. An empty KB
+/// counts as documents.
+fn derive_kind(sources: &[Source]) -> KbKind {
+    let code = sources.iter().filter(|s| s.kind == "CODE").count();
+    match code {
+        0 => KbKind::Document,
+        n if n == sources.len() => KbKind::Code,
+        _ => KbKind::Mixed,
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -68,6 +92,8 @@ pub struct KbInfo {
     pub dir: String,
     /// empty | pending | indexing | ready | failed
     pub status: String,
+    /// `kind_override` if set, else derived from the sources.
+    pub kind: KbKind,
     pub nodes: u64,
     pub edges: u64,
     pub size_bytes: u64,
@@ -99,7 +125,7 @@ fn absolute_dirs(dirs: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
     dirs.into_iter().filter(|d| d.is_absolute()).collect()
 }
 
-fn ug_path() -> Option<PathBuf> {
+pub(crate) fn ug_path() -> Option<PathBuf> {
     let from_path = std::env::var_os("PATH")
         .map(|p| absolute_dirs(std::env::split_paths(&p)).into_iter().map(|d| d.join("ug")).collect::<Vec<_>>())
         .unwrap_or_default();
@@ -118,7 +144,7 @@ fn ug() -> Result<Command, String> {
     Ok(cmd)
 }
 
-fn strip_ansi(s: &str) -> String {
+pub(crate) fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
@@ -188,7 +214,7 @@ fn valid_slug(slug: &str) -> bool {
     !slug.is_empty() && slug.len() <= 64 && slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-fn kb_dir(app: &AppHandle, slug: &str) -> Result<PathBuf, String> {
+pub(crate) fn kb_dir(app: &AppHandle, slug: &str) -> Result<PathBuf, String> {
     if !valid_slug(slug) {
         return Err(format!("invalid knowledge base id: {slug}"));
     }
@@ -247,6 +273,7 @@ fn info(dir: &Path, meta: KbMeta, projects: &[Value], indexing: &HashSet<String>
     KbInfo {
         dir: dir.to_string_lossy().into(),
         status: status.into(),
+        kind: meta.kind_override.unwrap_or_else(|| derive_kind(&meta.sources)),
         nodes: num("nodes"),
         edges: num("edges"),
         size_bytes: num("sizeBytes"),
@@ -270,7 +297,7 @@ fn valid_source_name(file: &str) -> bool {
 /// so a query starting with `-` would be parsed as a flag (`--base-url` would
 /// send it to a remote embedder). A leading space keeps it positional and
 /// doesn't change the search (probed against ug 0.1.21, AGENTS.md §9).
-fn search_query(query: &str) -> Result<String, String> {
+pub(crate) fn search_query(query: &str) -> Result<String, String> {
     if query.len() > MAX_QUERY_BYTES {
         return Err(format!("Search query is too long (max {MAX_QUERY_BYTES} bytes)."));
     }
@@ -393,6 +420,7 @@ pub fn kb_create(app: AppHandle, name: String, indexing: State<'_, Indexing>) ->
         sources: vec![],
         last_indexed_at: None,
         last_error: None,
+        kind_override: None,
     };
     write_meta(&dir, &meta)?;
     load_info(&app, &slug, &indexing)
@@ -449,6 +477,21 @@ pub fn kb_remove_source(
     }
     let _ = fs::remove_file(dir.join("docs").join(&file));
     meta.sources.retain(|s| s.file != file);
+    write_meta(&dir, &meta)?;
+    load_info(&app, &slug, &indexing)
+}
+
+/// Sets or clears (`None`) the user's override of the derived kind.
+#[tauri::command]
+pub fn kb_set_kind(
+    app: AppHandle,
+    slug: String,
+    kind: Option<KbKind>,
+    indexing: State<'_, Indexing>,
+) -> Result<KbInfo, String> {
+    let dir = kb_dir(&app, &slug)?;
+    let mut meta = read_meta(&dir)?;
+    meta.kind_override = kind;
     write_meta(&dir, &meta)?;
     load_info(&app, &slug, &indexing)
 }
@@ -599,14 +642,19 @@ mod tests {
             sources,
             last_indexed_at: None,
             last_error: last_error.map(Into::into),
+            kind_override: None,
         }
     }
 
     fn source(status: &str) -> Source {
+        source_of("MD", status)
+    }
+
+    fn source_of(kind: &str, status: &str) -> Source {
         Source {
             file: "a.md".into(),
             original: "/x/a.md".into(),
-            kind: "MD".into(),
+            kind: kind.into(),
             bytes: 4,
             approx_tokens: Some(1),
             added_at: 1,
@@ -788,6 +836,26 @@ mod tests {
     }
 
     #[test]
+    fn kind_is_derived_from_sources_unless_overridden() {
+        let kind = |m: KbMeta| info(Path::new("/tmp"), m, &[], &HashSet::new()).kind;
+        assert_eq!(kind(meta(vec![], None)), KbKind::Document);
+        assert_eq!(kind(meta(vec![source("indexed"), source_of("PDF", "indexed")], None)), KbKind::Document);
+        assert_eq!(kind(meta(vec![source_of("CODE", "indexed")], None)), KbKind::Code);
+        assert_eq!(kind(meta(vec![source("indexed"), source_of("CODE", "indexed")], None)), KbKind::Mixed);
+        let mut m = meta(vec![source_of("CODE", "indexed")], None);
+        m.kind_override = Some(KbKind::Document);
+        assert_eq!(kind(m), KbKind::Document, "the user's choice wins");
+    }
+
+    #[test]
+    fn kb_json_without_a_kind_override_still_loads() {
+        let raw = r#"{"slug":"a","name":"A","createdAt":1,"sources":[],"lastIndexedAt":null,"lastError":null}"#;
+        assert_eq!(serde_json::from_str::<KbMeta>(raw).unwrap().kind_override, None);
+        let bad = r#"{"slug":"a","name":"A","createdAt":1,"sources":[],"lastIndexedAt":null,"lastError":null,"kindOverride":"evil"}"#;
+        assert!(serde_json::from_str::<KbMeta>(bad).is_err());
+    }
+
+    #[test]
     fn graph_stats_come_from_the_matching_ug_project() {
         let projects = vec![
             json!({ "name": "andai-other", "nodes": 99, "edges": 99, "sizeBytes": 99 }),
@@ -803,7 +871,7 @@ mod tests {
     fn kb_info_serializes_flat_camel_case_for_the_frontend() {
         let kb = info(Path::new("/tmp"), meta(vec![source("indexed")], None), &[], &HashSet::new());
         let v = serde_json::to_value(&kb).unwrap();
-        for key in ["slug", "name", "createdAt", "sources", "lastIndexedAt", "lastError", "dir", "status", "nodes", "sizeBytes"] {
+        for key in ["slug", "name", "createdAt", "sources", "lastIndexedAt", "lastError", "kindOverride", "dir", "status", "kind", "nodes", "sizeBytes"] {
             assert!(v.get(key).is_some(), "missing {key} in {v}");
         }
         assert!(v["sources"][0].get("approxTokens").is_some());

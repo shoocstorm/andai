@@ -18,8 +18,14 @@ only network traffic is a model download you start, from Hugging Face.
   local port (14230), Andai shows an error instead of starting.
 - **Models are verified.** Downloads come from a fixed Hugging Face commit and
   must match a recorded sha256 before they load.
-- **Documents are data, not instructions.** Retrieved passages reach the model
-  fenced and marked untrusted.
+- **Documents are data, not instructions.** Retrieved passages and tool
+  results reach the model fenced and marked untrusted.
+- **Agent tools are read-only and boxed in.** The agent's tools are a fixed
+  list of read-only `ug` queries over one knowledge base. Rust re-validates
+  every call (no unknown tools or fields, no flag-like or escaping arguments),
+  runs it with a scrubbed environment, stops it after 20 s and caps its
+  output. Each tool can be set to ask for your approval, and every call is
+  shown in the Execution Trace.
 - **Dependencies are audited.** `bun audit` and `cargo audit` run in CI, and a
   release can't ship with a known vulnerability.
 

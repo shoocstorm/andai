@@ -13,6 +13,8 @@ const COMMANDS: &[&str] = &[
     "kb_delete",
     "kb_index",
     "kb_search",
+    "kb_set_kind",
+    "kb_tool",
 ];
 
 fn main() {

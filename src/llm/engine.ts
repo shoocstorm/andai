@@ -10,7 +10,7 @@
 // Every download is checked against the catalog's pinned size and sha256
 // before it is loaded (integrity.ts, AGENTS.md §9).
 
-import { ModelManager, Wllama, WllamaAbortError } from '@wllama/wllama';
+import { ModelManager, Wllama, WllamaAbortError, type ChatCompletionParams, type ChatCompletionResponse } from '@wllama/wllama';
 import { create } from 'zustand';
 import { verifyBlobs } from './integrity';
 import { MODELS, modelById, type ModelDef } from './models';
@@ -53,6 +53,14 @@ type EngineState = {
   lastLoadMs: number | null;
   /** How long the last sha256 check took; null when a verified copy was reused. */
   lastVerifyMs: number | null;
+  /** The optional decision model (loadDecider). */
+  decider: {
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    loadingId: string | null;
+    loadedId: string | null;
+    progress: { loaded: number; total: number; speed: number; phase: string } | null;
+    error: string | null;
+  };
 };
 
 export const useEngine = create<EngineState>(() => ({
@@ -75,6 +83,7 @@ export const useEngine = create<EngineState>(() => ({
   tokPerSec: null,
   lastLoadMs: null,
   lastVerifyMs: null,
+  decider: { status: 'idle', loadingId: null, loadedId: null, progress: null, error: null },
 }));
 
 let wllama: Wllama | null = null;
@@ -130,6 +139,46 @@ const setVerified = (url: string, sha256: string | null) => {
   localStorage.setItem(VERIFIED_KEY, JSON.stringify(v));
 };
 
+type Progress = NonNullable<EngineState['progress']>;
+
+/**
+ * Downloads (or reuses the OPFS copy of) a catalog model and verifies it
+ * against its pinned sha256 before anything may load it (AGENTS.md §9).
+ */
+async function openVerified(def: ModelDef, onProgress: (p: Progress) => void) {
+  const started = performance.now();
+  const mm = manager();
+  if (!mm) throw new Error('The model cache is unavailable in this webview.');
+  const wasCached = (await mm.getModels()).some((m) => m.url === def.url && m.size > 0);
+  const model = await mm.getModelOrDownload(
+    { url: def.url },
+    {
+      progressCallback: ({ loaded, total }: { loaded: number; total: number }) => {
+        const secs = (performance.now() - started) / 1000;
+        onProgress({ loaded, total: total || def.bytes, speed: secs > 0 ? loaded / secs : 0, phase: 'Downloading' });
+      },
+    },
+  );
+  let verifyMs: number | null = null;
+  if (!wasCached || verified()[def.url] !== def.sha256) {
+    const t = performance.now();
+    const setDone = (loaded: number) => onProgress({ loaded, total: def.bytes, speed: 0, phase: 'Verifying…' });
+    setDone(0);
+    const verdict = await verifyBlobs(await model.open(), def, setDone);
+    if (!verdict.ok) {
+      await model.remove();
+      setVerified(def.url, null);
+      throw new Error(
+        `The downloaded ${def.name} failed its integrity check (${verdict.reason}), so it was removed and not loaded. Try again; if it keeps failing, something is altering the download.`,
+      );
+    }
+    setVerified(def.url, def.sha256);
+    verifyMs = performance.now() - t;
+  }
+  onProgress({ loaded: def.bytes, total: def.bytes, speed: 0, phase: 'Warming up…' });
+  return { model, verifyMs };
+}
+
 export async function loadModel(id: string): Promise<void> {
   const def = modelById(id);
   if (!def) throw new Error(`unknown model ${id}`);
@@ -146,38 +195,8 @@ export async function loadModel(id: string): Promise<void> {
   });
   const started = performance.now();
   try {
-    const mm = manager();
-    if (!mm) throw new Error('The model cache is unavailable in this webview.');
-    const wasCached = (await mm.getModels()).some((m) => m.url === def.url && m.size > 0);
-    const model = await mm.getModelOrDownload(
-      { url: def.url },
-      {
-        progressCallback: ({ loaded, total }: { loaded: number; total: number }) => {
-          const secs = (performance.now() - started) / 1000;
-          useEngine.setState({
-            progress: { loaded, total: total || def.bytes, speed: secs > 0 ? loaded / secs : 0, phase: 'Downloading' },
-          });
-        },
-      },
-    );
-    useEngine.setState({ lastVerifyMs: null });
-    if (!wasCached || verified()[def.url] !== def.sha256) {
-      const t = performance.now();
-      const setDone = (loaded: number) =>
-        useEngine.setState({ progress: { loaded, total: def.bytes, speed: 0, phase: 'Verifying…' } });
-      setDone(0);
-      const verdict = await verifyBlobs(await model.open(), def, setDone);
-      if (!verdict.ok) {
-        await model.remove();
-        setVerified(def.url, null);
-        throw new Error(
-          `The downloaded ${def.name} failed its integrity check (${verdict.reason}), so it was removed and not loaded. Try again; if it keeps failing, something is altering the download.`,
-        );
-      }
-      setVerified(def.url, def.sha256);
-      useEngine.setState({ lastVerifyMs: performance.now() - t });
-    }
-    useEngine.setState({ progress: { loaded: def.bytes, total: def.bytes, speed: 0, phase: 'Warming up…' } });
+    const { model, verifyMs } = await openVerified(def, (progress) => useEngine.setState({ progress }));
+    useEngine.setState({ lastVerifyMs: verifyMs });
     const w = newWllama();
     await w.loadModel(model, {
       n_ctx: def.n_ctx,
@@ -214,11 +233,82 @@ export async function unloadModel(): Promise<void> {
   await w?.exit().catch(() => {});
 }
 
+// ── decision model ──────────────────────────────────────────────────────
+// A second, optional wllama instance that only scores tool choices
+// (llm/decide.ts). Without it, decisions run on the chat model.
+
+let deciderWllama: Wllama | null = null;
+
+export async function loadDecider(id: string): Promise<void> {
+  const def = modelById(id);
+  if (!def?.decider) throw new Error(`${def?.name ?? id} can't be used as a decision model`);
+  const { decider } = useEngine.getState();
+  if (decider.status === 'loading' || decider.loadedId === id) return;
+  if (deciderWllama) await unloadDecider();
+  const setDecider = (patch: Partial<EngineState['decider']>) =>
+    useEngine.setState((s) => ({ decider: { ...s.decider, ...patch } }));
+  setDecider({ status: 'loading', loadingId: id, error: null, progress: { loaded: 0, total: def.bytes, speed: 0, phase: 'Connecting…' } });
+  try {
+    const { model } = await openVerified(def, (progress) => setDecider({ progress }));
+    const w = newWllama();
+    // Decisions are short prompts scored in one forward pass.
+    await w.loadModel(model, { n_ctx: Math.min(def.n_ctx, 4096), reasoning_format: 'none' });
+    deciderWllama = w;
+    setDecider({ status: 'ready', loadingId: null, loadedId: id, progress: null });
+    localStorage.setItem('andai.lastDecider', id);
+  } catch (e) {
+    console.error('[engine] decider load failed', e);
+    setDecider({ status: 'error', loadingId: null, progress: null, error: e instanceof Error ? e.message : String(e) });
+  } finally {
+    await refreshCache();
+  }
+}
+
+export async function unloadDecider(): Promise<void> {
+  const w = deciderWllama;
+  deciderWllama = null;
+  useEngine.setState((s) => ({ decider: { ...s.decider, status: 'idle', loadedId: null } }));
+  localStorage.removeItem('andai.lastDecider');
+  await w?.exit().catch(() => {});
+}
+
+export type Slot = 'chat' | 'decider';
+/**
+ * wllama hands these to llama.cpp's server-side parser as JSON, so the
+ * llama.cpp-only `grammar` (GBNF) works here too. Measured: this build can't
+ * turn a JSON Schema into a grammar (`response_format: json_schema` fails with
+ * "Failed to initialize samplers"), so callers pass GBNF (tools/validate.ts).
+ */
+export type CompletionParams = ChatCompletionParams & { grammar?: string; top_k?: number; top_p?: number };
+export type Completion = ChatCompletionResponse;
+
+/**
+ * The instance a request runs on: `decider` falls back to the chat model when
+ * no decision model is loaded, and the result says which one answered.
+ */
+export function slotFor(prefer: Slot): { slot: Slot; def: ModelDef } | null {
+  const { decider, loadedId } = useEngine.getState();
+  const d = modelById(decider.loadedId);
+  if (prefer === 'decider' && deciderWllama && d) return { slot: 'decider', def: d };
+  const c = modelById(loadedId);
+  return wllama && c ? { slot: 'chat', def: c } : null;
+}
+
+/** One non-streaming completion (decisions, argument filling). */
+export async function complete(prefer: Slot, params: CompletionParams): Promise<{ response: Completion; slot: Slot; def: ModelDef }> {
+  const target = slotFor(prefer);
+  const w = target?.slot === 'decider' ? deciderWllama : wllama;
+  if (!target || !w) throw new Error('No model loaded — open Settings → Models to load one.');
+  const response = await w.createChatCompletion({ ...(params as ChatCompletionParams), stream: false });
+  return { response, ...target };
+}
+
 export async function evictModel(id: string): Promise<void> {
   const def = modelById(id);
   const mm = manager();
   if (!def || !mm) return;
   if (useEngine.getState().loadedId === id) await unloadModel();
+  if (useEngine.getState().decider.loadedId === id) await unloadDecider();
   for (const m of await mm.getModels()) if (m.url === def.url) await m.remove();
   setVerified(def.url, null);
   await refreshCache();
@@ -310,6 +400,8 @@ export async function autoload(): Promise<void> {
   const last = localStorage.getItem('andai.lastModel');
   const def = modelById(last);
   if (def && useEngine.getState().cached[def.url]) await loadModel(def.id);
+  const decider = modelById(localStorage.getItem('andai.lastDecider'));
+  if (decider && useEngine.getState().cached[decider.url]) await loadDecider(decider.id);
 }
 
 export { MODELS };

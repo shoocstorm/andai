@@ -1,7 +1,10 @@
 # Andai — features
 
-Andai is a private AI agent for macOS. The language model runs **inside the
-app on your Mac**, and it answers from **your own documents**. After a one-time
+Andai is a local-first **agentic RAG** agent for macOS. It answers from
+**your own knowledge bases**, and the language model runs **inside the app on
+your Mac**. Rather than pasting a few matching chunks into a prompt, the agent
+uses tools on your knowledge base: it searches, reads around a hit, outlines a
+file or follows a code symbol, then answers with citations. After a one-time
 model download nothing leaves the machine: no account, no API key, no cloud.
 
 > Status legend: **Available**: works today. **Preview**: the interface is
@@ -14,17 +17,66 @@ model download nothing leaves the machine: no account, no API key, no cloud.
 - **Streaming answers.** Replies render as they're generated, with Markdown,
   code blocks and tables. **Stop** (or `Esc`) halts generation at any point.
 - **Visible reasoning.** Each answer shows its steps as they happen:
-  *analyzing the query → searching your knowledge → assembling context →
-  generating*. Qwen3 models can also show their step-by-step thinking, folded
+  *planning and using tools → assembling context → generating*, with a chip
+  for each tool call. Qwen3 models can also show their step-by-step thinking, folded
   away until you open it.
 - **Cited sources.** When a knowledge base is selected, answers cite passages
   as `[1]`, `[2]`. Each citation matches a source listed under the answer, with
   its file name and line range.
-- **Execution Trace.** A side panel with each step's status and timing, the
-  sources used, live throughput (tokens/second) and how much of the model's
+- **Execution Trace.** A side panel with each step's status and timing,
+  each decision and tool call (see below), the sources used, live throughput (tokens/second) and how much of the model's
   context window the turn used. Hide it for a focused view (`⌘J`).
 - **Conversation memory.** Earlier turns are carried into follow-up questions
   (within the model's context budget), and your history is kept between launches.
+
+## Agentic retrieval — tools over your knowledge · Available
+
+With a knowledge base selected, the agent works it with tools instead of
+pasting in whatever one search returns:
+
+- **The agent decides what to do next.** At each step the local model picks
+  one action: use a tool, answer now, or ask you a clarifying question. It
+  chooses from a short lettered list and doesn't write free text, so every
+  choice is valid, and the probability of each option is shown in the trace.
+  When the model isn't sure enough, or a decision fails, Andai does one plain
+  knowledge search instead of acting on a guess. About 0.6 s per decision
+  with Qwen3 0.6B in our tests on an Apple Silicon Mac.
+- **It writes its own search.** Before a search, the model turns your
+  question into a search phrase (for example *"What HTTP headers does wllama
+  need for multi-threading?"* became *wllama multi-threading headers*); for
+  code tools it picks the symbol or file. Arguments are held to each tool's
+  schema.
+- **Tools built on [ug](https://github.com/shoocstorm/ug)**, offered to
+  match what the knowledge base holds (documents, code or both; set
+  automatically from your files, and you can change it):
+
+  | Tool | What it does | For |
+  |---|---|---|
+  | Knowledge search | Finds relevant passages, broad (follow related sections) or focused | All |
+  | Read lines | Reads up to 400 lines of a file around a result | All |
+  | File outline | A file's headings or symbols, and what it connects to | All |
+  | Overview | What the knowledge base contains: size, file types, largest files | All |
+  | Find symbols | Looks up functions, classes and so on by name or wildcard | Code |
+  | Symbol context | One symbol's source, callers, tests and dependencies | Code |
+  | Read symbol source | The full source of a named symbol | Code |
+  | Find usages | Who calls, imports or references a symbol | Code |
+
+- **You stay in control.** The **Tools** screen (`⌘5`) lists every tool, the
+  exact ug command it runs and how often it ran. Each tool is *Auto* (runs
+  without asking; the default for these read-only tools), *Ask* (an approval
+  card appears in the chat) or *Off* (never offered). You also set how many
+  tool calls a question may use and the minimum confidence, or turn agent mode
+  off to go back to one search per question.
+- **An optional decision model.** *Settings → Decision model* loads a second
+  model just for choosing the next step, so a larger model can decide while a
+  smaller one writes. Without it, the chat model decides.
+- **Every step is visible.** The Execution Trace lists each decision with
+  its options and probabilities, and each tool call with its arguments, the
+  ug command that ran, timing and what it returned. **Copy trace** exports a
+  turn as JSON.
+- **Read-only and on your Mac.** Every tool only reads the selected
+  knowledge base. Andai re-checks each call before running it, limits its
+  time and output, and never lets a tool reach the network.
 
 ## Knowledge — your documents, as a knowledge graph · Available
 
@@ -37,6 +89,9 @@ model download nothing leaves the machine: no account, no API key, no cloud.
   shown as it runs.
 - **Multiple knowledge bases.** Keep separate collections (e.g. *Specs*,
   *Research*) and choose which one grounds the chat from the composer.
+- **Kind: documents, code or mixed**, set automatically from your files and
+  changeable next to the source list. It decides which agent tools apply:
+  the code tools (symbols, callers) are offered only for code.
 - **Retrieval controls:** how many passages to retrieve (4 / 8 / 16 / 32) and
   how much text to give the model per question.
 - Remove a source or delete a whole knowledge base at any time. Your original
@@ -73,7 +128,7 @@ model download nothing leaves the machine: no account, no API key, no cloud.
   sun/moon button in the top bar).
 - **Collapsible sidebar** (`⌘B`) and **hideable Execution Trace** (`⌘J`),
   both remembered.
-- **Keyboard shortcuts:** `⌘K` focus the input · `⌘1–4` switch screens ·
+- **Keyboard shortcuts:** `⌘K` focus the input · `⌘1–5` switch screens ·
   `⌘,` Settings · `Enter` send · `Shift+Enter` new line · `Esc` stop.
 
 ## Workflows & tools · Preview
@@ -81,8 +136,9 @@ model download nothing leaves the machine: no account, no API key, no cloud.
 A glimpse of where Andai is heading. The screens work, but **nothing is
 executed**; every action says it's simulated.
 
-- **Tool library**: web search, data analysis, email, SQL, S3. Only
-  **Knowledge Search** is live today.
+- **Tool library**: web search, data analysis, email, SQL, S3, all simulated.
+  The real knowledge-base tools are on the **Tools** screen (see *Agentic
+  retrieval* above).
 - **Human-in-the-loop approvals**: approve or reject actions an agent wants to take.
 - **Visual workflow editor**: a pannable, zoomable node canvas with node
   configuration and a simulated run that pauses for your approval.

@@ -2,7 +2,8 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from '../state/ui';
 
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
@@ -149,6 +150,39 @@ export function Markdown({ text }: { text: string }) {
         {text}
       </ReactMarkdown>
     </div>
+  );
+}
+
+/**
+ * Icon button that copies `text` (or what it returns, computed at click time)
+ * and shows a check mark for a moment. For debugging aids: trace steps,
+ * arguments, commands, outputs, errors.
+ */
+export function CopyButton({ text, label, size = 12 }: { text: string | (() => string); label: string; size?: number }) {
+  const [done, setDone] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (
+    <button
+      type="button"
+      className={`copy-btn${done ? ' done' : ''}`}
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        const value = typeof text === 'function' ? text() : text;
+        void navigator.clipboard
+          ?.writeText(value)
+          .then(() => {
+            setDone(true);
+            clearTimeout(timer.current);
+            timer.current = setTimeout(() => setDone(false), 1400);
+          })
+          .catch(() => toast({ tone: 'error', title: 'Could not copy to the clipboard' }));
+      }}
+    >
+      {done ? <Check size={size} /> : <Copy size={size} />}
+    </button>
   );
 }
 

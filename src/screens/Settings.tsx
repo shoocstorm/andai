@@ -1,12 +1,74 @@
-import { Check, Cpu, Download, HardDrive, Loader2, Monitor, Moon, Palette, Power, Radio, Sun, Trash2, X } from 'lucide-react';
+import { Check, Cpu, Download, GitFork, HardDrive, Loader2, Monitor, Moon, Palette, Power, Radio, Sun, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { Bar, Modal, fmtBytes } from '../components/ui';
-import { evictModel, loadModel, removeLegacyCopies, unloadModel, useEngine } from '../llm/engine';
-import { MODELS, type ModelDef } from '../llm/models';
+import { evictModel, loadDecider, loadModel, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
+import { MODELS, modelById, type ModelDef } from '../llm/models';
 import { clearChat } from '../state/chat';
 import { useKb } from '../state/kb';
 import { useTheme, type ThemeMode } from '../state/theme';
 import { toast } from '../state/ui';
+
+/**
+ * The optional second model that scores the agent's next action
+ * (llm/decide.ts). A bigger decider picks tools more reliably (SemIf measured
+ * 0.44 → 0.69 → 0.81 balanced accuracy from 0.6B to 2B to 4B); without one,
+ * the chat model decides.
+ */
+function DecisionModel() {
+  const e = useEngine();
+  const d = e.decider;
+  const chat = modelById(e.loadedId);
+  const candidates = MODELS.filter((m) => m.decider);
+  return (
+    <section className="panel pad st-decider" aria-label="Decision model">
+      <div className="panel-head">
+        <GitFork size={20} color="var(--violet)" />
+        <h3>Decision model</h3>
+        <span className={`right pill ${d.status === 'ready' ? 'violet' : ''}`}>
+          {d.status === 'ready' ? modelById(d.loadedId)?.name : d.status === 'loading' ? 'loading' : 'using chat model'}
+        </span>
+      </div>
+      <p className="muted" style={{ marginTop: 0, fontSize: 13.5 }}>
+        In agent mode, a model picks each next step (a tool, answer or ask) by scoring the options in one pass. A separate,
+        larger model picks more reliably while a small one writes. Without one, {chat ? chat.name : 'the chat model'} decides.
+        It runs in addition to the chat model, so it needs its own memory.
+      </p>
+      <div className="st-decider-list">
+        {candidates.map((m) => {
+          const loaded = d.loadedId === m.id;
+          const loading = d.loadingId === m.id;
+          const pct = loading && d.progress?.total ? d.progress.loaded / d.progress.total : 0;
+          return (
+            <div key={m.id} className="st-decider-row">
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600 }}>{m.name}</div>
+                <div className="faint mono" style={{ fontSize: 11.5 }}>
+                  {m.size} · {e.cached[m.url] ? 'cached' : 'download'}
+                  {loading && d.progress ? ` · ${d.progress.phase} ${Math.round(pct * 100)}%` : ''}
+                </div>
+              </div>
+              {loaded ? (
+                <button className="btn secondary sm" onClick={() => void unloadDecider()}>
+                  <Power size={13} /> Unload
+                </button>
+              ) : (
+                <button className="btn secondary sm" disabled={d.status === 'loading'} onClick={() => void loadDecider(m.id)}>
+                  {loading ? <Loader2 size={13} className="spin" /> : <Power size={13} />}
+                  {loading ? 'Loading' : `Use for decisions`}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {d.error && (
+        <div className="kn-error" style={{ marginTop: 12 }}>
+          <X size={15} /> Decision model failed to load: {d.error}
+        </div>
+      )}
+    </section>
+  );
+}
 
 export function Settings() {
   const e = useEngine();
@@ -29,7 +91,7 @@ export function Settings() {
             Model Registry
           </span>
         </div>
-        <div className="st-models">
+        <section className="st-models" aria-label="Model registry">
           {MODELS.map((m) => {
             const cached = e.cached[m.url];
             const loaded = e.loadedId === m.id;
@@ -111,7 +173,7 @@ export function Settings() {
               </div>
             );
           })}
-        </div>
+        </section>
         <Modal open={!!legacyFor} onClose={() => setLegacyFor(null)}>
           <h3>Remove the old copy of {legacyFor?.name}?</h3>
           <p className="muted" style={{ margin: '4px 0 22px' }}>
@@ -139,6 +201,8 @@ export function Settings() {
             <X size={15} /> Model load failed: {e.error}
           </div>
         )}
+
+        <DecisionModel />
 
         <div className="st-grid">
           <Appearance />

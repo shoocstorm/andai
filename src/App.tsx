@@ -9,6 +9,7 @@ import { CommandCenter, composerRef } from './screens/CommandCenter';
 import { Knowledge } from './screens/Knowledge';
 import { Persona } from './screens/Persona';
 import { Settings } from './screens/Settings';
+import { Tools } from './screens/Tools';
 import { WorkflowDetail } from './screens/WorkflowDetail';
 import { Workflows } from './screens/Workflows';
 import { AboutModal, Sidebar, StatusBar, Toasts, TopBar } from './shell/Shell';
@@ -21,6 +22,7 @@ const SCREENS: Record<Route, () => React.ReactElement> = {
   workflows: Workflows,
   'workflow-detail': WorkflowDetail,
   knowledge: Knowledge,
+  tools: Tools,
   persona: Persona,
   settings: Settings,
 };
@@ -61,7 +63,7 @@ export function App() {
         if (e.key === 'Escape') stopTurn();
         return;
       }
-      const map: Record<string, Route> = { '1': 'command', '2': 'workflows', '3': 'knowledge', '4': 'persona', ',': 'settings' };
+      const map: Record<string, Route> = { '1': 'command', '2': 'workflows', '3': 'knowledge', '4': 'persona', '5': 'tools', ',': 'settings' };
       if (map[e.key]) {
         e.preventDefault();
         go(map[e.key]);

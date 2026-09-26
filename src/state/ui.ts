@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type Route = 'command' | 'workflows' | 'workflow-detail' | 'knowledge' | 'persona' | 'settings';
+export type Route = 'command' | 'workflows' | 'workflow-detail' | 'knowledge' | 'tools' | 'persona' | 'settings';
 
 export type Toast = {
   id: number;
@@ -23,7 +23,7 @@ type UiState = {
 
 let nextId = 1;
 
-const ROUTES: Route[] = ['command', 'workflows', 'workflow-detail', 'knowledge', 'persona', 'settings'];
+const ROUTES: Route[] = ['command', 'workflows', 'workflow-detail', 'knowledge', 'tools', 'persona', 'settings'];
 const initialRoute = (): Route => {
   const h = window.location.hash.slice(1) as Route;
   return ROUTES.includes(h) ? h : 'command';

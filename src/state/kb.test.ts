@@ -17,6 +17,8 @@ const mk = (over: Partial<KbInfo> = {}): KbInfo => ({
   sources: [],
   lastIndexedAt: null,
   lastError: null,
+  kindOverride: null,
+  kind: 'document',
   dir: '/tmp/docs',
   status: 'empty',
   nodes: 0,

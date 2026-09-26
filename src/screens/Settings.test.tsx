@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { removeLegacyCopies, useEngine } from '../llm/engine';
+import { loadDecider, removeLegacyCopies, useEngine } from '../llm/engine';
 import { MODELS } from '../llm/models';
 import { useTheme } from '../state/theme';
 import { Settings } from './Settings';
@@ -10,13 +10,27 @@ import { Settings } from './Settings';
 vi.mock('../llm/engine', async (original) => ({
   ...(await original<typeof import('../llm/engine')>()),
   removeLegacyCopies: vi.fn().mockResolvedValue(undefined),
+  loadDecider: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('Settings', () => {
   it('lists every catalog model with a download action', () => {
     render(<Settings />);
-    for (const m of MODELS) expect(screen.getByText(m.name)).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /download & load/i })).toHaveLength(MODELS.length);
+    const registry = within(screen.getByRole('region', { name: 'Model registry' }));
+    for (const m of MODELS) expect(registry.getByText(m.name)).toBeInTheDocument();
+    expect(registry.getAllByRole('button', { name: /download & load/i })).toHaveLength(MODELS.length);
+  });
+
+  it('offers only decision-capable models as the decision model, and loads the one picked', async () => {
+    const user = userEvent.setup();
+    render(<Settings />);
+    const panel = within(screen.getByRole('region', { name: 'Decision model' }));
+    const deciders = MODELS.filter((m) => m.decider);
+    expect(panel.getAllByRole('button', { name: /use for decisions/i })).toHaveLength(deciders.length);
+    expect(panel.queryByText(MODELS.find((m) => !m.decider)!.name)).toBeNull();
+    expect(panel.getByText(/using chat model/i)).toBeInTheDocument();
+    await user.click(panel.getAllByRole('button', { name: /use for decisions/i })[0]);
+    expect(loadDecider).toHaveBeenCalledWith(deciders[0].id);
   });
 
   it('switches appearance from the picker', async () => {

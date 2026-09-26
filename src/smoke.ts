@@ -3,12 +3,18 @@
 //   VITE_SMOKE=qwen3-0.6b bun run tauri dev
 // Reports capabilities, load time and tok/s to the terminal, then exits.
 import { invoke } from '@tauri-apps/api/core';
+import { decisionOptions, QUESTION } from './agent/loop';
+import { agentState } from './agent/prompt';
+import { fillArgs } from './agent/tools/argfill';
+import { available, toolById } from './agent/tools/registry';
 import { runTurn } from './agent/turn';
+import { decide } from './llm/decide';
 import { chat, loadModel, useEngine } from './llm/engine';
 import { clearChat, useChat } from './state/chat';
-import { kbAddFiles } from './kb/api';
+import { kbAddFiles, kbTool } from './kb/api';
 import { modelById } from './llm/models';
 import { addFiles, createKb, deleteKb, useKb } from './state/kb';
+import { TOOL_DEFAULTS, useTools } from './state/tools';
 
 const log = (line: string) => invoke('dev_log', { line }).catch(() => console.log(line));
 
@@ -84,6 +90,63 @@ async function securityChecks(slug: string) {
 }
 
 /**
+ * Agent mode against the real model and ug (AGENTS.md §1.6: the decision
+ * readout's logit bias and post-sampling logprobs are llama.cpp behavior that
+ * only a real run can confirm). Each part is probed on its own so a failure
+ * says which one broke, then one full agent turn is traced.
+ */
+async function agentProbes(slug: string, question: string) {
+  const kb = useKb.getState().kbs.find((k) => k.slug === slug)!;
+  const tools = available(kb.kind, {});
+  const state = agentState({
+    prompt: question,
+    history: [],
+    kb: { name: kb.name, kind: kb.kind, nodes: kb.nodes, files: kb.sources.length },
+    observations: [],
+    step: 0,
+    maxSteps: TOOL_DEFAULTS.maxSteps,
+  });
+  const out: Record<string, unknown> = { kind: kb.kind, tools: tools.map((t) => t.id) };
+  try {
+    const d = await decide(state, QUESTION, decisionOptions(tools, 1));
+    out.decision = { chosen: d.chosen, confidence: d.confidence, ms: d.ms, model: d.model, slot: d.slot, options: d.options.map((o) => [o.id, o.probability]) };
+  } catch (e) {
+    out.decision = { error: e instanceof Error ? e.message : String(e) };
+  }
+  await log(`agent decision ${JSON.stringify(out.decision)}`);
+  const t = performance.now();
+  const fill = await fillArgs(toolById('kb_search')!, { state, kind: kb.kind }).catch((e) => ({ ok: false, errors: [String(e)], raw: '' }));
+  out.fill = { ...fill, ms: performance.now() - t };
+  await log(`agent fill ${JSON.stringify(out.fill)}`);
+  out.overview = await kbTool(slug, { tool: 'kb_overview' })
+    .then((r) => ({ ok: true, argv: r.argv, ms: r.ms, kbType: (r.output as { kb_type?: string })?.kb_type }))
+    .catch((e) => ({ ok: false, error: String(e) }));
+  await log(`agent overview ${JSON.stringify(out.overview)}`);
+
+  useTools.setState({ agentMode: true });
+  clearChat();
+  const started = performance.now();
+  await runTurn(question);
+  const m = useChat.getState().messages.find((x) => x.role === 'assistant');
+  out.turn = {
+    ms: performance.now() - started,
+    steps: m?.steps?.map((x) => ({ kind: x.kind, status: x.status, detail: x.detail })),
+    agent: m?.agent?.map((a) => ({
+      action: a.action,
+      note: a.note,
+      confidence: a.decision?.confidence,
+      decisionMs: a.decision?.ms,
+      call: a.call && { status: a.call.status, args: a.call.args, argv: a.call.argv, error: a.call.error, observation: a.call.observation, ms: a.call.ms },
+    })),
+    sources: m?.sources?.map((h) => h.file),
+    answer: m?.content,
+  };
+  await log(`agent turn ${JSON.stringify(out.turn).slice(0, 4000)}`);
+  useTools.setState({ agentMode: false });
+  return out;
+}
+
+/**
  * Full pipeline inside the real app: create KB → ingest via ug → load model →
  * one RAG turn through the same orchestrator the UI uses. The App is rendered
  * alongside, so UI code runs in WKWebView too.
@@ -94,9 +157,12 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
   // snapshot what it touches and put it back afterwards.
   const savedChat = { messages: useChat.getState().messages, session: useChat.getState().session };
   const savedKb = { grounding: useKb.getState().grounding, selected: useKb.getState().selected };
+  const { agentMode, maxSteps, minConfidence, policies, stats } = useTools.getState();
+  const savedTools = { agentMode, maxSteps, minConfidence, policies, stats };
   const restore = () => {
     useChat.setState(savedChat);
     useKb.setState(savedKb);
+    useTools.setState(savedTools);
   };
   try {
     await new Promise((r) => setTimeout(r, 1500)); // let App mount + refresh KBs
@@ -121,9 +187,16 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
     while (useEngine.getState().status === 'loading') await new Promise((r) => setTimeout(r, 200));
     if (useEngine.getState().loadedId !== model) await loadModel(model);
     if (useEngine.getState().status !== 'ready') throw new Error(`load failed: ${useEngine.getState().error}`);
+    // The fixed pipeline first: its grounding checks and perf baselines
+    // (docs/performance.md) are about one search + one answer.
+    useTools.setState({ ...TOOL_DEFAULTS, agentMode: false, policies: {}, stats: {} });
     clearChat();
-    await runTurn('What HTTP headers does wllama need for multi-threading, and why?');
+    const question = 'What HTTP headers does wllama need for multi-threading, and why?';
+    await runTurn(question);
     const msg = useChat.getState().messages.find((m) => m.role === 'assistant');
+    // Read before the agent turn, which records searches of its own.
+    const searchMs = useKb.getState().lastSearch?.ms ?? null;
+    const agent = await agentProbes(kb.slug, question);
     const info = useEngine.getState().info;
     const result = {
       caps: useEngine.getState().caps,
@@ -135,10 +208,11 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
       sources: msg?.sources?.map((h) => h.file),
       stats: msg?.stats,
       answer: msg?.content,
+      agent,
       // Compared with perf/baseline.json by the runner (docs/performance.md).
       perf: {
         ingestMs,
-        searchMs: useKb.getState().lastSearch?.ms ?? null,
+        searchMs,
         loadMs: useEngine.getState().lastLoadMs,
         verifyMs: useEngine.getState().lastVerifyMs,
         modelBytes: modelById(model)?.bytes ?? null,

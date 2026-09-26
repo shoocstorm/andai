@@ -18,7 +18,9 @@
     "allow-kb-remove-source",
     "allow-kb-delete",
     "allow-kb-index",
-    "allow-kb-search"
+    "allow-kb-search",
+    "allow-kb-set-kind",
+    "allow-kb-tool"
   ],
   "remote": {
     "urls": [

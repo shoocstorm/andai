@@ -13,6 +13,7 @@ import {
   SquareTerminal,
   UserRoundCog,
   Workflow,
+  Wrench,
   Zap,
   CheckCircle2,
   AlertTriangle,
@@ -36,6 +37,7 @@ const NAV: { route: Route; label: string; icon: ReactNode; key: string }[] = [
   { route: 'workflows', label: 'Workflows', icon: <Workflow size={19} />, key: '⌘2' },
   { route: 'knowledge', label: 'Knowledge', icon: <Database size={19} />, key: '⌘3' },
   { route: 'persona', label: 'Persona', icon: <UserRoundCog size={19} />, key: '⌘4' },
+  { route: 'tools', label: 'Tools', icon: <Wrench size={19} />, key: '⌘5' },
 ];
 
 export function useCoreStatus() {
@@ -281,7 +283,7 @@ export function AboutModal() {
       </div>
       <div className="muted" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px 16px', fontSize: 13 }}>
         <span className="kbd-hint">⌘K</span> Focus the command input
-        <span className="kbd-hint">⌘1–4</span> Switch screens
+        <span className="kbd-hint">⌘1–5</span> Switch screens
         <span className="kbd-hint">⌘B</span> Collapse / expand the sidebar
         <span className="kbd-hint">⌘J</span> Show / hide the Execution Trace
         <span className="kbd-hint">⌘,</span> Settings &amp; models
