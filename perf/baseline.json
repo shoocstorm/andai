@@ -193,53 +193,53 @@
     "recorded": "2026-09-26",
     "metrics": {
       "first-action-accuracy": {
-        "value": 96.667,
+        "value": 96.875,
         "unit": "%",
         "better": "higher",
         "tolerance": 1.1
       },
       "fact-hit-rate": {
-        "value": 81.481,
+        "value": 82.759,
         "unit": "%",
         "better": "higher",
         "tolerance": 1.1
       },
       "grounded-rate": {
-        "value": 50,
+        "value": 46.429,
         "unit": "%",
         "better": "higher",
         "tolerance": 1.1
       },
       "wasted-calls-per-question": {
-        "value": 0.067,
+        "value": 0.063,
         "unit": "calls",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 0.2
       },
       "decisions-per-question": {
-        "value": 1.933,
+        "value": 2,
         "unit": "decisions",
         "better": "lower",
         "tolerance": 1.25,
         "slack": 0.1
       },
       "seconds-per-question": {
-        "value": 3.722,
+        "value": 5.937,
         "unit": "s",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 1
       },
       "ms-per-decision": {
-        "value": 651,
+        "value": 811,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 100
       },
       "prompt-tokens-per-decision": {
-        "value": 308,
+        "value": 310,
         "unit": "tokens",
         "better": "lower",
         "tolerance": 1.25

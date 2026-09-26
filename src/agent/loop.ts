@@ -22,6 +22,7 @@ import {
 } from '../state/chat';
 import { recordSearch } from '../state/kb';
 import { recordToolRun, requestApproval, useTools } from '../state/tools';
+import { addEvidence, mergeEvidence, type Found } from './evidence';
 import { agentState, type Observation } from './prompt';
 import { fillArgs, parseObject } from './tools/argfill';
 import { available, policyOf } from './tools/registry';
@@ -60,6 +61,18 @@ export function offered(tools: ToolDef[], usage: Map<string, { calls: number; fo
     return !denied.has(t.id) && !(u && (u.found > 0 || u.calls >= MAX_CALLS_PER_TOOL));
   });
 }
+
+/** Lines of context Read lines gets on each side of a passage. */
+const RANGE_PAD = 20;
+
+/** `file:start-end` around each passage that has lines, padded, first seen first. */
+export const rangesIn = (hits: SearchHit[]) => [
+  ...new Set(
+    hits
+      .filter((h) => h.start_line > 0 && h.end_line >= h.start_line && h.file && !h.file.startsWith('('))
+      .map((h) => `${h.file}:${Math.max(1, h.start_line - RANGE_PAD)}-${h.end_line + RANGE_PAD}`),
+  ),
+];
 
 /** Names of the code symbols among the hits, first seen first. */
 export const symbolsIn = (hits: SearchHit[]) => [...new Set(hits.filter((h) => SYMBOL_TYPES.has(h.node_type) && h.name).map((h) => h.name))];
@@ -145,7 +158,9 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
   const history = input.history;
   const seed = input.seed ?? Math.floor(Math.random() * 2 ** 31);
   const observations: Observation[] = [];
-  const hits: SearchHit[] = [];
+  // Every passage this turn, with the call that found it; merged for the answer (evidence.ts).
+  const found: Found[] = [];
+  const hits = () => found.map((f) => f.hit);
   const done = new Map<string, number>(); // argKey → step index
   const denied = new Set<string>();
   const usage = new Map<string, { calls: number; found: number }>();
@@ -170,7 +185,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
   const knownFiles = () => [
     ...new Set([
       ...kb.sources.filter((src) => src.status === 'indexed').map((src) => src.file),
-      ...hits.map((h) => h.file).filter((f) => f && !f.startsWith('(')),
+      ...hits().map((h) => h.file).filter((f) => f && !f.startsWith('(')),
     ]),
   ];
   const progress = (detail: string) => patchStep(msgId, 'plan', { detail });
@@ -203,7 +218,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     // was looked up yet (the fixed pipeline's behavior), else answer.
     const fallbackAction = () => (calls === 0 && searchTool ? searchTool.id : ANSWER);
     try {
-      const d = await decide(state(), QUESTION, decisionOptions(tools, seed + index, hits.length > 0), signal);
+      const d = await decide(state(), QUESTION, decisionOptions(tools, seed + index, found.length > 0), signal);
       decision = record(d, seed + index);
       action = d.chosen;
       if (action !== ANSWER && action !== CLARIFY && !tools.some((t) => t.id === action)) {
@@ -227,18 +242,23 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     // instead, and it cost more than it saved: with the shorter option list,
     // Qwen3 0.6B answered without searching on 12 of 16 code and mixed
     // questions (docs/agentic-rag-improvements.md, item 2).
+    // The same for Read lines, which reads around a passage already found.
     const lookup = tools.find((t) => t.id === 'kb_find_symbols') ?? searchTool;
     const chosenTool = tools.find((t) => t.id === action);
-    if (chosenTool && needsSymbol(chosenTool) && !symbolsIn(hits).length && lookup) {
+    if (chosenTool && needsSymbol(chosenTool) && !symbolsIn(hits()).length && lookup) {
       fallback = 'needs-symbol';
       note = `${chosenTool.title} needs a symbol name, and none has been seen yet, so ${lookup.id === 'kb_find_symbols' ? 'looking symbols up' : 'searching'} first.`;
       action = lookup.id;
+    } else if (chosenTool?.id === 'kb_read_lines' && !rangesIn(hits()).length && searchTool) {
+      fallback = 'needs-range';
+      note = `${chosenTool.title} needs a line range from an earlier result, and none has turned up yet, so searching first.`;
+      action = searchTool.id;
     }
 
     if (action === ANSWER || action === CLARIFY) {
       step({ decision, action, note, fallback });
       progress(action === CLARIFY ? 'Asking a clarifying question' : `Answering · ${calls} tool call${calls === 1 ? '' : 's'}`);
-      return { hits, clarify: action === CLARIFY, calls };
+      return { hits: mergeEvidence(found), clarify: action === CLARIFY, calls };
     }
 
     const tool = tools.find((t) => t.id === action)!;
@@ -262,7 +282,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     progress(`Step ${s.index + 1} · ${tool.title}: writing arguments…`);
     let args: Record<string, unknown>;
     try {
-      const fill = await fillArgs(tool, { state: state(), kind, files: knownFiles(), symbols: symbolsIn(hits), signal });
+      const fill = await fillArgs(tool, { state: state(), kind, known: { files: knownFiles(), symbols: symbolsIn(hits()), ranges: rangesIn(hits()) }, signal });
       if (fill.ok) {
         args = fill.args;
         patch({ args, argsRaw: sameJson(fill.raw, args) ? null : fill.raw, argModel: fill.model, argAttempts: fill.attempts });
@@ -334,8 +354,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
         signal,
       );
       const ev = tool.observe(out.output);
-      const fresh = ev.hits.filter((h) => !hits.some((x) => x.id === h.id));
-      hits.push(...fresh);
+      const added = addEvidence(found, tool.id, ev.hits);
       used(tool.id, ev.hits.length);
       if (tool.id === 'kb_search') recordSearch(out.ms, ev.hits.length);
       const text = typeof out.output === 'string' ? out.output : JSON.stringify(out.output, null, 2);
@@ -346,7 +365,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
         outputBytes: out.bytes,
         truncated: out.truncated,
         observation: ev.summary,
-        hits: fresh.length,
+        hits: added,
         endedAt: Date.now(),
         ms: out.ms,
       });
@@ -367,5 +386,5 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     }
   }
   progress(`Answering · ${calls} tool call${calls === 1 ? '' : 's'}`);
-  return { hits, clarify: false, calls };
+  return { hits: mergeEvidence(found), clarify: false, calls };
 }

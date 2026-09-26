@@ -59,7 +59,7 @@ export type ToolCallRecord = {
   error?: string;
   /** The line the next decision saw. */
   observation?: string;
-  /** Passages this call added to the answer's context. */
+  /** Passages this call added to the answer's context, or added text to (agent/evidence.ts). */
   hits?: number;
 };
 
@@ -76,10 +76,10 @@ export type AgentStep = {
   note?: string;
   /**
    * Set when the loop didn't take the decision as chosen: it wasn't trusted
-   * (search once, or answer), or it picked a symbol tool before any symbol
-   * was seen (look symbols up first).
+   * (search once, or answer), or it picked a tool whose argument nothing has
+   * shown yet: a symbol (look symbols up first) or a line range (search first).
    */
-  fallback?: 'low-confidence' | 'decision-failed' | 'needs-symbol';
+  fallback?: 'low-confidence' | 'decision-failed' | 'needs-symbol' | 'needs-range';
   call?: ToolCallRecord;
 };
 

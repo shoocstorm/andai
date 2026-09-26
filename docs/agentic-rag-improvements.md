@@ -20,13 +20,16 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 |---|---|---|
 | 1 | [Agent eval set](#1-agent-eval-set) | done 2026-09-26 · baseline below |
 | 2 | [Known symbols for code tools](#2-known-symbols-for-code-tools) | done 2026-09-26 · no change on the eval; hiding tools measured worse |
-| 3 | [Grounded line ranges for Read lines](#3-grounded-line-ranges-for-read-lines) | todo |
-| 4 | [Richer observations](#4-richer-observations) | todo |
-| 5 | [Merge evidence before answering](#5-merge-evidence-before-answering) | todo |
+| 3 | [Grounded line ranges for Read lines](#3-grounded-line-ranges-for-read-lines) | done 2026-09-26 · Read lines lands on a found passage; one call fewer |
+| 4 | [Richer observations](#4-richer-observations) | measured 2026-09-26 · no gain, not shipped; re-measure after item 5 |
+| 5 | [Merge evidence before answering](#5-merge-evidence-before-answering) | done 2026-09-26 · 0.6B facts 82.8% → 86.2%, no wasted calls |
 | 6 | [Prompt-prefix caching](#6-prompt-prefix-caching) | todo |
 | 7 | [Skip the obvious first decision](#7-skip-the-obvious-first-decision) | todo |
 | 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | todo |
 | 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | todo |
+
+**Deferred decision:** [a native llama.cpp engine](#deferred-a-native-llamacpp-engine)
+(bundled `llama-server` on Metal), to decide once items 3–9 are done.
 
 ---
 
@@ -160,6 +163,22 @@ choices, e.g. a `range` enum of `"file:start-end"` strings mapped back to
 **Done when.** Every Read lines call in the eval lands on a range that
 overlaps an earlier hit.
 
+**Done (2026-09-26).** Two questions joined the eval (`doc-quote-checkin`,
+`code-lines-cancel`), making 32; the "before" run is the new `agent-eval`
+baseline (`eval/item3-before-0.6b.json`).
+
+- **What ships:** Read lines takes one `range` argument, `file:start-end`,
+  held to the passages found so far padded by 20 lines (`rangesIn` in
+  `loop.ts`, `schemaFor` in `argfill.ts`) and listed in the argument prompt.
+  Rust still validates the file and clamps the lines. As in item 2, the
+  option isn't hidden until a range exists (that moved 0.6B's choices);
+  picking Read lines first searches instead (`fallback: 'needs-range'`).
+- **Measured** (`eval/item3-after-0.6b.json`): the one Read lines call read
+  `booking.ts:15-60`, the `cancelBooking` passage (35–40) the search had
+  found, padded; before, it chose 35–40 itself and then also asked for the
+  file outline, so the turn made one call fewer. Every other question had
+  the same outcome; the scorecard passed on every metric.
+
 ## 4. Richer observations
 
 **Why.** The next decision and argument fill only see a summary line of
@@ -173,6 +192,24 @@ decision.
 
 **Done when.** The eval shows better answer-fact hits or fewer wasted calls,
 at no more than +25% prompt tokens per decision.
+
+**Measured (2026-09-26), not shipped.** The first 100 characters of the top
+three passages went under each result, one line each (a quoted excerpt).
+Prompt tokens per decision rose 12% (310 → 346).
+
+| Setup | Answer facts | Grounded | Wasted calls |
+|---|---|---|---|
+| 0.6B, without → with excerpts | 82.8% → 79.3% | 46.4% → 46.4% | 2 → 0 |
+| 1.7B answers + 0.6B decisions, without → with | 96.6% → 96.6% | 89.3% → 89.3% | 2 → 0 |
+
+The "wasted" calls that went away are the two item 5 bug calls on
+`code-usages-refund` (they found the call site and were thrown away as
+duplicates); with excerpts the model skipped them and answered, with the
+same miss. The 0.6B fact lost was `code-lines-cancel`: with excerpts in its
+prompt, the argument writer picked `booking.ts:1-34` instead of the passage
+around `cancelBooking`. Nothing got better, so the change was reverted
+(reports: `eval/item4-*`). Re-measure after item 5, when those calls add
+what they find.
 
 ## 5. Merge evidence before answering
 
@@ -192,6 +229,31 @@ aligned with the UI source list.
 
 **Done when.** The eval shows no answer-fact regressions, and prompts that
 repeated text before now don't.
+
+**Done (2026-09-26).** `agent/evidence.ts`, used by `loop.ts`:
+- A passage whose ug node was already found keeps its place and gains the
+  text the new one adds (Find usages' call-site lines, a context bundle's
+  source); that call counts as having added something.
+- A passage inside a range read on purpose (Read lines, Read symbol source)
+  is dropped, since the read repeats its text; of two reads of one range, the
+  first stays.
+- Order for the answer and the UI source list (so `[n]` still matches):
+  reads, then lookups (symbols, context, usages, outlines, overview), then
+  search hits, each in arrival order. `buildSystem` cuts from the end, so
+  broad search hits give way to budget first.
+
+Measured against item 3's final run:
+
+| Setup | Answer facts | Grounded | Wasted calls |
+|---|---|---|---|
+| 0.6B | 82.8% → 86.2% | 46.4% → 53.6% | 2 → 0 |
+| 1.7B answers + 0.6B decisions | 96.6% → 96.6% | 89.3% → 85.7% | 2 → 0 |
+
+The 0.6B gain is `code-usages-refund`, the item 2 bug: the answer now names
+`cancelBooking`. The 1.7B grounding change is the same question: the answer
+got more exact (the call is on line 37, from the merged call site; before
+it said 35) but left out its `[1]` this time. No other question changed
+(`eval/item5-after-*`).
 
 ## 6. Prompt-prefix caching
 
@@ -248,3 +310,36 @@ with `dedupeHits`, with the arguments shown in the trace.
 
 **Done when.** The eval shows higher answer-fact hits for document questions
 without more decisions per question.
+
+---
+
+## Deferred: a native llama.cpp engine
+
+**Status:** to decide after the RAG items above are done (a human decision:
+it adds a native-code dependency, AGENTS.md §1.10).
+
+**Why.** WKWebView can only run wllama's compat (WebAssembly, Asyncify)
+build. It does use the GPU (every layer on WebGPU), but measured on an Apple
+M5 Max, Qwen3 1.7B reads prompts at about 185 tok/s and writes 30–65 tok/s,
+so a grounded answer waits about 3 s before its first word. Flash attention
+is unavailable on that path, and no wllama setting (threads, batch size)
+moved the numbers (docs/performance.md, *Engine*). Native llama.cpp on Metal
+would likely be several times faster at both; measure before deciding.
+
+**What it would take.**
+- Ship `llama-server` (or link llama.cpp through a Rust crate) for macOS and
+  Windows, pinned and checksummed like the models; sign it with the app.
+- Rust starts it bound to loopback on a random port with a per-launch token,
+  or talks to it over a pipe; the webview never gets a raw socket (§9: the
+  webview is untrusted, and a local server is a new attack surface).
+- Reuse the same GGUF files and the pinned catalog; keep the choice-based
+  decisions (`decide` needs raw next-token logprobs and GBNF, which
+  `llama-server` has).
+- Keep wllama as the fallback, and let `bun run eval:agent` and
+  `bun run bench:engine` compare the two engines on the same questions.
+
+**Open questions.** Binary size per platform (Metal and CPU builds), code
+signing and notarization, how models move between the two engines, and
+whether the speed-up survives the eval (answer quality should not change
+with the same weights).
+

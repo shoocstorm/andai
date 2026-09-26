@@ -45,9 +45,10 @@ pasting in whatever one search returns:
   question into a search phrase (for example *"What HTTP headers does wllama
   need for multi-threading?"* became *wllama multi-threading headers*); for
   code tools it picks the symbol or file. Arguments are held to each tool's
-  schema, and a file or symbol must be one the knowledge base or earlier
-  results showed; if it picks a symbol tool before any symbol has turned up,
-  it looks symbols up first, and the trace says so.
+  schema, and a file, symbol or line range must be one the knowledge base or
+  earlier results showed (Read lines reads around a passage already found,
+  with 20 lines either side); if it picks such a tool before anything has
+  turned up, it looks symbols up or searches first, and the trace says so.
 - **Tools built on [ug](https://github.com/shoocstorm/ug)**, offered to
   match what the knowledge base holds (documents, code or both; set
   automatically from your files, and you can change it):

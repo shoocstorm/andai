@@ -12,12 +12,26 @@ export type FillContext = {
   /** The decision state: request, recent turns, knowledge base, results so far (loop.ts). */
   state: string;
   kind: 'document' | 'code' | 'mixed';
-  /** Paths ug knows: the KB's indexed sources and files seen in results so far (loop.ts). */
-  files?: string[];
-  /** Code symbols the tools have shown this turn (loop.ts); a `symbol` argument must be one of them. */
-  symbols?: string[];
+  /** What the tools have shown so far (loop.ts); a matching argument must be one of them. */
+  known?: Known;
   signal?: AbortSignal;
 };
+
+export type Known = {
+  /** Paths ug knows: the KB's indexed sources and files seen in results so far. */
+  files?: string[];
+  /** Code symbols the tools have shown this turn. */
+  symbols?: string[];
+  /** `file:start-end` around each passage with lines, for Read lines. */
+  ranges?: string[];
+};
+
+/** Argument name → what it's held to, and how the prompt lists the choices. */
+const HELD = [
+  ['file', 'files', 'Files in the knowledge base'],
+  ['symbol', 'symbols', 'Symbols seen so far'],
+  ['range', 'ranges', 'Line ranges seen so far'],
+] as const;
 
 export type Fill =
   | { ok: true; args: Record<string, unknown>; raw: string; attempts: number; model: string | null }
@@ -28,18 +42,20 @@ const MAX_ATTEMPTS = 2;
 export const MAX_FILE_ENUM = 64;
 
 /**
- * The tool's schema, with a `file` argument held to the files that exist and
- * a `symbol` argument to the symbols seen so far. Left free, Qwen3 0.6B wrote
- * the knowledge base's name ("kb1") as the file for File outline, and every
- * retry repeated it; a free symbol name fails the same way ("No symbol named …").
+ * The tool's schema, with a `file`, `symbol` or `range` argument held to what
+ * the knowledge base and the results so far have shown. Left free, Qwen3 0.6B
+ * wrote the knowledge base's name ("kb1") as the file for File outline, and
+ * every retry repeated it; a free symbol name fails the same way ("No symbol
+ * named …"), and free line numbers read lines nothing pointed to.
  */
-export function schemaFor(tool: ToolDef, files: string[] = [], symbols: string[] = []): ObjectSchema | null {
+export function schemaFor(tool: ToolDef, known: Known = {}): ObjectSchema | null {
   if (!tool.schema) return null;
   let schema = tool.schema;
-  for (const [key, known] of [['file', files], ['symbol', symbols]] as const) {
+  for (const [key, from] of HELD) {
     const prop = schema.properties[key];
-    if (prop?.type !== 'string' || !known.length || known.length > MAX_FILE_ENUM) continue;
-    schema = { ...schema, properties: { ...schema.properties, [key]: { ...prop, enum: known } } };
+    const values = known[from] ?? [];
+    if (prop?.type !== 'string' || !values.length || values.length > MAX_FILE_ENUM) continue;
+    schema = { ...schema, properties: { ...schema.properties, [key]: { ...prop, enum: values } } };
   }
   return schema;
 }
@@ -58,10 +74,11 @@ export function parseObject(text: string): unknown {
 }
 
 export function fillMessages(tool: ToolDef, ctx: FillContext, previous?: { raw: string; errors: string[] }): ChatMessage[] {
-  const schema = schemaFor(tool, ctx.files, ctx.symbols);
-  const listed = (label: string, key: string, known?: string[]) =>
-    schema?.properties[key] && known?.length ? `${label}: ${known.slice(0, MAX_FILE_ENUM).join(', ')}${known.length > MAX_FILE_ENUM ? ', …' : ''}\n` : '';
-  const files = listed('Files in the knowledge base', 'file', ctx.files) + listed('Symbols seen so far', 'symbol', ctx.symbols);
+  const schema = schemaFor(tool, ctx.known);
+  const files = HELD.map(([key, from, label]) => {
+    const values = ctx.known?.[from];
+    return schema?.properties[key] && values?.length ? `${label}: ${values.slice(0, MAX_FILE_ENUM).join(', ')}${values.length > MAX_FILE_ENUM ? ', …' : ''}\n` : '';
+  }).join('');
   const msgs: ChatMessage[] = [
     {
       role: 'system',
@@ -87,7 +104,7 @@ export function fillMessages(tool: ToolDef, ctx: FillContext, previous?: { raw: 
 }
 
 export async function fillArgs(tool: ToolDef, ctx: FillContext): Promise<Fill> {
-  const schema = schemaFor(tool, ctx.files, ctx.symbols);
+  const schema = schemaFor(tool, ctx.known);
   if (!schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null };
   let previous: { raw: string; errors: string[] } | undefined;
   let model: string | null = null;

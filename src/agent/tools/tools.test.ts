@@ -43,7 +43,8 @@ describe('validate', () => {
     expect(validate(schema, 'query').ok).toBe(false);
     expect(validate(schema, [1]).ok).toBe(false);
     const lines = tool('kb_read_lines').schema!;
-    expect(validate(lines, { file: 'a.md', start: 0, end: 1.5 }).ok).toBe(false);
+    expect(validate(lines, { range: 5 }).ok).toBe(false);
+    expect(validate(lines, { range: 'a.md:1-20' }).ok).toBe(true);
     const syms = tool('kb_find_symbols').schema!;
     expect(validate(syms, { names: [], node_type: 'any' }).ok).toBe(false);
     expect(validate(syms, { names: ['a', ''], node_type: 'any' }).ok).toBe(false);
@@ -55,7 +56,8 @@ describe('schemaGrammar', () => {
   it('fixes key order, enum values and value types', () => {
     const g = schemaGrammar(tool('kb_search').schema!);
     expect(g.split('\n')[0]).toBe('root ::= "{" ws "\\"query\\"" ws ":" ws string ws "," ws "\\"scope\\"" ws ":" ws ("\\"broad\\"" | "\\"focused\\"") ws "}"');
-    expect(schemaGrammar(tool('kb_read_lines').schema!)).toMatch(/"\\"start\\"" ws ":" ws uint/);
+    const counted = { type: 'object' as const, properties: { n: { type: 'integer' as const, minimum: 1, maximum: 9 } }, required: ['n'], additionalProperties: false as const };
+    expect(schemaGrammar(counted)).toMatch(/"\\"n\\"" ws ":" ws uint/);
     expect(schemaGrammar(tool('kb_find_symbols').schema!)).toContain('"[" ws string (ws "," ws string){0,4} ws "]"');
   });
   it('covers every property, since the grammar makes each one present', () => {
@@ -95,7 +97,8 @@ describe('registry', () => {
       node_type: null,
       file_prefix: null,
     });
-    expect(tool('kb_read_lines').toCall({ file: 'a.md', start: 3, end: 9 }, ctx)).toEqual({ tool: 'kb_get_code', symbol: null, file: 'a.md', start: 3, end: 9 });
+    expect(tool('kb_read_lines').toCall({ range: 'notes/a:b.md:3-9' }, ctx)).toEqual({ tool: 'kb_get_code', symbol: null, file: 'notes/a:b.md', start: 3, end: 9 });
+    expect(() => tool('kb_read_lines').toCall({ range: 'a.md lines 3 to 9' }, ctx)).toThrow(/file:start-end/);
   });
 });
 
@@ -136,7 +139,7 @@ describe('fillArgs', () => {
   it('holds a file argument to the files that exist, and lists them', async () => {
     const files = ['notes.md', 'src/app.ts'];
     eng.replies = ['{"file":"kb1"}', '{"file":"notes.md"}'];
-    const fill = await fillArgs(tool('kb_file_context'), { ...ctx, files });
+    const fill = await fillArgs(tool('kb_file_context'), { ...ctx, known: { files } });
     expect(fill).toMatchObject({ ok: true, args: { file: 'notes.md' }, attempts: 2 });
     const p = eng.seen[0] as { grammar: string; messages: { content: string }[] };
     expect(p.grammar.split('\n')[0]).toBe('root ::= "{" ws "\\"file\\"" ws ":" ws ("\\"notes.md\\"" | "\\"src/app.ts\\"") ws "}"');
@@ -147,27 +150,37 @@ describe('fillArgs', () => {
 
   it('leaves the file argument free when no files are known or there are too many to list', () => {
     const t = tool('kb_file_context');
-    expect(schemaFor(t, [])).toBe(t.schema);
-    expect(schemaFor(t, Array.from({ length: MAX_FILE_ENUM + 1 }, (_, i) => `f${i}.md`))).toBe(t.schema);
-    expect(schemaFor(tool('kb_search'), ['notes.md'])).toBe(tool('kb_search').schema);
+    expect(schemaFor(t, { files: [] })).toBe(t.schema);
+    expect(schemaFor(t, { files: Array.from({ length: MAX_FILE_ENUM + 1 }, (_, i) => `f${i}.md`) })).toBe(t.schema);
+    expect(schemaFor(tool('kb_search'), { files: ['notes.md'] })).toBe(tool('kb_search').schema);
   });
 
   it('holds a symbol argument to the symbols seen so far, and lists them', async () => {
     const symbols = ['computeFare', 'VEHICLE_SURCHARGE'];
     eng.replies = ['{"symbol":"computeFare"}'];
-    const fill = await fillArgs(tool('kb_get_code'), { ...ctx, kind: 'code', symbols });
+    const fill = await fillArgs(tool('kb_get_code'), { ...ctx, kind: 'code', known: { symbols } });
     expect(fill).toMatchObject({ ok: true, args: { symbol: 'computeFare' } });
     const p = eng.seen[0] as { grammar: string; messages: { content: string }[] };
     expect(p.grammar.split('\n')[0]).toContain('("\\"computeFare\\"" | "\\"VEHICLE_SURCHARGE\\"")');
     expect(p.messages[1].content).toContain('Symbols seen so far: computeFare, VEHICLE_SURCHARGE');
-    for (const id of ['kb_symbol_context', 'kb_find_usages']) expect(schemaFor(tool(id), [], symbols)!.properties.symbol).toMatchObject({ enum: symbols });
+    for (const id of ['kb_symbol_context', 'kb_find_usages']) expect(schemaFor(tool(id), { symbols })!.properties.symbol).toMatchObject({ enum: symbols });
   });
 
   it('leaves the symbol argument free when none or too many are known', () => {
     const t = tool('kb_get_code');
-    expect(schemaFor(t, [], [])).toBe(t.schema);
-    expect(schemaFor(t, [], Array.from({ length: MAX_FILE_ENUM + 1 }, (_, i) => `s${i}`))).toBe(t.schema);
-    expect(schemaFor(tool('kb_file_context'), [], ['add'])).toBe(tool('kb_file_context').schema);
+    expect(schemaFor(t, { symbols: [] })).toBe(t.schema);
+    expect(schemaFor(t, { symbols: Array.from({ length: MAX_FILE_ENUM + 1 }, (_, i) => `s${i}`) })).toBe(t.schema);
+    expect(schemaFor(tool('kb_file_context'), { symbols: ['add'] })).toBe(tool('kb_file_context').schema);
+  });
+
+  it('holds Read lines to the line ranges seen so far, and lists them', async () => {
+    const ranges = ['operations.md:1-45', 'refund-policy.md:1-31'];
+    eng.replies = ['{"range":"operations.md:1-45"}'];
+    const fill = await fillArgs(tool('kb_read_lines'), { ...ctx, known: { ranges } });
+    expect(fill).toMatchObject({ ok: true, args: { range: 'operations.md:1-45' } });
+    const p = eng.seen[0] as { grammar: string; messages: { content: string }[] };
+    expect(p.grammar.split('\n')[0]).toContain('("\\"operations.md:1-45\\"" | "\\"refund-policy.md:1-31\\"")');
+    expect(p.messages[1].content).toContain('Line ranges seen so far: operations.md:1-45, refund-policy.md:1-31');
   });
 
   it('needs no model for a tool without arguments', async () => {

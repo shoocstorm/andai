@@ -76,6 +76,7 @@ Andai/
 │  ├─ agent/prompt.ts        PURE prompt assembly: keywords, system prompt, history, budgets, agent state
 │  ├─ agent/turn.ts          one turn: plan (agent loop) or analyze → retrieve (fixed) → build → generate
 │  ├─ agent/loop.ts          agent loop: decide → fill args → policy gate → run tool → observe; writes Message.agent
+│  ├─ agent/evidence.ts      PURE: merges what the tools found into the answer's passages (same node, covered ranges, order)
 │  ├─ agent/tools/           tool registry (code only), ug tools, argument filling, schema validation + GBNF
 │  ├─ kb/api.ts              typed wrappers over the Rust ug bridge + hit dedupe
 │  ├─ state/                 zustand stores: chat, kb, tools, persona, theme, layout, ui (persisted where noted)
@@ -105,8 +106,8 @@ Andai/
 [`decide` (llm/decide.ts, decision slot or chat model) → `fillArgs` (chat
 model, GBNF from the tool schema) → `validate` → policy gate (Auto / Ask →
 approval card) → `kbTool` (Rust `kb_tool` → `ug <cmd> --json`) →
-`tool.observe`] × up to `maxSteps` → `buildSystem` (tool results fenced as
-passages) + `buildHistory` → `engine.chat` → answer. Every decision and call
+`tool.observe` → `addEvidence`] × up to `maxSteps` → `mergeEvidence` →
+`buildSystem` (tool results fenced as passages) + `buildHistory` → `engine.chat` → answer. Every decision and call
 is written to `Message.agent`, which drives the tool chips, approval cards and
 the Execution Trace. **Agent mode off, or no KB:** `runTurn` → `kbSearch` (one
 `ug search` with the question) → `buildSystem` → `engine.chat`.
@@ -119,9 +120,13 @@ they are held to a grammar, validated in TS, then validated again in Rust,
 which is the trust boundary. When a decision can't be trusted (it failed,
 chose something not offered, or is below `minConfidence`), the loop falls
 back to what the fixed pipeline does: one plain search, then answer. Tools
-are offered by KB kind (`KbKind`: code tools only for code/mixed). A `file`
-or `symbol` argument is held to the files and code symbols known so far
-(`schemaFor`), because free-text names were the commonest failed call. Read-only
+are offered by KB kind (`KbKind`: code tools only for code/mixed). A `file`,
+`symbol` or Read lines `range` argument is held to the files, code symbols
+and passage line ranges known so far (`schemaFor`), because free-text names
+and line numbers were the commonest failed or aimless calls. A tool picked
+before anything has shown such a value looks it up or searches first; its
+option is never hidden, since removing options moves a small model's other
+choices (§2). Read-only
 tools default to *Auto* (a product decision, 2026-09-26: they only read the
 KB the user selected, and every call is traced); anything with another risk
 level defaults to *Ask*.

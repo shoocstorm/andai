@@ -89,6 +89,13 @@ const QUERY_GUIDE: Record<KbKind, string> = {
     'Write `query` as a short search phrase for retrieval over documents and source code: key concepts plus likely identifiers, not the user’s literal wording or a question.',
 };
 
+/** "notes/a.md:12-40" → file, start, end. The file may contain colons; the range is after the last one. */
+export function parseRange(range: string): { file: string; start: number; end: number } {
+  const m = /^(.+):(\d+)-(\d+)$/.exec(range.trim());
+  if (!m) throw new Error(`Expected a line range as file:start-end, got “${range.slice(0, 80)}”.`);
+  return { file: m[1], start: Number(m[2]), end: Number(m[3]) };
+}
+
 export const UG_TOOLS: ToolDef[] = [
   {
     id: 'kb_search',
@@ -132,18 +139,18 @@ export const UG_TOOLS: ToolDef[] = [
     kinds: ['document', 'code', 'mixed'],
     risk: 'read',
     command: 'ug get_code -f <file> -s <start> -e <end> --json',
+    // One `range` string instead of free file/start/end: loop.ts holds it to
+    // the passages found so far, padded (argfill.ts schemaFor).
     schema: {
       type: 'object',
       properties: {
-        file: { type: 'string', minLength: 1, maxLength: 256, description: 'file path exactly as shown in the results' },
-        start: { type: 'integer', minimum: 1, maximum: 1000000 },
-        end: { type: 'integer', minimum: 1, maximum: 1000000 },
+        range: { type: 'string', minLength: 5, maxLength: 300, description: 'file:start-end, one of the line ranges seen so far' },
       },
-      required: ['file', 'start', 'end'],
+      required: ['range'],
       additionalProperties: false,
     },
-    guide: () => 'Pick `file` from the tool results so far (copy the path exactly) and a line window around the part that matters.',
-    toCall: (a) => ({ tool: 'kb_get_code', symbol: null, file: String(a.file), start: Number(a.start), end: Number(a.end) }),
+    guide: () => 'Pick the `range` around the passage whose surrounding lines matter most.',
+    toCall: (a) => ({ tool: 'kb_get_code', symbol: null, ...parseRange(String(a.range)) }),
     observe: (out) => {
       const slices = arr(obj(out).slices).map(node);
       const hits = slices.filter((s) => s.code).map((s) => hit(s, s.code ?? '', 'lines'));

@@ -24,6 +24,7 @@ const agent = vi.hoisted(() => ({
   fillFail: null as string | null,
   fillFiles: [] as (string[] | undefined)[],
   fillSymbols: [] as (string[] | undefined)[],
+  fillRanges: [] as (string[] | undefined)[],
   failTools: [] as string[],
   tool: [] as { slug: string; call: Record<string, unknown> }[],
   output: {} as Record<string, unknown>,
@@ -58,9 +59,10 @@ vi.mock('../llm/decide', async (orig) => ({
 }));
 
 vi.mock('./tools/argfill', () => ({
-  fillArgs: async (tool: { id: string; schema: unknown }, ctx: { files?: string[]; symbols?: string[] }) => {
-    agent.fillFiles.push(ctx.files);
-    agent.fillSymbols.push(ctx.symbols);
+  fillArgs: async (tool: { id: string; schema: unknown }, ctx: { known?: { files?: string[]; symbols?: string[]; ranges?: string[] } }) => {
+    agent.fillFiles.push(ctx.known?.files);
+    agent.fillSymbols.push(ctx.known?.symbols);
+    agent.fillRanges.push(ctx.known?.ranges);
     if (!tool.schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null };
     if (agent.fillFail) return { ok: false, errors: [agent.fillFail], raw: 'nope', attempts: 2, model: 'Qwen3 0.6B' };
     // a list is consumed one fill per call
@@ -161,6 +163,7 @@ beforeEach(() => {
     fillFail: null,
     fillFiles: [],
     fillSymbols: [],
+    fillRanges: [],
     failTools: [],
     tool: [],
     output: { kb_search: { items: [hit] } },
@@ -339,7 +342,41 @@ describe('runTurn (agent mode)', () => {
     expect(agent.fillSymbols).toEqual([[], ['add']]);
   });
 
-  it('does not count document sections as symbols', async () => {
+  it('reads lines only around what was found: the hit padded by 20 lines', async () => {
+    // A probe asked for lines 100–200 of a file it hadn't seen (docs/agentic-rag-improvements.md, item 3).
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_read_lines' }, { chosen: 'answer_now' }];
+    agent.fills.kb_read_lines = { range: 'README.md:1-53' };
+    await runTurn('what does the readme say about headers?');
+    expect(agent.fillRanges[1]).toEqual(['README.md:1-53']);
+    expect(agent.tool[1].call).toMatchObject({ tool: 'kb_get_code', file: 'README.md', start: 1, end: 53 });
+  });
+
+  it('searches first when Read lines is chosen before any line range turned up', async () => {
+    agent.decisions = [{ chosen: 'kb_read_lines' }, { chosen: 'answer_now' }];
+    await runTurn('show me the headers section');
+    expect(agent.seenOptions[0]).toContain('kb_read_lines');
+    expect(steps()[0]).toMatchObject({ action: 'kb_search', fallback: 'needs-range' });
+    expect(steps()[0].note).toMatch(/Read lines needs a line range .* searching first/);
+  });
+
+  it('keeps what a later call adds to a passage it already has, and answers from the merged evidence', async () => {
+    // docs/agentic-rag-improvements.md, item 5: the call site Find usages found was dropped as a duplicate.
+    useKb.setState({ kbs: [kb({ kind: 'code' })] });
+    const cancel = { id: 'f:cancel', name: 'cancelBooking', node_type: 'Function', file: 'booking.ts', start_line: 35, end_line: 40, snippet: 'function cancelBooking() {…}' };
+    agent.output.kb_search = { items: [cancel] };
+    agent.output.kb_find_usages = {
+      nodes: [{ subject: { name: 'refundFraction' }, users: [{ ...cancel, call_sites: [{ line: 37, text: 'const amount = refundFraction(hours)' }] }] }],
+    };
+    agent.fills.kb_find_usages = { symbol: 'cancelBooking' };
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_find_usages' }, { chosen: 'answer_now' }];
+    await runTurn('who calls refundFraction?');
+    expect(steps()[1].call).toMatchObject({ status: 'done', hits: 1 });
+    expect(assistant().sources).toHaveLength(1);
+    const system = engine.seen[0].messages[0].content;
+    expect(system).toContain('function cancelBooking() {…}\nFunction cancelBooking → uses refundFraction\n  37: const amount = refundFraction(hours)');
+  });
+
+    it('does not count document sections as symbols', async () => {
     useKb.setState({ kbs: [kb({ kind: 'mixed' })] });
     agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_get_code' }, { chosen: 'answer_now' }];
     agent.fills.kb_find_symbols = { names: ['readme'], node_type: 'any' };

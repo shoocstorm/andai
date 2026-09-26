@@ -27,9 +27,11 @@ const q = { id: 'q', kb: 'docs', prompt: '?', first: ['kb_search'], facts: ['48'
 const call = (over: Record<string, unknown> = {}) => ({ tool: 'kb_search', status: 'done', args: { query: 'x' }, argsFallback: false, hits: 2, error: null, observation: '', ...over });
 
 describe('agent eval question set', () => {
-  it('has 20–30 questions with unique ids, a known KB, expected first actions and valid regexes', () => {
+  it('has 20–40 questions with unique ids, a known KB, expected first actions and valid regexes', () => {
+    // Items add questions that exercise what they change (docs/agentic-rag-improvements.md);
+    // past 40 a run takes long enough that it stops being run before every change.
     expect(cases.length).toBeGreaterThanOrEqual(20);
-    expect(cases.length).toBeLessThanOrEqual(30);
+    expect(cases.length).toBeLessThanOrEqual(40);
     expect(new Set(cases.map((c: { id: string }) => c.id)).size).toBe(cases.length);
     for (const c of cases) {
       expect(['docs', 'code', 'mixed']).toContain(c.kb);
