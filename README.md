@@ -69,6 +69,8 @@ Andai (Tauri 2)
 
 ```bash
 bun install              # also copies the wllama wasm builds into public/wllama/
+                         # and installs the pre-push hook (.githooks/: bun run check before every push;
+                         # bypass once with git push --no-verify)
 bun run tauri dev        # desktop app with hot reload
 bun run tauri build      # macOS → src-tauri/target/release/bundle/macos/Andai.app
                          # Windows: bun run tauri build --bundles nsis → bundle/nsis/*-setup.exe

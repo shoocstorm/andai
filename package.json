@@ -11,7 +11,7 @@
     "typecheck": "bun --bun tsc --noEmit",
     "tauri": "bunx --bun tauri",
     "build:mac-arm64": "bunx --bun tauri build --config src-tauri/tauri.laya.conf.json",
-    "postinstall": "bun scripts/copy-wllama.mjs",
+    "postinstall": "bun scripts/copy-wllama.mjs && bun scripts/install-hooks.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

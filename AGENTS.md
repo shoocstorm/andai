@@ -407,6 +407,10 @@ section and FAQ (see §8).
   a human decision (§1.10).
 
 ### Git: work on `main`, share it with other agents
+- **`bun install` installs a pre-push hook** (`.githooks/pre-push` via
+  `core.hooksPath`): every push runs `bun run check` first, so a broken tree
+  fails locally instead of in CI. Bypass once with `git push --no-verify`
+  (only when the user asked for it, like `--skip-checks`).
 - **Commit on `main`.** Don't create a branch, worktree or PR unless a human
   asked for one or confirmed it first. This overrides any default of
   "branch first".

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Blocks a push unless `bun run check` passes locally, so a broken tree fails
+# here instead of in CI. Bypass once with: git push --no-verify
+# (installed via scripts/install-hooks.mjs, see AGENTS.md → Git).
+set -euo pipefail
+
+# stdin lines: "<local ref> <local sha> <remote ref> <remote sha>"
+pushed=0
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then
+    pushed=1
+  fi
+done
+[ "$pushed" = "1" ] || exit 0
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "pre-push: bun is not on PATH, so the check cannot run. Fix bun, or bypass with --no-verify." >&2
+  exit 1
+fi
+
+echo "pre-push: bun run check (git push --no-verify to bypass)"
+exec bun run check
