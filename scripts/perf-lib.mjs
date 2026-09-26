@@ -107,3 +107,19 @@ export function compare(section, measured, { update = false, machineBound = true
 }
 
 const round = (v) => (Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 1000) / 1000);
+
+/**
+ * A stream 'data' handler that passes on complete lines only. A chunk can end
+ * mid-line, and a long harness line (a CASE or RESULT record) split across two
+ * chunks was lost; the unfinished tail waits for the next chunk. Use one per
+ * stream, since stdout and stderr interleave.
+ */
+export function byLine(onLines) {
+  let rest = '';
+  return (buf) => {
+    const parts = (rest + buf.toString()).split('\n');
+    rest = parts.pop();
+    onLines(parts);
+  };
+}
+

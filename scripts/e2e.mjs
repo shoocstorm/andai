@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { compare } from './perf-lib.mjs';
+import { byLine, compare } from './perf-lib.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const release = process.argv.includes('--release');
@@ -76,8 +76,8 @@ let result = null;
 let failure = null;
 
 const done = new Promise((resolveDone) => {
-  const onData = (buf) => {
-    for (const line of buf.toString().split('\n')) {
+  const onData = (lines) => {
+    for (const line of lines) {
       if (!line.includes('[webview]')) continue;
       const text = line.slice(line.indexOf('[webview]') + 10);
       lines.push(text);
@@ -87,8 +87,8 @@ const done = new Promise((resolveDone) => {
       if (text.startsWith('OK') || text.startsWith('FAIL')) resolveDone();
     }
   };
-  child.stdout.on('data', onData);
-  child.stderr.on('data', onData);
+  child.stdout.on('data', byLine(onData));
+  child.stderr.on('data', byLine(onData));
   child.on('exit', () => resolveDone());
   setTimeout(() => {
     failure ??= `timed out after ${timeoutMs / 1000}s`;

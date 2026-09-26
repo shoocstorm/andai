@@ -19,7 +19,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { diffCases, loadCases, scoreCase, scorecard } from './eval-lib.mjs';
-import { compare } from './perf-lib.mjs';
+import { byLine, compare } from './perf-lib.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const argv = process.argv.slice(2);
@@ -78,8 +78,8 @@ let start = null;
 const byId = new Map(cases.map((c) => [c.id, c]));
 
 await new Promise((resolveDone) => {
-  const onData = (buf) => {
-    for (const line of buf.toString().split('\n')) {
+  const onData = (lines) => {
+    for (const line of lines) {
       if (!line.includes('[webview]')) continue;
       const text = line.slice(line.indexOf('[webview]') + 10);
       if (text.startsWith('CASE ')) {
@@ -98,8 +98,8 @@ await new Promise((resolveDone) => {
       if (text.startsWith('OK') || text.startsWith('FAIL')) resolveDone();
     }
   };
-  child.stdout.on('data', onData);
-  child.stderr.on('data', onData);
+  child.stdout.on('data', byLine(onData));
+  child.stderr.on('data', byLine(onData));
   child.on('exit', () => resolveDone());
   setTimeout(() => {
     failure ??= `timed out after ${timeoutMs / 1000}s`;

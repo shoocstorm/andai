@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { byLine } from './perf-lib.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const model = process.env.BENCH_MODEL ?? 'qwen3-1.7b';
@@ -40,8 +41,8 @@ const env = {
 const child = spawn('bun', ['run', 'tauri', 'dev'], { cwd: root, env, detached: true });
 const results = [];
 await new Promise((done) => {
-  const onData = (buf) => {
-    for (const line of buf.toString().split('\n')) {
+  const onData = (lines) => {
+    for (const line of lines) {
       if (!line.includes('[webview]')) continue;
       const text = line.slice(line.indexOf('[webview]') + 10);
       if (text.startsWith('BENCH ')) {
@@ -53,8 +54,8 @@ await new Promise((done) => {
       if (text.startsWith('OK') || text.startsWith('FAIL')) done();
     }
   };
-  child.stdout.on('data', onData);
-  child.stderr.on('data', onData);
+  child.stdout.on('data', byLine(onData));
+  child.stderr.on('data', byLine(onData));
   child.on('exit', done);
   setTimeout(done, Number(process.env.BENCH_TIMEOUT_MS ?? 900_000));
 });
