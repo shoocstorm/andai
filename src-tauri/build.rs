@@ -8,6 +8,7 @@ const COMMANDS: &[&str] = &[
     "kb_list",
     "kb_create",
     "kb_add_files",
+    "kb_pick_files",
     "kb_remove_source",
     "kb_delete",
     "kb_index",

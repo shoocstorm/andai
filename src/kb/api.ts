@@ -52,6 +52,9 @@ export const ugStatus = () =>
   inTauri ? invoke<UgStatus>('ug_status') : Promise.resolve<UgStatus>({ found: false, path: null, version: null });
 export const kbList = () => (inTauri ? invoke<KbInfo[]>('kb_list') : Promise.resolve<KbInfo[]>([]));
 export const kbCreate = (name: string) => call<KbInfo>('kb_create', { name });
+/** Rust opens the dialog and grants what the user picks (src-tauri/src/grants.rs). */
+export const kbPickFiles = (title: string) => call<string[]>('kb_pick_files', { title });
+/** Only paths the user dropped or picked are accepted; others come back as per-file errors. */
 export const kbAddFiles = (slug: string, paths: string[]) =>
   call<[KbInfo, string[]]>('kb_add_files', { slug, paths });
 export const kbRemoveSource = (slug: string, file: string) => call<KbInfo>('kb_remove_source', { slug, file });

@@ -84,10 +84,18 @@ executed**; every action says it's simulated.
 
 ---
 
-## Privacy
+## Privacy & security
 
 - Inference and indexing run locally. The only network use is downloading a
-  model you chose, from Hugging Face.
+  model you chose, from Hugging Face. A content security policy enforces this:
+  the app can't reach any other host.
+- **Answers can't phone home.** Images in a model's answer are never loaded,
+  and links show their real host and can only be copied, not opened. A
+  document crafted to trick the model can't use either to send your text out.
+- **Only files you choose are read.** Andai ingests exactly the files you
+  drop or pick with **Upload**, nothing else on your Mac. Files over 100 MB are
+  refused.
+- Knowledge-base copies are readable only by your macOS user account.
 - No telemetry, analytics or accounts.
 - Your data lives in `~/Library/Application Support/dev.andai.agent/`
   (knowledge-base copies), `~/.ug/andai-*` (knowledge graphs) and the app's
@@ -101,6 +109,7 @@ executed**; every action says it's simulated.
   PATH).
 - Builds are currently **unsigned**: on first launch, right-click Andai.app → Open.
 - Andai uses local port **14230** internally. If another app holds it, Andai
-  can't start.
+  shows an error and doesn't start, rather than loading something it doesn't
+  own. Quit the other app (`lsof -i :14230` shows which one) and reopen Andai.
 - Small on-device models are fast and private but less capable than large
   cloud models. Grounding answers in a knowledge base helps a lot.

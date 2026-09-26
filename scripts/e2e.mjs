@@ -11,6 +11,7 @@
 // Needs: ug on PATH (or ~/.local/bin), network on first run for the model.
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -19,6 +20,19 @@ const release = process.argv.includes('--release');
 const model = process.env.E2E_MODEL ?? 'qwen3-0.6b';
 const timeoutMs = Number(process.env.E2E_TIMEOUT_MS ?? 900_000);
 const fixtures = ['tests/fixtures/wllama-notes.md', 'tests/fixtures/hello.pdf'].map((f) => resolve(root, f));
+// Egress canary (AGENTS.md §9): a local server the CSP doesn't allow. It
+// answers with permissive CORS/CORP so only the CSP can stop a request, and
+// counts every one that arrives. The webview tries to reach it; zero hits
+// proves the block without any real outbound traffic.
+const canaryHits = [];
+const canary = createServer((req, res) => {
+  canaryHits.push(req.url);
+  res.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Cross-Origin-Resource-Policy': 'cross-origin' });
+  res.end('leaked');
+});
+await new Promise((r) => canary.listen(0, '127.0.0.1', r));
+const canaryUrl = `http://127.0.0.1:${canary.address().port}/exfil`;
+
 // Knowledge-base files go to a throwaway dir, never the user's real ones.
 const dataDir = mkdtempSync(join(tmpdir(), 'andai-e2e-'));
 const env = {
@@ -26,7 +40,12 @@ const env = {
   VITE_SMOKE: 'e2e',
   VITE_SMOKE_FILES: fixtures.join(','),
   VITE_SMOKE_MODEL: model,
+  VITE_SMOKE_CANARY: canaryUrl,
   ANDAI_DATA_DIR: dataDir,
+  // Harness-only switches, read by Rust at startup (AGENTS.md §9): enable
+  // dev_log/dev_exit, and grant the fixtures the way a drop would.
+  ANDAI_SMOKE: '1',
+  ANDAI_E2E_FILES: fixtures.join(','),
 };
 
 function launch() {
@@ -37,7 +56,13 @@ function launch() {
   // Minimal environment, like a Finder launch: proves ug is found without the shell PATH.
   return spawn(resolve(root, 'src-tauri/target/release/andai'), [], {
     cwd: root,
-    env: { HOME: process.env.HOME, PATH: '/usr/bin:/bin', ANDAI_DATA_DIR: dataDir },
+    env: {
+      HOME: process.env.HOME,
+      PATH: '/usr/bin:/bin',
+      ANDAI_DATA_DIR: dataDir,
+      ANDAI_SMOKE: env.ANDAI_SMOKE,
+      ANDAI_E2E_FILES: env.ANDAI_E2E_FILES,
+    },
     detached: true,
   });
 }
@@ -73,6 +98,7 @@ try {
   process.kill(-child.pid, 'SIGTERM');
 } catch {}
 rmSync(dataDir, { recursive: true, force: true });
+canary.close();
 
 // ── assertions ─────────────────────────────────────────────────────────────
 const checks = [];
@@ -83,6 +109,7 @@ if (failure || !result) {
 } else {
   const { caps, engine, kb, steps, sources, stats, answer } = result;
   check('webview is cross-origin isolated', caps.isolated && caps.sharedArrayBuffer);
+  check('CSP blocked egress (the canary got no requests)', canaryHits.length === 0, JSON.stringify(canaryHits));
   check('wllama runs multi-threaded', /multi/.test(engine?.threads ?? ''), engine?.threads);
   check('knowledge base indexed by ug', kb.status === 'ready' && kb.nodes > 0 && !kb.error, JSON.stringify(kb));
   check('every source indexed', kb.sources.length === fixtures.length && kb.sources.every((s) => s.status === 'indexed'));

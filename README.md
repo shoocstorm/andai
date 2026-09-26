@@ -53,6 +53,16 @@ First launch:
 | Model registry (download, load, unload, evict) | **Real**: wllama `ModelManager` |
 | Workflows, approvals, tool library, node editor, run simulation | **Simulated**: mock data in `src/mock/workflows.ts` |
 
+## Security
+
+Andai treats its own webview as untrusted, because model output can be steered
+by a poisoned document. A content security policy limits the network to
+Hugging Face. Answers never load images or open links. Rust ingests only files
+you dropped or picked, and the app refuses to start if another process holds
+its UI port. The threat model and the checklist for every change are in
+[AGENTS.md §9](AGENTS.md#9-security). To report a vulnerability, see
+[SECURITY.md](SECURITY.md).
+
 ## Why Tauri, and the WebKit details that matter
 
 gpuix renders with Bun. wllama's default wasm needs **Memory64 + JSPI**, which Bun's JavaScriptCore lacks, and its compat build crashed mid-generation under Bun. So the UI moved to a webview.

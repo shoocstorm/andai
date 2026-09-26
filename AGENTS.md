@@ -67,7 +67,9 @@ Andai/
 │  ├─ mock/workflows.ts      data for the simulated Workflows screens
 │  └─ smoke.ts               in-webview test harness (VITE_SMOKE)
 ├─ src-tauri/
-│  ├─ src/lib.rs             app setup; release UI served from http://localhost:14230
+│  ├─ src/lib.rs             app setup, navigation lock, drop → file grants
+│  ├─ src/ui_server.rs       loopback server for the release UI (http://localhost:14230)
+│  ├─ src/grants.rs          which files the webview may ingest (drop / Rust dialog only)
 │  ├─ src/ug.rs              knowledge bases → `ug gen/search/list/remove` CLI
 │  ├─ build.rs               app command manifest (ACL)
 │  └─ capabilities/default.json
@@ -108,6 +110,29 @@ Execution Trace.
 - **Qwen3 emits `<think></think>` even with thinking off.** `splitThink` treats
   an empty pair as no reasoning. Reasoning is never replayed to the model in
   history.
+- **Whoever answers on port 14230 gets full IPC.** `ui_server.rs` binds
+  `127.0.0.1` and `[::1]` before any window exists; if either is taken, Andai
+  shows an error and opens no window. (`tauri-plugin-localhost` bound in a
+  background thread and opened the window anyway.) See §9.
+- **ug has no `--` separator.** `ug search -- "q"` fails with "missing query
+  argument", so `search_query()` prefixes a query that starts with `-` with a
+  space, which keeps it positional (ug 0.1.21). Without that, a query could pass
+  `--base-url` and send itself to a remote embedder.
+- **Model downloads go to `huggingface.co`, then redirect to a regional
+  `*.cdn.hf.co` host** (measured: `us.aws.cdn.hf.co`). That's why `connect-src`
+  allows `https://*.hf.co`.
+- **Vite answers a revalidated `index.html` with a bare 304**, and WebKit
+  keeps the cached headers, so a webview that cached the page before a CSP
+  change never enforced it (measured: `new Function` ran). The
+  `freshDocuments` plugin in `vite.config.ts` strips `If-None-Match` for
+  documents. The release server sends no ETag.
+- **WKWebView rejects a CSP-blocked fetch with a bare "Load failed"** and
+  doesn't fire `securitypolicyviolation` for `connect-src`. The e2e run proves
+  the block with a canary server instead (§9).
+- **wllama needs `'wasm-unsafe-eval'` and `worker-src blob:`**, and no eval.
+  Inline `style` attributes need `style-src 'unsafe-inline'`, so
+  `dangerousDisableAssetCspModification: ["style-src"]` keeps Tauri from adding
+  a nonce there. A nonce would make browsers ignore `'unsafe-inline'`.
 - **wllama loads single GGUF files up to 2 GB.** Larger models need gguf-split
   shards; `models.test.ts` enforces the limit.
 
@@ -178,6 +203,8 @@ section and FAQ (see §8).
 5. Add a typed wrapper in `src/kb/api.ts` (or a sibling module)
 6. `npm test` then checks steps 2–4 (`tauri-acl.test.ts`), and
    `npm run test:e2e:release` proves it works in the shipped build.
+7. Go through the security checklist in §9. The caller is the webview, and
+   the webview is untrusted.
 
 ### Dependencies
 - Pin exact versions in `package.json`. `@wllama/wllama` and
@@ -248,6 +275,7 @@ Rules:
 - [ ] Real vs. simulated table (§3) and platform facts (§2) still true, or updated
 - [ ] README / this file updated if commands, setup or behavior changed
 - [ ] **Docs and website updated** for any user-visible change (§8), in the same change
+- [ ] Security checklist (§9) holds, and `tests/unit/security.test.ts` passes without loosening an allowlist
 
 ---
 
@@ -311,8 +339,9 @@ Before announcing a release, also run `npm run test:e2e:release` locally
 (CI can't run it: it needs ug and a model). Then launch the downloaded `.dmg`
 build, ask a grounded question and switch themes.
 
-Known constraints to keep in mind: the release UI needs port **14230** free
-(the app currently can't start without it), and dev (`localhost:1420`) and
+Known constraints to keep in mind: the release UI needs port **14230** free.
+If another process holds it, Andai refuses to start and shows why, and never
+loads the other process's page (§9). Also, dev (`localhost:1420`) and
 release (`localhost:14230`) have separate webview storage, including separate
 model caches.
 
@@ -356,4 +385,95 @@ Rules:
   resolve, anchors exist, screenshots have alt text, and the Workflows preview
   stays labeled simulated. It can't judge whether prose is still *true*.
   That part is on you.
+
+---
+
+## 9. Security
+
+Security is part of the product promise ("your documents never leave the
+machine"), not a feature on top of it. Every rule below is enforced by a test.
+When you change one, change its test and record the reason here.
+
+### Threat model
+
+| Asset | Where |
+|---|---|
+| The user's documents | KB copies in app data, ug graphs in `~/.ug/andai-*` |
+| Chats, persona, settings | webview storage (localStorage) |
+| Anything else readable by the user | the filesystem the Rust side can reach |
+
+| Adversary | Can | Mitigation |
+|---|---|---|
+| **A malicious document** (prompt injection) | steer what the model writes, which is then rendered in the webview | Markdown loads no images and links are copy-only (`components/ui.tsx`); the CSP blocks egress; the navigation lock |
+| **Script running in the webview** (the result of any of the above, or a compromised dependency) | call every app command | Rust validates every argument; file grants; argument hardening for ug; harness commands gated |
+| **Another local process** | squat port 14230 to serve its own page with our IPC | `ui_server.rs` binds first on both loopback families or refuses to start; Host check against DNS rebinding |
+| **A web page in the user's browser** | send requests to `localhost:14230` | Host must be `localhost:14230`; only static assets are served; the IPC bridge exists only in the app's webview |
+
+Out of scope for now: an attacker with the user's login or root, and physical
+access (rely on FileVault). Encryption at rest is planned (below).
+
+### Principles
+
+1. **The webview is untrusted. Rust is the trust boundary.** Validate every
+   command argument as if an attacker sent it. The UI's checks are for UX,
+   not safety.
+2. **Least privilege.** A command, plugin permission, CSP source or origin
+   must justify its presence. The allowlists live in
+   `tests/unit/security.test.ts`, and growing one is a product decision (§1.10).
+3. **Egress is deny-by-default.** CSP `connect-src` is `self`, IPC and Hugging
+   Face. Nothing in `src/` besides `llm/models.ts` names a remote URL, and the
+   Rust side has no HTTP client.
+4. **Users choose files, never the webview.** `kb_add_files` only accepts a
+   path the user granted by drag-and-drop or the dialog opened by Rust
+   (`grants.rs`). Each grant is one file, canonicalized and consumed once.
+5. **Fail closed.** If the port can't be owned, there is no window. If a
+   path isn't granted, it isn't read. If a query looks like a flag, it's
+   neutralized.
+
+### What enforces it
+
+| Control | Code | Test |
+|---|---|---|
+| CSP (tauri.conf.json, mirrored by Vite in dev) | `tauri.conf.json`, `vite.config.ts` | `security.test.ts`; e2e: eval blocked, egress canary gets no requests |
+| Safe Markdown rendering | `components/ui.tsx` | `components/ui.test.tsx` |
+| Navigation lock, no new windows | `lib.rs`, `ui_server::is_app_url` | Rust unit test; e2e |
+| Owned loopback server, Host check, hardening headers | `ui_server.rs` | Rust unit tests (squatted port, 403, headers, real sockets) |
+| File grants | `grants.rs`, `ug::add_sources` | Rust unit tests (ungranted, consumed once, symlink); e2e |
+| ug argument hardening, budgets clamped | `ug::search_query`, `ug::search_limits` | Rust unit tests |
+| Private files (0700 dirs / 0600 files), 100 MB cap, absolute PATH only | `ug.rs` | Rust unit tests |
+| `dev_log` / `dev_exit` need `ANDAI_SMOKE=1` | `lib.rs` | `security.test.ts` |
+| Webview holds no fs/shell/http/opener/dialog permission | `capabilities/default.json` | `security.test.ts` |
+
+`ANDAI_SMOKE` and `ANDAI_E2E_FILES` are read from the environment by Rust. The
+webview can't set them. Only the e2e runner does.
+
+### Security checklist (every change)
+
+- [ ] New command: every argument is validated in Rust (slugs, names, sizes,
+      ranges). Paths come from a grant, never from the webview directly.
+- [ ] Anything passed to a CLI can't be parsed as a flag, and each argument
+      is its own `arg()`.
+- [ ] No new network destination: no CSP source, URL literal or HTTP client
+      without a product decision recorded in §1.4.
+- [ ] Model or document text is rendered only through `<Markdown>`, never as
+      raw HTML, and never as a live link or image.
+- [ ] New plugin permission or capability: justified here, and added to the
+      allowlist in `security.test.ts`.
+- [ ] New files under app data are created with private permissions
+      (`create_private_dir` / `private_file`).
+
+### Planned
+
+- **Model integrity:** pin catalog URLs to an immutable Hugging Face commit and
+  verify size. Changing URLs re-downloads cached models, so evicting the old
+  cache needs a confirm step (§1.5).
+- **Dependency audit in CI:** `npm audit --omit=dev` and `cargo audit`.
+- **Prompt-injection hygiene:** delimit retrieved passages, and have the
+  system prompt say they are data, not instructions.
+- **Encryption at rest** (needs a human decision, §1.10): a Keychain-held key,
+  chats moved to an encrypted file owned by Rust, and encrypted KB copies, with
+  a one-time migration behind a confirm step.
+- **Gate for promoting simulated features (§3):** before any tool or workflow
+  becomes real, every model-initiated action needs explicit user approval in
+  the UI, a per-tool capability, and an entry in the Execution Trace.
 

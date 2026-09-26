@@ -41,8 +41,8 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
- "tauri-plugin-localhost",
  "tempfile",
+ "tiny_http",
 ]
 
 [[package]]
@@ -3300,21 +3300,6 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.1.6+spec-1.1.0",
  "url",
-]
-
-[[package]]
-name = "tauri-plugin-localhost"
-version = "2.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c8d72c024121b1a3d9268293d49a56baf01a8c785561c85d17872588b839e55"
-dependencies = [
- "http",
- "log",
- "serde",
- "serde_json",
- "tauri",
- "thiserror 2.0.21",
- "tiny_http",
 ]
 
 [[package]]

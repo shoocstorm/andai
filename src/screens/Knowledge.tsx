@@ -1,4 +1,3 @@
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import {
   AlertTriangle,
   CloudUpload,
@@ -18,15 +17,17 @@ import {
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { Bar, Modal, Segmented, Slider, fmtAgo, fmtBytes } from '../components/ui';
-import { inTauri, type KbInfo, type Source } from '../kb/api';
+import { inTauri, kbPickFiles, type KbInfo, type Source } from '../kb/api';
 import { addFiles, createKb, deleteKb, indexKb, removeSource, useKb } from '../state/kb';
 import { toast, useUi } from '../state/ui';
 
-export const ACCEPT = ['pdf', 'md', 'markdown', 'mdx', 'txt', 'text', 'log', 'rst', 'csv', 'tsv', 'ts', 'tsx', 'js', 'jsx', 'mjs', 'py', 'java', 'rs'];
-
 export async function pickFiles(title: string): Promise<string[]> {
-  const picked = await openDialog({ multiple: true, title, filters: [{ name: 'Documents', extensions: ACCEPT }] });
-  return Array.isArray(picked) ? picked : picked ? [picked] : [];
+  try {
+    return await kbPickFiles(title);
+  } catch (e) {
+    toast({ tone: 'error', title: 'Could not open the file picker', body: String(e) });
+    return [];
+  }
 }
 
 export function Knowledge() {

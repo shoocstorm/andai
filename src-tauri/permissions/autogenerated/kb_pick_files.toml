@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kb-pick-files"
+description = "Enables the kb_pick_files command without any pre-configured scope."
+commands.allow = ["kb_pick_files"]
+
+[[permission]]
+identifier = "deny-kb-pick-files"
+description = "Denies the kb_pick_files command without any pre-configured scope."
+commands.deny = ["kb_pick_files"]

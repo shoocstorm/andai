@@ -54,6 +54,40 @@
   text-decoration: none;
   border-bottom: 1px dashed color-mix(in srgb, var(--blue) 40%, transparent);
 }
+/* Links in model output are copy-only and show their real host (AGENTS.md §9). */
+.md-link {
+  color: var(--blue);
+  border-bottom: 1px dashed color-mix(in srgb, var(--blue) 40%, transparent);
+}
+.md-link-host {
+  margin-left: 4px;
+  font: 0.78em var(--font-mono);
+  color: var(--text-3);
+}
+.md-link-copy {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 3px;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 150ms var(--ease), background 150ms var(--ease);
+}
+.md-link-copy:hover,
+.md-link-copy:focus-visible {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+.md-blocked {
+  font: 0.82em var(--font-mono);
+  color: var(--text-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 1px 6px;
+}
 .md h1,
 .md h2,
 .md h3,

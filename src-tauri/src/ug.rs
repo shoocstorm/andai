@@ -13,14 +13,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::grants::FileGrants;
+
 const PROJECT_PREFIX: &str = "andai-";
+/// Longest search query passed to ug; anything larger is not a question.
+const MAX_QUERY_BYTES: usize = 2048;
+/// Largest file a knowledge base accepts, so one drop can't fill the disk.
+const MAX_SOURCE_BYTES: u64 = 100 * 1024 * 1024;
 
 /// Slugs with a `ug gen` in flight; a second index request for one is refused.
 #[derive(Default)]
@@ -87,9 +93,15 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Relative PATH entries (`.`, `bin`) resolve against whatever the cwd is, so
+/// they could pick up a planted `ug`; only absolute directories are probed.
+fn absolute_dirs(dirs: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    dirs.into_iter().filter(|d| d.is_absolute()).collect()
+}
+
 fn ug_path() -> Option<PathBuf> {
     let from_path = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).map(|d| d.join("ug")).collect::<Vec<_>>())
+        .map(|p| absolute_dirs(std::env::split_paths(&p)).into_iter().map(|d| d.join("ug")).collect::<Vec<_>>())
         .unwrap_or_default();
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let fallbacks = [".local/bin/ug", ".cargo/bin/ug", ".ug/bin/ug"]
@@ -135,6 +147,29 @@ fn run_json(mut cmd: Command) -> Result<Value, String> {
     serde_json::from_slice(&out.stdout).map_err(|e| format!("bad ug JSON: {e}"))
 }
 
+/// Knowledge-base folders hold the user's documents: owner-only (0700).
+/// Existing folders keep their permissions; only new ones are created private.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
+}
+
+/// Opens `path` for writing, creating it owner-only (0600) if it is new.
+fn private_file(path: &Path) -> std::io::Result<fs::File> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    opts.open(path)
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    private_file(path)?.write_all(bytes)
+}
+
 /// `ANDAI_DATA_DIR` relocates all knowledge-base files — the e2e runner points
 /// it at a temp dir so tests never touch a user's real knowledge bases.
 fn kb_root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -143,7 +178,7 @@ fn kb_root(app: &AppHandle) -> Result<PathBuf, String> {
         None => app.path().app_data_dir().map_err(|e| e.to_string())?,
     };
     let dir = base.join("kb");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    create_private_dir(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
@@ -167,7 +202,7 @@ fn read_meta(dir: &Path) -> Result<KbMeta, String> {
 
 fn write_meta(dir: &Path, meta: &KbMeta) -> Result<(), String> {
     let raw = serde_json::to_string_pretty(meta).map_err(|e| e.to_string())?;
-    fs::write(dir.join("kb.json"), raw).map_err(|e| e.to_string())
+    write_private(&dir.join("kb.json"), raw.as_bytes()).map_err(|e| e.to_string())
 }
 
 fn slugify(name: &str) -> String {
@@ -231,12 +266,35 @@ fn valid_source_name(file: &str) -> bool {
     !file.is_empty() && !file.contains('/') && !file.contains('\\') && !file.contains("..")
 }
 
+/// The query reaches ug as a positional argument. ug has no `--` separator,
+/// so a query starting with `-` would be parsed as a flag (`--base-url` would
+/// send it to a remote embedder). A leading space keeps it positional and
+/// doesn't change the search (probed against ug 0.1.21, AGENTS.md §9).
+fn search_query(query: &str) -> Result<String, String> {
+    if query.len() > MAX_QUERY_BYTES {
+        return Err(format!("Search query is too long (max {MAX_QUERY_BYTES} bytes)."));
+    }
+    if query.contains('\0') {
+        return Err("Search query contains a NUL byte.".into());
+    }
+    Ok(if query.starts_with('-') { format!(" {query}") } else { query.to_string() })
+}
+
+/// Result count and context budget, clamped to what the prompt can use.
+fn search_limits(k: u32, max_chars: u32) -> (u32, u32) {
+    (k.clamp(1, 50), max_chars.clamp(100, 8000))
+}
+
 /// Copy one file into `docs/`, converting formats ug can't parse into Markdown.
-fn ingest_file(docs: &Path, src: &Path) -> Result<Source, String> {
+pub(crate) fn ingest_file(docs: &Path, src: &Path) -> Result<Source, String> {
     let original = src.to_string_lossy().to_string();
     let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("file").to_string();
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     let file_name = src.file_name().and_then(|s| s.to_str()).unwrap_or("file").to_string();
+    let size = fs::metadata(src).map_err(|e| format!("{file_name}: {e}"))?.len();
+    if size > MAX_SOURCE_BYTES {
+        return Err(format!("{file_name}: too large ({} MB; the limit is 100 MB)", size / (1024 * 1024)));
+    }
 
     let code = ["ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "java", "rs"];
     let (kind, target_ext, body): (&str, String, Option<String>) = match ext.as_str() {
@@ -260,9 +318,11 @@ fn ingest_file(docs: &Path, src: &Path) -> Result<Source, String> {
         target = docs.join(format!("{stem}-{n}.{target_ext}"));
         n += 1;
     }
+    // Written through private_file, not fs::copy, which would carry over the
+    // source's (often world-readable) permissions.
     match &body {
-        Some(text) => fs::write(&target, text),
-        None => fs::copy(src, &target).map(|_| ()),
+        Some(text) => write_private(&target, text.as_bytes()),
+        None => fs::File::open(src).and_then(|mut f| std::io::copy(&mut f, &mut private_file(&target)?)).map(|_| ()),
     }
     .map_err(|e| format!("{file_name}: {e}"))?;
 
@@ -325,7 +385,7 @@ pub fn kb_create(app: AppHandle, name: String, indexing: State<'_, Indexing>) ->
         n += 1;
     }
     let dir = kb_dir(&app, &slug)?;
-    fs::create_dir_all(dir.join("docs")).map_err(|e| e.to_string())?;
+    create_private_dir(&dir.join("docs")).map_err(|e| e.to_string())?;
     let meta = KbMeta {
         slug: slug.clone(),
         name: name.into(),
@@ -338,30 +398,39 @@ pub fn kb_create(app: AppHandle, name: String, indexing: State<'_, Indexing>) ->
     load_info(&app, &slug, &indexing)
 }
 
+/// Ingests each path the user granted (see grants.rs) into `docs/`; returns
+/// one actionable message per file that was skipped.
+fn add_sources(docs: &Path, meta: &mut KbMeta, paths: &[String], grants: &FileGrants) -> Vec<String> {
+    let mut errors = vec![];
+    for p in paths {
+        if Path::new(p).is_dir() {
+            errors.push(format!("{p}: folders aren't supported yet — drop the files inside it"));
+            continue;
+        }
+        match grants.take(Path::new(p)).and_then(|src| ingest_file(docs, &src)) {
+            Ok(source) => meta.sources.push(source),
+            Err(e) => errors.push(e),
+        }
+    }
+    errors
+}
+
 /// Copies files in; returns the updated KB plus per-file errors. Call `kb_index` after.
+/// Sync on purpose: it runs on the main thread, after the drag-drop window
+/// event that granted the dropped paths (lib.rs) has finished.
 #[tauri::command]
 pub fn kb_add_files(
     app: AppHandle,
     slug: String,
     paths: Vec<String>,
     indexing: State<'_, Indexing>,
+    grants: State<'_, FileGrants>,
 ) -> Result<(KbInfo, Vec<String>), String> {
     let dir = kb_dir(&app, &slug)?;
     let docs = dir.join("docs");
-    fs::create_dir_all(&docs).map_err(|e| e.to_string())?;
+    create_private_dir(&docs).map_err(|e| e.to_string())?;
     let mut meta = read_meta(&dir)?;
-    let mut errors = vec![];
-    for p in paths {
-        let src = PathBuf::from(&p);
-        if src.is_dir() {
-            errors.push(format!("{p}: folders aren't supported yet — drop the files inside it"));
-            continue;
-        }
-        match ingest_file(&docs, &src) {
-            Ok(source) => meta.sources.push(source),
-            Err(e) => errors.push(e),
-        }
-    }
+    let errors = add_sources(&docs, &mut meta, &paths, &grants);
     write_meta(&dir, &meta)?;
     Ok((load_info(&app, &slug, &indexing)?, errors))
 }
@@ -498,6 +567,8 @@ pub async fn kb_search(
     max_chars: u32,
 ) -> Result<Value, String> {
     let dir = kb_dir(&app, &slug)?;
+    let query = search_query(&query)?;
+    let (k, max_chars) = search_limits(k, max_chars);
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = ug()?;
         cmd.arg("search")
@@ -566,6 +637,78 @@ mod tests {
         for bad in ["", "../kb.json", "docs/a.md", "a\\b.md", ".."] {
             assert!(!valid_source_name(bad), "{bad:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn search_queries_cannot_become_ug_flags() {
+        // ug has no `--` separator; a leading space keeps the query positional
+        // (probed against ug 0.1.21, see AGENTS.md §9).
+        assert_eq!(search_query("--base-url http://evil").unwrap(), " --base-url http://evil");
+        assert_eq!(search_query("-k").unwrap(), " -k");
+        assert_eq!(search_query("what is wllama").unwrap(), "what is wllama");
+        assert!(search_query("a\0b").is_err(), "NUL bytes can't reach argv");
+        assert!(search_query(&"x".repeat(MAX_QUERY_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn search_budgets_are_clamped() {
+        assert_eq!(search_limits(0, 0), (1, 100));
+        assert_eq!(search_limits(8, 6000), (8, 6000));
+        assert_eq!(search_limits(u32::MAX, u32::MAX), (50, 8000));
+    }
+
+    #[test]
+    fn relative_path_entries_are_not_trusted_for_ug() {
+        let dirs = [PathBuf::from("."), PathBuf::from("bin"), PathBuf::from("/usr/bin")];
+        assert_eq!(absolute_dirs(dirs), vec![PathBuf::from("/usr/bin")]);
+    }
+
+    #[test]
+    fn only_granted_files_are_added() {
+        let src = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let (mine, secret) = (src.path().join("mine.md"), src.path().join("secret.md"));
+        fs::write(&mine, "ok").unwrap();
+        fs::write(&secret, "key").unwrap();
+        let grants = FileGrants::default();
+        grants.grant([&mine]);
+
+        let mut m = meta(vec![], None);
+        let paths = [mine, secret].map(|p| p.to_string_lossy().to_string());
+        let errors = add_sources(docs.path(), &mut m, &paths, &grants);
+        assert_eq!(m.sources.iter().map(|s| s.file.as_str()).collect::<Vec<_>>(), ["mine.md"]);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("secret.md") && errors[0].contains("not added by you"), "{errors:?}");
+        assert!(!docs.path().join("secret.md").exists());
+    }
+
+    #[test]
+    fn ingest_rejects_oversized_files() {
+        let src = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let big = src.path().join("big.md");
+        fs::File::create(&big).unwrap().set_len(MAX_SOURCE_BYTES + 1).unwrap();
+        let err = ingest_file(docs.path(), &big).unwrap_err();
+        assert!(err.contains("too large"), "{err}");
+        assert_eq!(fs::read_dir(docs.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kb_files_are_private_to_the_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("kb").join("docs");
+        create_private_dir(&dir).unwrap();
+        assert_eq!(fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(fs::metadata(root.path().join("kb")).unwrap().permissions().mode() & 0o777, 0o700);
+        write_private(&dir.join("kb.json"), b"{}").unwrap();
+        assert_eq!(fs::metadata(dir.join("kb.json")).unwrap().permissions().mode() & 0o777, 0o600);
+
+        let src = tempfile::tempdir().unwrap();
+        fs::write(src.path().join("n.md"), "x").unwrap();
+        ingest_file(&dir, &src.path().join("n.md")).unwrap();
+        assert_eq!(fs::metadata(dir.join("n.md")).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]

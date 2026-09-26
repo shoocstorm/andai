@@ -2,6 +2,8 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Copy } from 'lucide-react';
+import { toast } from '../state/ui';
 
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
@@ -88,17 +90,60 @@ export function Bar({ value, indeterminate, color }: { value: number; indetermin
   );
 }
 
+const hostOf = (url?: string) => {
+  try {
+    return url ? new URL(url).host : '';
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Renders model output. A poisoned document can steer what the model writes
+ * (prompt injection), so nothing here may reach the network or navigate
+ * (AGENTS.md §9): images are never loaded, since their URL could carry chat
+ * text out, and links show their real host and can only be copied. Raw HTML
+ * stays off; react-markdown's default urlTransform drops `javascript:`.
+ */
 export function Markdown({ text }: { text: string }) {
   return (
     <div className="md selectable">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer">
-              {children}
-            </a>
-          ),
+          img: ({ src, alt }) => {
+            const host = hostOf(typeof src === 'string' ? src : undefined);
+            return (
+              <span className="md-blocked" title="Andai never loads images from model output">
+                [image blocked{alt ? `: ${alt}` : ''}
+                {host && ` · ${host}`}]
+              </span>
+            );
+          },
+          a: ({ href, children }) => {
+            if (!href) return <span>{children}</span>;
+            const host = hostOf(href);
+            return (
+              <span className="md-link">
+                <span>{children}</span>
+                {host && <span className="md-link-host">{host}</span>}
+                <button
+                  type="button"
+                  className="md-link-copy"
+                  aria-label={`Copy link ${href}`}
+                  title={href}
+                  onClick={() =>
+                    void navigator.clipboard
+                      ?.writeText(href)
+                      .then(() => toast({ tone: 'info', title: 'Link copied', body: href }))
+                      .catch(() => toast({ tone: 'warn', title: 'Could not copy the link', body: href }))
+                  }
+                >
+                  <Copy size={12} />
+                </button>
+              </span>
+            );
+          },
         }}
       >
         {text}
