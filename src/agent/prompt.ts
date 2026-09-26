@@ -31,6 +31,20 @@ export function keywords(text: string, n = 3): string[] {
   return out;
 }
 
+const SMALL_TALK =
+  /^(hi|hello|hey|hiya|yo|good (morning|afternoon|evening|night)|thanks|thank you|thx|ty|cheers|bye|goodbye|see you|ok|okay|great|cool|nice|awesome|perfect|got it|no worries)\b/;
+
+/**
+ * A greeting, thanks or sign-off: short, no question mark, and it starts like
+ * one. Anything else is taken to need a lookup (agent loop, `searchFirst`);
+ * a miss costs one search, not a wrong answer, since small talk still goes to
+ * the decision model.
+ */
+export function isSmallTalk(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  return !t.includes('?') && t.split(/\s+/).filter(Boolean).length <= 8 && SMALL_TALK.test(t);
+}
+
 export type PersonaInput = { systemPrompt: string; tone: Tone };
 
 /**

@@ -199,47 +199,47 @@
         "tolerance": 1.1
       },
       "fact-hit-rate": {
-        "value": 82.759,
+        "value": 86.207,
         "unit": "%",
         "better": "higher",
         "tolerance": 1.1
       },
       "grounded-rate": {
-        "value": 46.429,
+        "value": 53.571,
         "unit": "%",
         "better": "higher",
         "tolerance": 1.1
       },
       "wasted-calls-per-question": {
-        "value": 0.063,
+        "value": 0,
         "unit": "calls",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 0.2
       },
       "decisions-per-question": {
-        "value": 2,
+        "value": 1.969,
         "unit": "decisions",
         "better": "lower",
         "tolerance": 1.25,
         "slack": 0.1
       },
       "seconds-per-question": {
-        "value": 5.937,
+        "value": 3.928,
         "unit": "s",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 1
       },
       "ms-per-decision": {
-        "value": 811,
+        "value": 671,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 100
       },
       "prompt-tokens-per-decision": {
-        "value": 310,
+        "value": 309,
         "unit": "tokens",
         "better": "lower",
         "tolerance": 1.25

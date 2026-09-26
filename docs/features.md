@@ -41,6 +41,10 @@ pasting in whatever one search returns:
   When the model isn't sure enough, or a decision fails, Andai does one plain
   knowledge search instead of acting on a guess. About 0.6 s per decision
   with Qwen3 0.6B in our tests on an Apple Silicon Mac.
+- **It searches first.** With a knowledge base selected, the first step of
+  a question is a search (greetings and thanks still go straight to an
+  answer), which saves a decision; the trace says so. After that, the model
+  decides each step.
 - **It writes its own search.** Before a search, the model turns your
   question into a search phrase (for example *"What HTTP headers does wllama
   need for multi-threading?"* became *wllama multi-threading headers*); for

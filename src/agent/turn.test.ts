@@ -154,7 +154,8 @@ beforeEach(() => {
   search.calls = 0;
   useKb.setState({ kbs: [kb()], grounding: 'docs', k: 8, maxChars: 6000 });
   usePersona.getState().reset();
-  useTools.setState({ agentMode: false, maxSteps: 4, minConfidence: 0.3, policies: {}, stats: {} });
+  // Most tests script the first decision; the searchFirst tests turn it on.
+  useTools.setState({ agentMode: false, maxSteps: 4, minConfidence: 0.3, searchFirst: false, policies: {}, stats: {} });
   Object.assign(agent, {
     decisions: [],
     seenStates: [],
@@ -376,7 +377,35 @@ describe('runTurn (agent mode)', () => {
     expect(system).toContain('function cancelBooking() {…}\nFunction cancelBooking → uses refundFraction\n  37: const amount = refundFraction(hours)');
   });
 
-    it('does not count document sections as symbols', async () => {
+    it('searches first without a decision when the request is not small talk', async () => {
+    // docs/agentic-rag-improvements.md, item 7: step 1 chose search 23 of 24 times.
+    useTools.setState({ searchFirst: true });
+    agent.decisions = [{ chosen: 'answer_now' }];
+    await runTurn('What headers does wllama need?');
+    expect(steps()[0]).toMatchObject({ action: 'kb_search', decision: null });
+    expect(steps()[0].note).toMatch(/Searched first, without a decision/);
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
+    expect(agent.seenOptions).toHaveLength(1); // only the second step was decided
+  });
+
+  it('still lets the model decide on small talk, and after the first step', async () => {
+    useTools.setState({ searchFirst: true });
+    agent.decisions = [{ chosen: 'answer_now' }];
+    await runTurn('Thanks, that is all!');
+    expect(steps()[0]).toMatchObject({ action: 'answer_now' });
+    expect(steps()[0].decision).not.toBeNull();
+    expect(agent.tool).toHaveLength(0);
+  });
+
+  it('does not search first when search is switched off', async () => {
+    useTools.setState({ searchFirst: true });
+    setPolicy('kb_search', 'off');
+    agent.decisions = [{ chosen: 'answer_now' }];
+    await runTurn('What headers does wllama need?');
+    expect(steps()[0].decision).not.toBeNull();
+  });
+
+  it('does not count document sections as symbols', async () => {
     useKb.setState({ kbs: [kb({ kind: 'mixed' })] });
     agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_get_code' }, { chosen: 'answer_now' }];
     agent.fills.kb_find_symbols = { names: ['readme'], node_type: 'any' };

@@ -23,7 +23,7 @@ import {
 import { recordSearch } from '../state/kb';
 import { recordToolRun, requestApproval, useTools } from '../state/tools';
 import { addEvidence, mergeEvidence, type Found } from './evidence';
-import { agentState, type Observation } from './prompt';
+import { agentState, isSmallTalk, type Observation } from './prompt';
 import { fillArgs, parseObject } from './tools/argfill';
 import { available, policyOf } from './tools/registry';
 import { needsSymbol, SYMBOL_TYPES } from './tools/ug';
@@ -217,24 +217,33 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     // What to do when the decision can't be trusted: search once if nothing
     // was looked up yet (the fixed pipeline's behavior), else answer.
     const fallbackAction = () => (calls === 0 && searchTool ? searchTool.id : ANSWER);
-    try {
-      const d = await decide(state(), QUESTION, decisionOptions(tools, seed + index, found.length > 0), signal);
-      decision = record(d, seed + index);
-      action = d.chosen;
-      if (action !== ANSWER && action !== CLARIFY && !tools.some((t) => t.id === action)) {
-        throw new Error(`chose “${action}”, which wasn't offered`);
+    // With a knowledge base selected, the first decision picked search on 23 of
+    // 24 lookup questions, and the miss was a follow-up that needed one, so
+    // it's skipped (about 0.7 s). Small talk still goes to the model, which
+    // answered it 3 of 3 times (docs/agentic-rag-improvements.md, item 7).
+    if (settings.searchFirst && index === 0 && searchTool && !isSmallTalk(prompt)) {
+      action = searchTool.id;
+      note = 'Searched first, without a decision: with a knowledge base selected, a question almost always needs a search.';
+    } else {
+      try {
+        const d = await decide(state(), QUESTION, decisionOptions(tools, seed + index, found.length > 0), signal);
+        decision = record(d, seed + index);
+        action = d.chosen;
+        if (action !== ANSWER && action !== CLARIFY && !tools.some((t) => t.id === action)) {
+          throw new Error(`chose “${action}”, which wasn't offered`);
+        }
+        if (action !== ANSWER && action !== CLARIFY && d.confidence < settings.minConfidence) {
+          const next = fallbackAction();
+          fallback = 'low-confidence';
+          note = `Low confidence (${Math.round(d.confidence * 100)}% < ${Math.round(settings.minConfidence * 100)}%) in “${action}”, so ${next === ANSWER ? 'answering' : 'searching the knowledge base'} instead.`;
+          action = next;
+        }
+      } catch (e) {
+        if (signal.aborted) throw aborted();
+        action = fallbackAction();
+        fallback = 'decision-failed';
+        note = `Decision failed (${errText(e)}), so ${action === ANSWER ? 'answering' : 'searching the knowledge base'} instead.`;
       }
-      if (action !== ANSWER && action !== CLARIFY && d.confidence < settings.minConfidence) {
-        const next = fallbackAction();
-        fallback = 'low-confidence';
-        note = `Low confidence (${Math.round(d.confidence * 100)}% < ${Math.round(settings.minConfidence * 100)}%) in “${action}”, so ${next === ANSWER ? 'answering' : 'searching the knowledge base'} instead.`;
-        action = next;
-      }
-    } catch (e) {
-      if (signal.aborted) throw aborted();
-      action = fallbackAction();
-      fallback = 'decision-failed';
-      note = `Decision failed (${errText(e)}), so ${action === ANSWER ? 'answering' : 'searching the knowledge base'} instead.`;
     }
 
     // A symbol tool needs a name ug knows, and none has been seen yet: look

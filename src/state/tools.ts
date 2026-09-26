@@ -11,12 +11,14 @@ type ToolsState = {
   maxSteps: number;
   /** Below this, a tool choice isn't trusted: the agent falls back (loop.ts). */
   minConfidence: number;
+  /** Search as the first step without a decision, unless the request is small talk (loop.ts). */
+  searchFirst: boolean;
   /** Per-tool user setting; a tool that isn't listed uses its default (registry.defaultPolicy). */
   policies: Record<string, Policy>;
   stats: Record<string, ToolStats>;
 };
 
-export const TOOL_DEFAULTS = { agentMode: true, maxSteps: 20, minConfidence: 0.3 };
+export const TOOL_DEFAULTS = { agentMode: true, maxSteps: 20, minConfidence: 0.3, searchFirst: true };
 
 export const useTools = create<ToolsState>()(
   persist((): ToolsState => ({ ...TOOL_DEFAULTS, policies: {}, stats: {} }), {

@@ -157,8 +157,8 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
   // snapshot what it touches and put it back afterwards.
   const savedChat = { messages: useChat.getState().messages, session: useChat.getState().session };
   const savedKb = { grounding: useKb.getState().grounding, selected: useKb.getState().selected };
-  const { agentMode, maxSteps, minConfidence, policies, stats } = useTools.getState();
-  const savedTools = { agentMode, maxSteps, minConfidence, policies, stats };
+  const { agentMode, maxSteps, minConfidence, searchFirst, policies, stats } = useTools.getState();
+  const savedTools = { agentMode, maxSteps, minConfidence, searchFirst, policies, stats };
   const restore = () => {
     useChat.setState(savedChat);
     useKb.setState(savedKb);

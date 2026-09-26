@@ -24,7 +24,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 4 | [Richer observations](#4-richer-observations) | measured 2026-09-26 · no gain, not shipped; re-measure after item 5 |
 | 5 | [Merge evidence before answering](#5-merge-evidence-before-answering) | done 2026-09-26 · 0.6B facts 82.8% → 86.2%, no wasted calls |
 | 6 | [Prompt-prefix caching](#6-prompt-prefix-caching) | done 2026-09-26 · later decisions ~20% faster on a decision model; same outcomes |
-| 7 | [Skip the obvious first decision](#7-skip-the-obvious-first-decision) | todo |
+| 7 | [Skip the obvious first decision](#7-skip-the-obvious-first-decision) | done 2026-09-26 · first action 100%, 45% fewer decisions |
 | 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | todo |
 | 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | todo |
 
@@ -300,6 +300,24 @@ in the trace as a decision with a note, so it stays visible.
 
 **Done when.** The eval shows the time saved and that small talk still gets
 `answer_now`.
+
+**Done (2026-09-26).** On step 1, if `kb_search` is offered and the request
+isn't small talk (`isSmallTalk` in `prompt.ts`: short, no question mark,
+starts like a greeting, thanks or sign-off), the loop searches without a
+decision and says so on the trace. Small talk still goes to the model. The
+switch is `searchFirst` in the tools settings (on by default, no UI yet).
+
+| Setup | First action | Decisions / question | Seconds / question |
+|---|---|---|---|
+| 0.6B | 96.9% → 100% | 1.97 → 1.09 | 3.93 → 3.62 |
+| 1.7B answers + 0.6B decisions | 96.9% → 100% | 2.00 → 1.13 | 7.79 → 7.05 |
+
+The first-action gain is the follow-up "What does it add for a vehicle?",
+which the model had answered from history without a lookup; it now
+searches (its answer still misses the 18.5 surcharge). Small talk got
+`answer_now` 3 of 3 times, as before. The load average was 6.8 during the
+"after" run against 2.7 for "before", so the time saved is if anything
+understated.
 
 ## 8. Measure a larger decision model
 

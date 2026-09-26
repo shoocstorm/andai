@@ -78,8 +78,8 @@ export async function runEval(input: EvalInput) {
   const savedChat = { messages: useChat.getState().messages, session: useChat.getState().session };
   const { grounding, selected, k, maxChars } = useKb.getState();
   const savedKb = { grounding, selected, k, maxChars };
-  const { agentMode, maxSteps, minConfidence, policies, stats } = useTools.getState();
-  const savedTools = { agentMode, maxSteps, minConfidence, policies, stats };
+  const { agentMode, maxSteps, minConfidence, searchFirst, policies, stats } = useTools.getState();
+  const savedTools = { agentMode, maxSteps, minConfidence, searchFirst, policies, stats };
   const { set: _set, reset: _reset, ...savedPersona } = usePersona.getState();
   // unloadDecider forgets the user's saved decision model; put it back for their next launch.
   let savedDecider: string | null = null;

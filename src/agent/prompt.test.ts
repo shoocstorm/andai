@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SearchHit } from '../kb/api';
 import type { Message } from '../state/chat';
 import { TONES } from '../state/persona';
-import { agentState, budgets, buildHistory, buildSystem, keywords, MIN_PASSAGE_CHARS } from './prompt';
+import { agentState, budgets, buildHistory, buildSystem, isSmallTalk, keywords, MIN_PASSAGE_CHARS } from './prompt';
 
 const hit = (file: string, text: string, start = 1, end = 10): SearchHit => ({
   id: `${file}:${start}`,
@@ -148,6 +148,16 @@ describe('buildSystem (agent mode)', () => {
   });
   it('asks for a clarifying question when the agent decided the request is ambiguous', () => {
     expect(buildSystem(persona, [], 1000, null, { clarify: true })).toContain('Ask the user one short clarifying question');
+  });
+});
+
+describe('isSmallTalk', () => {
+  it('recognizes greetings, thanks and sign-offs', () => {
+    for (const t of ['Hi there!', 'hello', 'Good morning!', "Thanks, that's all I needed.", 'thank you so much', 'Cheers', 'ok great', 'Bye!']) expect(isSmallTalk(t), t).toBe(true);
+  });
+  it('treats questions and requests as needing a lookup', () => {
+    for (const t of ['Hi, what is the refund policy?', 'How long is the crossing?', 'And the Osprey?', 'Show me the full source of withRetry.', 'what does it add for a vehicle', 'Okay so how do refunds work when a sailing is cancelled for weather and I booked a car'])
+      expect(isSmallTalk(t), t).toBe(false);
   });
 });
 
