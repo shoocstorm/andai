@@ -1,8 +1,9 @@
 //! A loaded Laya checkpoint: config, tokenizer, calibration and network, and
-//! the one thing Andai asks of it, a choice between options.
+//! what Andai asks of it: one or more typed questions about the same state
+//! (a choice between options, or whether a statement holds), in one pass.
 
 use super::model::{EncoderConfig, Model, R};
-use super::prompt::{self, Encode, Special};
+use super::prompt::{self, Encode, Kind, Special};
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
@@ -20,21 +21,38 @@ pub struct Engine {
     model: Model,
     tok: Tok,
     special: Special,
+    pad: u32,
     max_len: usize,
     head_max_len: usize,
-    /// Choice temperature, and per option-count bucket overrides (clamped).
-    temperature: f64,
+    /// Per question type (choice, score, noul), and per bucket overrides; clamped.
+    temperature: [f64; 3],
     by_options: Vec<(String, f64)>,
+}
+
+/// One question about the state. A `Noul` has no options of its own.
+#[derive(Debug, Clone)]
+pub struct Question {
+    pub kind: Kind,
+    pub instructions: String,
+    /// `(id, text)` per option, for a choice.
+    pub options: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Choice {
-    /// Calibrated probability per option, in the order given.
+pub struct Answer {
+    /// Calibrated probability per option in the order given; for a noul,
+    /// `[P(false), P(true)]`.
     pub probabilities: Vec<f64>,
     pub input_tokens: usize,
     /// An option, the question or the state was cut to fit the model's input.
     pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asked {
+    pub answers: Vec<Answer>,
     pub ms: f64,
 }
 
@@ -61,7 +79,8 @@ impl Engine {
             return Err("Laya config: expected 4 < head_max_len < max_len".into());
         }
         let temps = agent["temperature"].as_array().cloned().unwrap_or_default();
-        let temperature = prompt::clamp_temperature(temps.first().and_then(Value::as_f64).unwrap_or(1.0));
+        let t = |i: usize| prompt::clamp_temperature(temps.get(i).and_then(Value::as_f64).unwrap_or(1.0));
+        let temperature = [t(0), t(1), t(2)];
         let by_options = agent["temperature_by_options"]
             .as_object()
             .map(|m| m.iter().filter_map(|(k, v)| v.as_f64().map(|t| (k.clone(), prompt::clamp_temperature(t)))).collect())
@@ -76,27 +95,41 @@ impl Engine {
         let (_, cls) = special_token(&tk, &tcfg, "cls_token")?;
         let (_, sep) = special_token(&tk, &tcfg, "sep_token")?;
         let (mask_text, mask) = special_token(&tk, &tcfg, "mask_token")?;
+        let (_, pad) = special_token(&tk, &tcfg, "pad_token")?;
 
         let model = Model::load(dir, enc, head_layers, act_outputs)?;
-        Ok(Self { model, tok: Tok(tk), special: Special { cls, sep, mask, mask_text }, max_len, head_max_len, temperature, by_options })
+        Ok(Self { model, tok: Tok(tk), special: Special { cls, sep, mask, mask_text }, pad, max_len, head_max_len, temperature, by_options })
     }
 
-    pub fn choose(&self, state: &str, question: &str, options: &[(String, String)]) -> R<Choice> {
+    /// Scores every question against `state` in one batched forward pass.
+    pub fn ask(&self, state: &str, questions: &[Question]) -> R<Asked> {
         let started = Instant::now();
-        let rendered: Vec<String> = options.iter().map(|(id, text)| prompt::render_option(id, text)).collect();
-        let seq = prompt::build(&self.tok, &self.special, state, question, &rendered, self.max_len, self.head_max_len)?;
-        let logits = self.model.logits(&seq.ids, &seq.markers, 0)?;
-        if logits.iter().any(|l| !l.is_finite()) {
-            return Err("the decision model returned non-finite scores".into());
-        }
-        let bucket = prompt::choice_bucket(options.len());
-        let t = self.by_options.iter().find(|(k, _)| k == bucket).map_or(self.temperature, |(_, t)| *t);
-        Ok(Choice {
-            probabilities: prompt::probabilities(&logits, t),
-            input_tokens: seq.ids.len(),
-            truncated: seq.truncated,
-            ms: started.elapsed().as_secs_f64() * 1e3,
-        })
+        let seqs = questions
+            .iter()
+            .map(|q| {
+                let options = match q.kind {
+                    Kind::Choice => q.options.iter().map(|(id, text)| prompt::render_option(id, text)).collect(),
+                    Kind::Noul => prompt::noul_options(),
+                };
+                prompt::build(&self.tok, &self.special, q.kind, state, &q.instructions, &options, self.max_len, self.head_max_len)
+            })
+            .collect::<R<Vec<_>>>()?;
+        let rows: Vec<_> = seqs.iter().zip(questions).map(|(s, q)| (s.ids.as_slice(), s.markers.as_slice(), q.kind.qtype())).collect();
+        let logits = self.model.logits(&rows, self.pad)?;
+        let answers = seqs
+            .iter()
+            .zip(questions)
+            .zip(logits)
+            .map(|((seq, q), l)| {
+                if l.iter().any(|v| !v.is_finite()) {
+                    return Err("the decision model returned non-finite scores".to_string());
+                }
+                let bucket = prompt::bucket(q.kind, l.len());
+                let t = self.by_options.iter().find(|(k, _)| *k == bucket).map_or(self.temperature[q.kind.qtype() as usize], |(_, t)| *t);
+                Ok(Answer { probabilities: prompt::probabilities(&l, t), input_tokens: seq.ids.len(), truncated: seq.truncated })
+            })
+            .collect::<R<Vec<_>>>()?;
+        Ok(Asked { answers, ms: started.elapsed().as_secs_f64() * 1e3 })
     }
 }
 
@@ -127,33 +160,50 @@ mod tests {
         serde_json::from_str(include_str!("../../tests/fixtures/laya/fixture.json")).unwrap()
     }
 
+    /// Largest |Δp| between two distributions, after checking they pick the same option.
+    fn close(got: &[f64], want: &Value, what: &str) -> f64 {
+        let want: Vec<f64> = serde_json::from_value(want.clone()).unwrap();
+        let argmax = |v: &[f64]| v.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
+        assert_eq!(argmax(got), argmax(&want), "{what}: same answer as laya-mlx");
+        let worst = got.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+        // FP16 vs laya-mlx FP32: measured ≤ 0.0015 on these fixtures; laya-mlx's own FP16 run differs by 0.005.
+        assert!(worst < 0.006, "{what}: max |Δp| {worst} vs laya-mlx FP32");
+        worst
+    }
+
     fn run(id: &str) {
         let golden: Value = serde_json::from_str(&std::fs::read_to_string(format!("{}/tests/fixtures/laya/golden-{id}.json", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap();
         let fx = fixture();
         let engine = Engine::load(&checkpoint_dir(id)).unwrap();
         let options: Vec<(String, String)> = fx["options"].as_array().unwrap().iter().map(|o| (o[0].as_str().unwrap().into(), o[1].as_str().unwrap().into())).collect();
         let (state, question) = (fx["state"].as_str().unwrap(), fx["question"].as_str().unwrap());
+        let choice = Question { kind: Kind::Choice, instructions: question.into(), options: options.clone() };
+        let stop = Question { kind: Kind::Noul, instructions: fx["stop"].as_str().unwrap().into(), options: vec![] };
 
         let rendered: Vec<String> = options.iter().map(|(i, t)| prompt::render_option(i, t)).collect();
-        let seq = prompt::build(&engine.tok, &engine.special, state, question, &rendered, engine.max_len, engine.head_max_len).unwrap();
+        let seq = prompt::build(&engine.tok, &engine.special, Kind::Choice, state, question, &rendered, engine.max_len, engine.head_max_len).unwrap();
         let want_ids: Vec<u32> = serde_json::from_value(golden["ids"].clone()).unwrap();
         let want_markers: Vec<usize> = serde_json::from_value(golden["markers"].clone()).unwrap();
         assert_eq!(seq.ids, want_ids, "token ids match laya-mlx");
         assert_eq!(seq.markers, want_markers);
 
-        let got = engine.choose(state, question, &options).unwrap();
-        let want: Vec<f64> = serde_json::from_value(golden["probabilities_fp32"].clone()).unwrap();
-        let worst = got.probabilities.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
-        let argmax = |v: &[f64]| v.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
-        assert_eq!(argmax(&got.probabilities), argmax(&want), "same choice as laya-mlx");
-        // FP16 vs laya-mlx FP32: measured ≤ 0.0015 on these fixtures; laya-mlx's own FP16 run differs by 0.005.
-        assert!(worst < 0.006, "max |Δp| {worst} vs laya-mlx FP32");
+        let one = engine.ask(state, std::slice::from_ref(&choice)).unwrap();
+        let worst = close(&one.answers[0].probabilities, &golden["probabilities_fp32"], "choice");
+        // A batch pads the shorter noul row: the choice must come out the same.
+        let both = engine.ask(state, &[choice.clone(), stop.clone()]).unwrap();
+        let worst_b = close(&both.answers[0].probabilities, &golden["batch"]["choice_fp32"], "batched choice")
+            .max(close(&both.answers[1].probabilities, &golden["batch"]["stop_fp32"], "batched noul"));
+        assert!(both.answers[1].input_tokens < both.answers[0].input_tokens, "the noul row is shorter, so it was padded");
 
         // Latency: this port measured 9 ms (multilingual) and 20 ms (English) P50 on an M5 Max.
-        let mut t: Vec<f64> = (0..25).map(|_| engine.choose(state, question, &options).unwrap().ms).collect();
-        t.sort_by(f64::total_cmp);
-        println!("{id}: P50 {:.1} ms, {} tokens, max |Δp| {worst:.4}", t[12], got.input_tokens);
-        assert!(t[12] < 100.0, "a decision must take < 100 ms (P50 {:.1} ms)", t[12]);
+        let p50 = |qs: &[Question]| {
+            let mut t: Vec<f64> = (0..25).map(|_| engine.ask(state, qs).unwrap().ms).collect();
+            t.sort_by(f64::total_cmp);
+            t[12]
+        };
+        let (t1, t2) = (p50(std::slice::from_ref(&choice)), p50(&[choice, stop]));
+        println!("{id}: P50 {t1:.1} ms (choice), {t2:.1} ms (choice + noul), {} tokens, max |Δp| {worst:.4} / batched {worst_b:.4}", one.answers[0].input_tokens);
+        assert!(t2 < 100.0, "a decision must take < 100 ms (P50 {t2:.1} ms)");
     }
 
     #[test]

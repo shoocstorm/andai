@@ -41,6 +41,16 @@ vi.mock('./engine', async () => {
 
 const { decide, DecisionError, decisionMessages, labelsFor, optionLogprobs, seededShuffle, softmax } = await import('./decide');
 
+/** A Laya reply: the choice, and a yes/no answer when `stop` is given. */
+const reply = (p: number[], extra: { truncated?: boolean; tokens?: number; stop?: number } = {}) => ({
+  answers: [
+    { id: 'next', probabilities: p, inputTokens: extra.tokens ?? 476, truncated: extra.truncated ?? false },
+    ...(extra.stop != null ? [{ id: 'stop', probabilities: [1 - extra.stop, extra.stop], inputTokens: 300, truncated: false }] : []),
+  ],
+  ms: 8.4,
+  model: 'laya-multilingual',
+});
+
 const opts = [
   { id: 'answer_now', text: 'Answer now' },
   { id: 'kb_search', text: 'Search the knowledge base' },
@@ -54,7 +64,7 @@ beforeEach(() => {
   eng.fail = null;
   eng.laya = null;
   eng.layaSeen = [];
-  eng.layaReply = { probabilities: [0.2, 0.7, 0.1], inputTokens: 476, truncated: false, ms: 8.4, model: 'laya-multilingual' };
+  eng.layaReply = reply([0.2, 0.7, 0.1]);
   eng.top = [
     { token: 'B', logprob: Math.log(0.6) },
     { token: 'A', logprob: Math.log(0.3) },
@@ -184,7 +194,7 @@ describe('decide on a Laya checkpoint', () => {
   it('sends ids and texts to Rust and reads calibrated probabilities, with no letters or logprobs', async () => {
     eng.laya = 'laya-multilingual';
     const d = await decide('state here', 'Which?', opts);
-    expect(eng.layaSeen).toEqual([['state here', 'Which?', opts]]);
+    expect(eng.layaSeen).toEqual([['state here', [{ id: 'next', kind: 'choice', question: 'Which?', options: opts }]]]);
     expect(eng.seen).toEqual([]);
     expect(d).toMatchObject({ chosen: 'kb_search', model: 'Laya Multilingual', slot: 'decider', promptTokens: 476, bounded: [], truncated: false });
     expect(d.confidence).toBeCloseTo(0.7);
@@ -210,7 +220,7 @@ describe('decide on a Laya checkpoint', () => {
 
   it('carries the truncation flag', async () => {
     eng.laya = 'laya-en';
-    eng.layaReply = { probabilities: [0.5, 0.3, 0.2], inputTokens: 512, truncated: true, ms: 18, model: 'laya-en' };
+    eng.layaReply = reply([0.5, 0.3, 0.2], { truncated: true, tokens: 512 });
     expect((await decide('s', 'q', opts)).truncated).toBe(true);
   });
 
@@ -221,7 +231,25 @@ describe('decide on a Laya checkpoint', () => {
     expect(e).toBeInstanceOf(DecisionError);
     expect(e.message).toBe('No Laya model is loaded.');
     expect(e.io.request.messages[0]).toEqual({ role: 'state', content: 's' });
-    eng.layaReply = { probabilities: [1], inputTokens: 3, truncated: false, ms: 1, model: 'laya-multilingual' };
+    eng.layaReply = reply([1]);
     await expect(decide('s', 'q', opts)).rejects.toThrow(/1 scores for 3 options/);
+    eng.layaReply = reply([0.2, 0.7, 0.1]);
+    await expect(decide('s', 'q', opts, undefined, { stop: 'It holds.' })).rejects.toThrow(/didn't answer the yes\/no question/);
+  });
+
+  it('asks a stop statement as a yes/no question in the same call, and returns P(true)', async () => {
+    eng.laya = 'laya-multilingual';
+    eng.layaReply = reply([0.2, 0.7, 0.1], { stop: 0.8 });
+    const d = await decide('s', 'q', opts, undefined, { stop: 'The results suffice.' });
+    expect(eng.layaSeen).toEqual([['s', [{ id: 'next', kind: 'choice', question: 'q', options: opts }, { id: 'stop', kind: 'noul', question: 'The results suffice.' }]]]);
+    expect(d.stop).toEqual({ statement: 'The results suffice.', probability: 0.8 });
+    expect(d.io.response?.laya?.stop).toBe(0.8);
+    expect(d.io.request.messages.at(-1)).toEqual({ role: 'yes/no', content: 'The results suffice.' });
+  });
+
+  it('ignores a stop statement on the letter readout', async () => {
+    const d = await decide('s', 'q', opts, undefined, { stop: 'The results suffice.' });
+    expect(d.stop).toBeUndefined();
+    expect(eng.layaSeen).toEqual([]);
   });
 });

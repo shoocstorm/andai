@@ -297,14 +297,32 @@ level defaults to *Ask*.
   rest of `max_len` (1024 / 512), cut from the end. The agent's ~476-token
   state with 9 options fits both; `truncated` in the trace says when not.
 - **Laya agent eval (2026-09-26, `bun run eval:agent`, Qwen3 0.6B answering,
-  34 questions, seed fixed):** Qwen deciding: first action 100%, facts 86.2%,
-  1.09 decisions and 4.16 s per question (756 ms per decision). Laya English:
-  94.1%, 82.8%, 1.74 decisions (62 ms each), 4.67 s. Laya Multilingual:
-  85.3%, 93.1%, 4.62 decisions (48 ms each), 8.13 s, 14 wasted calls. With
-  Laya the loop rarely picks *answer* after results: it takes every other
-  tool until `offered()` runs out (eval reports `eval/laya-*.json`). Its
-  small-talk first actions also miss (searches or clarifies). Laya's decision
-  is fast; its option wording and stopping rule aren't tuned for it yet.
+  34 questions, seed fixed; `eval/laya-*.json`):**
+
+  | Decider | First action | Facts | Decisions/q | ms/decision | s/question |
+  |---|---|---|---|---|---|
+  | Qwen3 0.6B | 100% | 86.2% | 1.09 | 756 | 4.16 |
+  | Laya Multilingual, no stop question | 85.3% | 93.1% | 4.62 | 48 | 8.13 |
+  | Laya Multilingual + stop question | 85.3% | 82.8% | 1.97 | 22 | 3.40 |
+  | Laya English + stop question | 94.1% | 79.3% | 1.62 | 74 | 5.11 |
+
+  Without the stop question the loop almost never picked *answer* after
+  results and took every other tool until `offered()` ran out; with it
+  (`STOP`, a `noul` asked in the same batch, answer at ≥ 0.5) that's gone.
+  Laya still misses small talk that `needsLookup` lets through (it searches
+  on "hi", clarifies on "thanks"), and a probe of a Laya "needs the
+  knowledge base" `noul` scored the ferry question 0.0003 and "hi" 0.53, so
+  it doesn't replace `needsLookup` yet.
+- **Laya batches questions, but each is its own row:** the state is encoded
+  again per question (laya-mlx does the same). Choice alone vs choice +
+  stop in one pass: 7.9 → 12.7 ms (multilingual), 18.3 → 30.8 ms (English)
+  in release; separate calls would cost about twice the single time.
+- **mlx-sys builds MLX as CMake "Debug" in dev builds** (its build script
+  follows `debug_assertions`), which made Laya about 4× slower in `tauri dev`
+  and the agent eval (53 ms vs 13 ms per decision). `Cargo.toml` builds
+  mlx-sys, mlx-rs and tokenizers optimized in dev. `[profile.dev.build-override]`
+  would reach it too, but it also changes Tauri's codegen and breaks the
+  build (`missing field referenced_by`).
 - **ug's lookups fail with the useful message in stdout JSON** (`"error":
   "No symbol named …, try find_symbols"`) and exit 1 with a bare `error:` on
   stderr. `tools::run` surfaces the JSON message.

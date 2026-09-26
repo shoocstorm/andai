@@ -2,7 +2,7 @@
 //! wait off the async runtime (AGENTS.md §4). Keeping every MLX call on one
 //! thread also keeps its default stream and Metal state in one place.
 
-use super::engine::{Choice, Engine};
+use super::engine::{Asked, Engine, Question};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
@@ -13,7 +13,7 @@ type Reply<T> = Sender<Result<T, String>>;
 enum Job {
     Load { id: String, dir: PathBuf, reply: Reply<f64> },
     Unload { reply: Reply<()> },
-    Choose { state: String, question: String, options: Vec<(String, String)>, reply: Reply<Choice> },
+    Ask { state: String, questions: Vec<Question>, reply: Reply<Asked> },
 }
 
 pub struct Worker {
@@ -56,9 +56,9 @@ impl Worker {
                             *shared.lock().unwrap() = None;
                             let _ = reply.send(Ok(()));
                         }
-                        Job::Choose { state, question, options, reply } => {
+                        Job::Ask { state, questions, reply } => {
                             let res = match &engine {
-                                Some(e) => e.choose(&state, &question, &options),
+                                Some(e) => e.ask(&state, &questions),
                                 None => Err("No Laya model is loaded.".into()),
                             };
                             let _ = reply.send(res);
@@ -85,8 +85,8 @@ impl Worker {
         self.ask(|reply| Job::Unload { reply })
     }
 
-    pub fn choose(&self, state: String, question: String, options: Vec<(String, String)>) -> Result<Choice, String> {
-        self.ask(|reply| Job::Choose { state, question, options, reply })
+    pub fn questions(&self, state: String, questions: Vec<Question>) -> Result<Asked, String> {
+        self.ask(|reply| Job::Ask { state, questions, reply })
     }
 
     pub fn loaded(&self) -> Option<String> {

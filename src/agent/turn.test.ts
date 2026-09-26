@@ -15,9 +15,11 @@ const engine = vi.hoisted(() => ({
   seen: [] as { messages: { role: string; content: string }[]; opts: Record<string, unknown> }[],
 }));
 const search = vi.hoisted(() => ({ hits: [] as unknown[], fail: null as Error | null, calls: 0 }));
-type Scripted = { chosen: string; confidence?: number } | Error;
+type Scripted = { chosen: string; confidence?: number; stop?: number } | Error;
 const agent = vi.hoisted(() => ({
   decisions: [] as Scripted[],
+  laya: false,
+  seenStops: [] as (string | null)[],
   seenStates: [] as string[],
   seenOptions: [] as string[][],
   fills: {} as Record<string, unknown>,
@@ -34,9 +36,11 @@ const agent = vi.hoisted(() => ({
 
 vi.mock('../llm/decide', async (orig) => ({
   ...(await orig<typeof import('../llm/decide')>()),
-  decide: async (state: string, _question: string, options: { id: string; text: string }[]) => {
+  decidesWithLaya: () => agent.laya,
+  decide: async (state: string, _question: string, options: { id: string; text: string }[], _signal?: AbortSignal, extra: { stop?: string } = {}) => {
     agent.seenStates.push(state);
     agent.seenOptions.push(options.map((o) => o.id));
+    agent.seenStops.push(extra.stop ?? null);
     const next = agent.decisions.shift() ?? { chosen: 'answer_now' };
     if (next instanceof Error) throw next;
     const confidence = next.confidence ?? 0.9;
@@ -54,6 +58,7 @@ vi.mock('../llm/decide', async (orig) => ({
       slot: 'decider',
       ms: 12,
       promptTokens: 300,
+      ...(extra.stop && next.stop != null ? { stop: { statement: extra.stop, probability: next.stop } } : {}),
     };
   },
 }));
@@ -112,6 +117,7 @@ vi.mock('../kb/api', async (orig) => ({
 }));
 
 const { runTurn, stopTurn } = await import('./turn');
+const { STOP } = await import('./loop');
 const { resolveApproval, setAgent, setPolicy, useTools } = await import('../state/tools');
 
 const kb = (over: Partial<KbInfo> = {}): KbInfo => ({
@@ -158,6 +164,8 @@ beforeEach(() => {
   useTools.setState({ agentMode: false, maxSteps: 4, minConfidence: 0.3, searchFirst: false, policies: {}, stats: {} });
   Object.assign(agent, {
     decisions: [],
+    laya: false,
+    seenStops: [],
     seenStates: [],
     seenOptions: [],
     fills: { kb_search: { query: 'wllama COOP COEP headers', scope: 'broad' }, kb_find_usages: { symbol: 'add' } },
@@ -555,6 +563,33 @@ describe('runTurn (agent mode)', () => {
     expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
     expect(steps()[0].note).toMatch(/Decision failed \(no scores for every option\)/);
     expect(steps()[0].fallback).toBe('decision-failed');
+  });
+
+  it('with Laya, asks whether the results suffice once there are some, and answers on yes', async () => {
+    agent.laya = true;
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.8 }];
+    await runTurn('What headers does wllama need?');
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
+    // no stop question before any results; after, answer_now leaves the choice
+    expect(agent.seenStops).toEqual([null, STOP]);
+    expect(agent.seenOptions[1]).not.toContain('answer_now');
+    expect(steps().at(-1)).toMatchObject({ action: 'answer_now', decision: { stop: { statement: STOP, probability: 0.8 } } });
+    expect(steps().at(-1)!.note).toMatch(/results cover the request \(80% likely\)/);
+  });
+
+  it('with Laya, keeps using tools while it says the results fall short', async () => {
+    agent.laya = true;
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.2 }, { chosen: 'kb_overview', stop: 0.9 }];
+    await runTurn('What headers does wllama need?');
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search', 'kb_overview']);
+    expect(steps().at(-1)!.action).toBe('answer_now');
+  });
+
+  it('never asks the stop question without Laya', async () => {
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    await runTurn('What headers does wllama need?');
+    expect(agent.seenStops.every((s) => s === null)).toBe(true);
+    expect(agent.seenOptions.at(-1)).toContain('answer_now');
   });
 
   it('records a failed decision call on the trace, with its time and what was sent', async () => {

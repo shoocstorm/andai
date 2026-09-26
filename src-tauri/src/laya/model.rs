@@ -268,13 +268,13 @@ impl Model {
         mlx_rs::transforms::eval(all).map_err(e)
     }
 
-    /// `x`: [1, L, 3·D] → attention output [1, L, D].
+    /// `qkv`: [B, L, 3·D] → attention output [B, L, D].
     fn attention(&self, qkv: &Array, heads: i32, rope: Option<f32>, mask: Option<&Array>) -> R<Array> {
         let d = self.cfg.hidden;
         let hd = d / heads;
-        let l = qkv.shape()[1];
+        let (b, l) = (qkv.shape()[0], qkv.shape()[1]);
         let parts = qkv
-            .reshape(&[1, l, 3, heads, hd])
+            .reshape(&[b, l, 3, heads, hd])
             .and_then(|a| a.transpose_axes(&[2, 0, 3, 1, 4]))
             .and_then(|a| a.split_equal(3, 0))
             .map_err(e)?;
@@ -290,7 +290,7 @@ impl Model {
             None => fast::scaled_dot_product_attention(&q, &k, &v, scale, None, None),
         }
         .map_err(e)?;
-        out.transpose_axes(&[0, 2, 1, 3]).and_then(|a| a.reshape(&[1, l, d])).map_err(e)
+        out.transpose_axes(&[0, 2, 1, 3]).and_then(|a| a.reshape(&[b, l, d])).map_err(e)
     }
 
     /// Local layers attend within `window / 2` tokens either side (inclusive).
@@ -300,12 +300,40 @@ impl Model {
         dist.le(Array::from_int(self.cfg.window / 2)).and_then(|m| m.reshape(&[1, 1, l, l])).map_err(e)
     }
 
-    /// One logit per marker, for question type `qtype` (0 = choice).
-    pub fn logits(&self, ids: &[u32], markers: &[usize], qtype: i32) -> R<Vec<f32>> {
-        let l = ids.len() as i32;
-        let ids: Vec<i32> = ids.iter().map(|&i| i as i32).collect();
+    /// One logit per marker for each row (its token ids, marker positions and
+    /// question type), all rows in one forward pass. Rows are padded to the
+    /// longest, as laya-mlx `collate_items` does: padding is never a key, and
+    /// padded queries see the valid keys (so no softmax row is all masked);
+    /// they're never read. A single row needs no masks beyond the band.
+    pub fn logits(&self, rows: &[(&[u32], &[usize], i32)], pad: u32) -> R<Vec<Vec<f32>>> {
+        let b = rows.len() as i32;
+        let l = rows.iter().map(|r| r.0.len()).max().unwrap_or(0) as i32;
+        let k = rows.iter().map(|r| r.1.len()).max().unwrap_or(0).max(1) as i32;
+        let mut ids = vec![pad as i32; (b * l) as usize];
+        let mut valid = vec![false; (b * l) as usize];
+        let mut at = vec![0i32; (b * k) as usize];
+        for (i, (row, markers, _)) in rows.iter().enumerate() {
+            for (j, &t) in row.iter().enumerate() {
+                ids[i * l as usize + j] = t as i32;
+                valid[i * l as usize + j] = true;
+            }
+            for (j, &m) in markers.iter().enumerate() {
+                at[i * k as usize + j] = i as i32 * l + m as i32;
+            }
+        }
         let band = self.band_mask(l)?;
-        let mut x = self.tok_embeddings.take_axis(Array::from_slice(&ids, &[1, l]), 0).map_err(e)?;
+        let padded = valid.iter().any(|v| !v);
+        let (full, local) = if padded {
+            let valid = Array::from_slice(&valid, &[b, l]);
+            let full = valid.reshape(&[b, 1, 1, l]).map_err(e)?;
+            let pad_query = valid.logical_not().and_then(|v| v.reshape(&[b, 1, l, 1])).map_err(e)?;
+            let local = ops::logical_or(&band, &pad_query).and_then(|m| ops::logical_and(&m, &full)).map_err(e)?;
+            (Some(full), local)
+        } else {
+            (None, band)
+        };
+
+        let mut x = self.tok_embeddings.take_axis(Array::from_slice(&ids, &[b, l]), 0).map_err(e)?;
         x = self.emb_norm.call(&x)?;
         for layer in &self.layers {
             let h = match &layer.attn_norm {
@@ -313,27 +341,32 @@ impl Model {
                 None => x.clone(),
             };
             let theta = if layer.global { self.cfg.global_theta } else { self.cfg.local_theta };
-            let a = self.attention(&layer.wqkv.call(&h)?, self.cfg.heads, Some(theta), (!layer.global).then_some(&band))?;
+            let mask = if layer.global { full.as_ref() } else { Some(&local) };
+            let a = self.attention(&layer.wqkv.call(&h)?, self.cfg.heads, Some(theta), mask)?;
             x = ops::add(&x, &layer.wo.call(&a)?).map_err(e)?;
             let gate = layer.wi.call(&layer.mlp_norm.call(&x)?)?.split_equal(2, -1).map_err(e)?;
             let m = ops::multiply(&nn::gelu(&gate[0]).map_err(e)?, &gate[1]).map_err(e)?;
             x = ops::add(&x, &layer.mlp_wo.call(&m)?).map_err(e)?;
         }
         x = self.final_norm.call(&x)?;
-        x = ops::add(&x, &self.type_emb.take_axis(Array::from_int(qtype), 0).map_err(e)?).map_err(e)?;
+        let qtypes: Vec<i32> = rows.iter().map(|r| r.2).collect();
+        let te = self.type_emb.take_axis(Array::from_slice(&qtypes, &[b]), 0).and_then(|t| t.reshape(&[b, 1, self.cfg.hidden])).map_err(e)?;
+        x = ops::add(&x, &te).map_err(e)?;
         for h in &self.head {
-            let a = self.attention(&h.in_proj.call(&h.norm1.call(&x)?)?, self.head_heads, None, None)?;
+            let a = self.attention(&h.in_proj.call(&h.norm1.call(&x)?)?, self.head_heads, None, full.as_ref())?;
             x = ops::add(&x, &h.out_proj.call(&a)?).map_err(e)?;
             // PyTorch's TransformerEncoderLayer defaults to ReLU here, unlike the GELU elsewhere.
             let f = nn::relu(&h.linear1.call(&h.norm2.call(&x)?)?).map_err(e)?;
             x = ops::add(&x, &h.linear2.call(&f)?).map_err(e)?;
         }
-        let idx: Vec<i32> = markers.iter().map(|&m| m as i32).collect();
-        let at = x.take_axis(Array::from_slice(&idx, &[idx.len() as i32]), 1).map_err(e)?;
-        let s = nn::gelu(&self.scorer1.call(&self.scorer_norm.call(&at)?)?).map_err(e)?;
-        let out = self.scorer2.call(&s)?.reshape(&[idx.len() as i32]).and_then(|a| a.as_dtype(Dtype::Float32)).map_err(e)?;
+        // Gather every row's markers from the flattened [B·L, D] states.
+        let flat = x.reshape(&[b * l, self.cfg.hidden]).map_err(e)?;
+        let picked = flat.take_axis(Array::from_slice(&at, &[b * k]), 0).map_err(e)?;
+        let s = nn::gelu(&self.scorer1.call(&self.scorer_norm.call(&picked)?)?).map_err(e)?;
+        let out = self.scorer2.call(&s)?.reshape(&[b * k]).and_then(|a| a.as_dtype(Dtype::Float32)).map_err(e)?;
         out.eval().map_err(e)?;
-        Ok(out.as_slice::<f32>().to_vec())
+        let all = out.as_slice::<f32>();
+        Ok(rows.iter().enumerate().map(|(i, r)| all[i * k as usize..i * k as usize + r.1.len()].to_vec()).collect())
     }
 }
 

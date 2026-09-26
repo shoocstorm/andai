@@ -18,12 +18,23 @@ export type LayaCheckpoint = {
 
 export type LayaStatus = { supported: boolean; loaded: string | null; checkpoints: LayaCheckpoint[] };
 
-export type LayaChoice = {
-  /** Calibrated probability per option, in the order given. */
+/** `choice`: pick one of `options`. `noul`: does the statement in `question` hold, given the state? */
+export type LayaQuestion =
+  | { id: string; kind: 'choice'; question: string; options: { id: string; text: string }[] }
+  | { id: string; kind: 'noul'; question: string };
+
+export type LayaAnswer = {
+  id: string;
+  /** Calibrated probability per option, in the order given; `[P(false), P(true)]` for a noul. */
   probabilities: number[];
   inputTokens: number;
   /** An option, the question or the state was cut to fit the model's input. */
   truncated: boolean;
+};
+
+export type LayaAnswers = {
+  answers: LayaAnswer[];
+  /** Model time for the whole batch (Rust), ms. */
   ms: number;
   /** Checkpoint id. */
   model: string;
@@ -38,8 +49,8 @@ export const layaStatus = (): Promise<LayaStatus> => (isTauri() ? invoke<LayaSta
 export const layaLoad = (id: string) => invoke<number>('laya_load', { checkpoint: id });
 export const layaUnload = () => invoke<void>('laya_unload');
 export const layaRemove = (id: string) => invoke<void>('laya_remove', { checkpoint: id });
-export const layaDecide = (state: string, question: string, options: { id: string; text: string }[]) =>
-  invoke<LayaChoice>('laya_decide', { state, question, options });
+/** Every question about `state` in one batched forward pass (up to 4). */
+export const layaDecide = (state: string, questions: LayaQuestion[]) => invoke<LayaAnswers>('laya_decide', { state, questions });
 
 /** Bytes per IPC call; Rust accepts up to 16 MiB. */
 export const CHUNK = 8 * 1024 * 1024;

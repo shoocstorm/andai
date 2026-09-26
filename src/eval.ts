@@ -52,6 +52,9 @@ function report(c: EvalCase, msg: Message | undefined, error: string | null, ms:
         promptTokens: a.decision.promptTokens,
         model: a.decision.model,
         slot: a.decision.slot,
+        // Laya: its own (Rust) time, apart from IPC, and its stop answer
+        modelMs: a.decision.io?.response?.laya?.ms ?? null,
+        stop: a.decision.stop?.probability ?? null,
       },
       call: a.call && {
         tool: a.call.tool,

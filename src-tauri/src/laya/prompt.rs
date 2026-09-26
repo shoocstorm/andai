@@ -1,7 +1,10 @@
 //! Laya's input layout and calibration, ported from laya-mlx
 //! `laya_mlx/common.py` (upstream NandhaKishorM/laya @ 573e5b6, Apache-2.0):
 //!
-//! `[CLS] choice question: <instructions> [SEP] [MASK] opt0 [MASK] opt1 … [SEP] <state> [SEP]`
+//! `[CLS] <type> question: <instructions> [SEP] [MASK] opt0 [MASK] opt1 … [SEP] <state> [SEP]`
+//!
+//! `<type>` is `choice` (pick one of the options) or `noul` (is a statement
+//! true, given the state? scored as the options `false` and `true`).
 //!
 //! Each option is scored at its `[MASK]` marker. Options share a
 //! `head_max_len` token budget; the state gets whatever room is left of
@@ -33,6 +36,35 @@ pub struct Sequence {
 /// Upstream caps each option at this many tokens after its marker.
 const OPTION_TOKENS: usize = 48;
 
+/// A question type, as its token in the input and its row in `type_emb`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Choice,
+    Noul,
+}
+
+impl Kind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Choice => "choice",
+            Kind::Noul => "noul",
+        }
+    }
+    /// Row of the checkpoint's question-type embedding (upstream `QTYPES`).
+    pub fn qtype(self) -> i32 {
+        match self {
+            Kind::Choice => 0,
+            Kind::Noul => 2,
+        }
+    }
+}
+
+/// A `noul` question's options, false then true, as upstream renders them
+/// without criteria; the answer is the probability of the second.
+pub fn noul_options() -> Vec<String> {
+    vec!["false: no, the statement does not hold".into(), "true: yes, the statement holds".into()]
+}
+
 /// `id: text`, as upstream renders a choice criterion with a description.
 pub fn render_option(id: &str, text: &str) -> String {
     if text.is_empty() {
@@ -42,9 +74,11 @@ pub fn render_option(id: &str, text: &str) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build(
     tok: &impl Encode,
     sp: &Special,
+    kind: Kind,
     state: &str,
     instructions: &str,
     options: &[String],
@@ -54,7 +88,7 @@ pub fn build(
     let clean = |s: &str| s.replace(&sp.mask_text, " ");
     let mut truncated = false;
 
-    let head = tok.encode(&format!("choice question: {}", clean(instructions)))?;
+    let head = tok.encode(&format!("{} question: {}", kind.name(), clean(instructions)))?;
     let mut opts = Vec::with_capacity(options.len());
     for o in options {
         let mut ids = tok.encode(&format!(" {}", clean(o)))?;
@@ -118,14 +152,15 @@ pub fn clamp_temperature(t: f64) -> f64 {
     }
 }
 
-/// The calibration bucket for a choice with `k` options.
-pub fn choice_bucket(k: usize) -> &'static str {
-    match k {
-        0..=2 => "choice:2",
-        3..=5 => "choice:3-5",
-        6..=10 => "choice:6-10",
-        _ => "choice:11+",
-    }
+/// The calibration bucket for a question with `k` options (upstream `temp_bucket`).
+pub fn bucket(kind: Kind, k: usize) -> String {
+    let size = match k {
+        0..=2 => "2",
+        3..=5 => "3-5",
+        6..=10 => "6-10",
+        _ => "11+",
+    };
+    format!("{}:{size}", kind.name())
 }
 
 /// Softmax of `logits / temperature`.
@@ -161,7 +196,7 @@ mod tests {
     #[test]
     fn lays_out_question_options_and_state() {
         let opts = vec![render_option("a", "first"), render_option("b", "")];
-        let s = build(&Chars, &sp(), "ST", "Q?", &opts, 512, 192).unwrap();
+        let s = build(&Chars, &sp(), Kind::Choice, "ST", "Q?", &opts, 512, 192).unwrap();
         let head = "choice question: Q?";
         assert_eq!(s.ids[0], CLS);
         assert_eq!(text(&s.ids[1..1 + head.len()]), head);
@@ -176,8 +211,17 @@ mod tests {
     }
 
     #[test]
+    fn a_noul_question_is_typed_and_scores_false_then_true() {
+        let s = build(&Chars, &sp(), Kind::Noul, "", "Results suffice.", &noul_options(), 512, 192).unwrap();
+        assert_eq!(text(&s.ids[1..1 + "noul question: ".len()]), "noul question: ");
+        assert_eq!(s.markers.len(), 2);
+        assert!(text(&s.ids[s.markers[0]..s.markers[1]]).contains("false: no"));
+        assert_eq!((Kind::Choice.qtype(), Kind::Noul.qtype()), (0, 2));
+    }
+
+    #[test]
     fn text_cannot_add_markers() {
-        let s = build(&Chars, &sp(), "x<mask>y", "a<mask>b", &["o<mask>".into(), "p".into()], 512, 192).unwrap();
+        let s = build(&Chars, &sp(), Kind::Choice, "x<mask>y", "a<mask>b", &["o<mask>".into(), "p".into()], 512, 192).unwrap();
         assert_eq!(s.ids.iter().filter(|&&i| i == MASK).count(), 2, "only the two option markers");
         assert!(text(&s.ids).contains("x y"));
     }
@@ -185,7 +229,7 @@ mod tests {
     #[test]
     fn long_options_are_cut_to_48_tokens_and_flagged() {
         let long = "z".repeat(100);
-        let s = build(&Chars, &sp(), "", "q", &[long, "b".into()], 512, 192).unwrap();
+        let s = build(&Chars, &sp(), Kind::Choice, "", "q", &[long, "b".into()], 512, 192).unwrap();
         assert_eq!(s.markers[1] - s.markers[0], 1 + 48);
         assert!(s.truncated);
     }
@@ -194,14 +238,14 @@ mod tests {
     fn many_options_share_the_budget_equally() {
         // 10 options of 30 tokens + marker overflow a 192 budget: (192 - 16) / 10 = 17 each
         let opts: Vec<String> = (0..10).map(|i| format!("{i}{}", "y".repeat(29))).collect();
-        let s = build(&Chars, &sp(), "", "q", &opts, 1024, 192).unwrap();
+        let s = build(&Chars, &sp(), Kind::Choice, "", "q", &opts, 1024, 192).unwrap();
         assert!(s.markers.windows(2).all(|w| w[1] - w[0] == 17));
         assert!(s.truncated);
     }
 
     #[test]
     fn the_state_fills_the_room_left_and_is_cut_from_the_end() {
-        let s = build(&Chars, &sp(), &"s".repeat(100), "q", &["a".into(), "b".into()], 60, 32).unwrap();
+        let s = build(&Chars, &sp(), Kind::Choice, &"s".repeat(100), "q", &["a".into(), "b".into()], 60, 32).unwrap();
         assert_eq!(s.ids.len(), 60);
         assert_eq!(*s.ids.last().unwrap(), SEP);
         assert!(s.truncated);
@@ -210,7 +254,7 @@ mod tests {
     #[test]
     fn options_that_dont_fit_the_input_are_an_error() {
         let opts: Vec<String> = (0..8).map(|i| format!("{i}")).collect();
-        assert!(build(&Chars, &sp(), "", &"q".repeat(40), &opts, 12, 200).unwrap_err().contains("don't fit"));
+        assert!(build(&Chars, &sp(), Kind::Choice, "", &"q".repeat(40), &opts, 12, 200).unwrap_err().contains("don't fit"));
     }
 
     #[test]
@@ -219,9 +263,10 @@ mod tests {
         assert_eq!(clamp_temperature(1.76), 1.76);
         assert_eq!(clamp_temperature(9.0), 5.0);
         assert_eq!(clamp_temperature(f64::NAN), 1.0);
-        assert_eq!(choice_bucket(2), "choice:2");
-        assert_eq!(choice_bucket(9), "choice:6-10");
-        assert_eq!(choice_bucket(11), "choice:11+");
+        assert_eq!(bucket(Kind::Choice, 2), "choice:2");
+        assert_eq!(bucket(Kind::Choice, 9), "choice:6-10");
+        assert_eq!(bucket(Kind::Choice, 11), "choice:11+");
+        assert_eq!(bucket(Kind::Noul, 2), "noul:2");
         let p = probabilities(&[2.0, 1.0, 0.0], 2.0);
         assert!((p.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         let q = probabilities(&[2.0, 1.0, 0.0], 1.0);

@@ -96,9 +96,15 @@ export function DecisionCall({ io, labels }: { io: DecisionIO; labels?: Record<s
         ) : r.laya ? (
           <>
             <div className="ag-small">
-              Scored {r.laya.scores.length} options from {r.laya.inputTokens} input tokens in {fmtMs(r.laya.ms)} (model time)
+              Scored {r.laya.scores.length} options{r.laya.stop != null ? ' and a yes/no question in one pass' : ''} from {r.laya.inputTokens} input
+              tokens in {fmtMs(r.laya.ms)} (model time)
               {r.laya.truncated && <span className="ag-note"> · input cut to fit</span>}
             </div>
+            {r.laya.stop != null && (
+              <div className="ag-small">
+                Yes/no: P(true) <span className="mono">{pct(r.laya.stop)}</span>
+              </div>
+            )}
             <table className="ag-logprobs mono">
               <thead>
                 <tr>
@@ -176,6 +182,11 @@ export function DecisionBars({ d }: { d: DecisionRecord }) {
           </li>
         ))}
       </ul>
+      {d.stop && (
+        <div className="ag-small ag-stop" title={d.stop.statement}>
+          Results suffice? <b>{pct(d.stop.probability)} yes</b> <span className="faint">(yes/no question, asked with the choice)</span>
+        </div>
+      )}
       <div className="faint ag-seed">
         Option order seed {d.seed} · {d.io?.response?.laya ? 'calibrated probabilities' : 'probabilities are uncalibrated scores'}
         {!!d.bounded?.length && ' · ≤ marks options below the readout, scored at its lowest value'}
@@ -277,6 +288,7 @@ export function AgentStepCard({ s }: { s: AgentStep }) {
       </div>
       {s.decision && (
         <div className="trace-detail">
+          {s.decision.stop && `Results suffice: ${pct(s.decision.stop.probability)} · `}
           Chosen with {pct(s.decision.confidence)} of {s.decision.options.length} options ·{' '}
           <span className="ag-ms">decided in {fmtMs(s.decision.ms)}</span> <span className="faint">· {s.decision.model}</span>
         </div>

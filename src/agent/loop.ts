@@ -8,7 +8,7 @@
 // as fenced passages (prompt.ts) and a clipped summary line.
 
 import { kbTool, type KbInfo, type SearchHit } from '../kb/api';
-import { decide, DecisionError, seededShuffle, type Decision, type DecisionOption } from '../llm/decide';
+import { decide, decidesWithLaya, DecisionError, seededShuffle, type Decision, type DecisionOption } from '../llm/decide';
 import {
   addAgentStep,
   OUTPUT_KEEP,
@@ -44,6 +44,16 @@ const PSEUDO: Record<string, string> = {
 };
 
 export const QUESTION = 'What should the assistant do next to fulfil the user’s request?';
+
+/**
+ * Laya picked a tool over *answer* after nearly every search that found
+ * passages (agent eval, 2026-09-26: 4.6 decisions per question), so with
+ * Laya, once there are results, stopping is its own yes/no question, asked in
+ * the same pass as the tool choice, and *answer* leaves the choice.
+ */
+export const STOP = 'The tool results above already contain the information needed to answer the user’s request.';
+/** Answer when Laya says the results suffice at least this likely. */
+export const STOP_AT = 0.5;
 
 /** A tool that failed or found nothing may be retried (rephrased) up to this many calls per turn. */
 const MAX_CALLS_PER_TOOL = 2;
@@ -136,6 +146,7 @@ const record = (d: Decision, seed: number): DecisionRecord => ({
   seed,
   promptTokens: d.promptTokens,
   io: d.io,
+  ...(d.stop ? { stop: d.stop } : {}),
   ...(d.truncated ? { truncated: true } : {}),
 });
 
@@ -230,9 +241,15 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       note = 'Searched first, without a decision: with a knowledge base selected, a question almost always needs a search.';
     } else {
       try {
-        const d = await decide(state(), QUESTION, decisionOptions(tools, seed + index, found.length > 0), signal);
+        const options = decisionOptions(tools, seed + index, found.length > 0);
+        const stopCheck = found.length > 0 && decidesWithLaya();
+        const d = await decide(state(), QUESTION, stopCheck ? options.filter((o) => o.id !== ANSWER) : options, signal, stopCheck ? { stop: STOP } : {});
         decision = record(d, seed + index);
         action = d.chosen;
+        if (d.stop && d.stop.probability >= STOP_AT) {
+          action = ANSWER;
+          note = `The tool results cover the request (${Math.round(d.stop.probability * 100)}% likely), so answering.`;
+        }
         if (action !== ANSWER && action !== CLARIFY && !tools.some((t) => t.id === action)) {
           throw new Error(`chose “${action}”, which wasn't offered`);
         }

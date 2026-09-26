@@ -289,6 +289,17 @@ describe('Command Center (agent mode)', () => {
     expect(await navigator.clipboard.readText()).toBe(`[system]\nMake the requested decision.\n\n[user]\n${io.request.messages[1].content}`);
   });
 
+  it('shows Laya’s answer to the stop question on the step and in the details', async () => {
+    const user = userEvent.setup();
+    const stop = { statement: 'The tool results above already contain the information needed.', probability: 0.78 };
+    turn([{ id: 's1', index: 0, at: 0, decision: { ...decision, model: 'Laya Multilingual', chosen: 'answer_now', stop }, action: 'answer_now' }]);
+    render(<CommandCenter />);
+    const trace = within(screen.getByText('Execution Trace').closest('aside')!);
+    expect(trace.getByText(/Results suffice: 78% · Chosen with/)).toBeInTheDocument();
+    await user.click(trace.getByRole('button', { name: 'Details' }));
+    expect(trace.getByText(/Results suffice\?/)).toHaveTextContent('Results suffice? 78% yes');
+  });
+
   it('shows a failed decision call with its time, error and request', async () => {
     const user = userEvent.setup();
     const io = { request: { messages: [{ role: 'user', content: 'State: failing' }], params: {} }, response: null };

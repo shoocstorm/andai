@@ -87,13 +87,39 @@ pub struct LayaOption {
     text: String,
 }
 
+/// `choice`: pick one of `options`. `noul`: does the statement in `question`
+/// hold, given the state? (no options; the answer is `[P(false), P(true)]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LayaKind {
+    Choice,
+    Noul,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LayaQuestion {
+    id: String,
+    kind: LayaKind,
+    question: String,
+    #[serde(default)]
+    options: Vec<LayaOption>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LayaChoice {
-    /// Calibrated probability per option, in the order given.
+pub struct LayaAnswer {
+    id: String,
+    /// Calibrated probability per option, in the order given; `[P(false), P(true)]` for a noul.
     probabilities: Vec<f64>,
     input_tokens: usize,
     truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayaAnswers {
+    answers: Vec<LayaAnswer>,
+    /// Model time for the whole batch (Rust), ms.
     ms: f64,
     model: String,
 }
@@ -102,31 +128,51 @@ pub const MAX_STATE: usize = 64 * 1024;
 pub const MAX_QUESTION: usize = 2 * 1024;
 pub const MAX_OPTION_TEXT: usize = 1024;
 pub const MAX_OPTIONS: usize = 16;
+/// Questions per call: each is its own row in the batch.
+pub const MAX_QUESTIONS: usize = 4;
 /// One IPC chunk of a checkpoint download.
 pub const MAX_CHUNK: usize = 16 * 1024 * 1024;
 
+fn slug(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
 /// Bounds on what the webview may ask the model to score.
-pub fn validate(state: &str, question: &str, options: &[LayaOption]) -> Result<(), String> {
+pub fn validate(state: &str, questions: &[LayaQuestion]) -> Result<(), String> {
     if state.len() > MAX_STATE {
         return Err(format!("decision state is over {MAX_STATE} bytes"));
     }
-    if question.is_empty() || question.len() > MAX_QUESTION {
-        return Err(format!("decision question must be 1–{MAX_QUESTION} bytes"));
+    if !(1..=MAX_QUESTIONS).contains(&questions.len()) {
+        return Err(format!("ask 1–{MAX_QUESTIONS} questions at a time, got {}", questions.len()));
     }
-    if !(2..=MAX_OPTIONS).contains(&options.len()) {
-        return Err(format!("a decision needs 2–{MAX_OPTIONS} options, got {}", options.len()));
-    }
-    let mut seen = std::collections::HashSet::new();
-    for o in options {
-        let ok_id = !o.id.is_empty() && o.id.len() <= 64 && o.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-        if !ok_id {
-            return Err(format!("invalid option id: {:?}", o.id));
+    let mut ids = std::collections::HashSet::new();
+    for q in questions {
+        if !slug(&q.id) || !ids.insert(q.id.as_str()) {
+            return Err(format!("invalid or duplicate question id: {:?}", q.id));
         }
-        if !seen.insert(o.id.as_str()) {
-            return Err(format!("duplicate option id: {}", o.id));
+        if q.question.is_empty() || q.question.len() > MAX_QUESTION {
+            return Err(format!("question {} must be 1–{MAX_QUESTION} bytes", q.id));
         }
-        if o.text.len() > MAX_OPTION_TEXT {
-            return Err(format!("option {} text is over {MAX_OPTION_TEXT} bytes", o.id));
+        match q.kind {
+            LayaKind::Noul if !q.options.is_empty() => return Err(format!("yes/no question {} takes no options", q.id)),
+            LayaKind::Noul => {}
+            LayaKind::Choice => {
+                if !(2..=MAX_OPTIONS).contains(&q.options.len()) {
+                    return Err(format!("a decision needs 2–{MAX_OPTIONS} options, got {}", q.options.len()));
+                }
+                let mut seen = std::collections::HashSet::new();
+                for o in &q.options {
+                    if !slug(&o.id) {
+                        return Err(format!("invalid option id: {:?}", o.id));
+                    }
+                    if !seen.insert(o.id.as_str()) {
+                        return Err(format!("duplicate option id: {}", o.id));
+                    }
+                    if o.text.len() > MAX_OPTION_TEXT {
+                        return Err(format!("option {} text is over {MAX_OPTION_TEXT} bytes", o.id));
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -261,21 +307,37 @@ pub async fn laya_unload(app: AppHandle, laya: tauri::State<'_, Laya>) -> Result
     }
 }
 
-/// Scores `options` for `question` given `state` on the loaded checkpoint.
+/// Scores every question about `state` on the loaded checkpoint, in one batch.
 #[tauri::command]
-pub async fn laya_decide(app: AppHandle, laya: tauri::State<'_, Laya>, state: String, question: String, options: Vec<LayaOption>) -> Result<LayaChoice, String> {
-    validate(&state, &question, &options)?;
+pub async fn laya_decide(app: AppHandle, laya: tauri::State<'_, Laya>, state: String, questions: Vec<LayaQuestion>) -> Result<LayaAnswers, String> {
+    validate(&state, &questions)?;
     #[cfg(laya)]
     {
         let model = laya.loaded().ok_or("No Laya model is loaded.")?;
         let w = laya.worker(&app);
-        let pairs = options.into_iter().map(|o| (o.id, o.text)).collect();
-        let c = blocking(move || w.choose(state, question, pairs)).await?;
-        Ok(LayaChoice { probabilities: c.probabilities, input_tokens: c.input_tokens, truncated: c.truncated, ms: c.ms, model })
+        let ids: Vec<String> = questions.iter().map(|q| q.id.clone()).collect();
+        let qs = questions
+            .into_iter()
+            .map(|q| engine::Question {
+                kind: match q.kind {
+                    LayaKind::Choice => prompt::Kind::Choice,
+                    LayaKind::Noul => prompt::Kind::Noul,
+                },
+                instructions: q.question,
+                options: q.options.into_iter().map(|o| (o.id, o.text)).collect(),
+            })
+            .collect();
+        let asked = blocking(move || w.questions(state, qs)).await?;
+        let answers = ids
+            .into_iter()
+            .zip(asked.answers)
+            .map(|(id, a)| LayaAnswer { id, probabilities: a.probabilities, input_tokens: a.input_tokens, truncated: a.truncated })
+            .collect();
+        Ok(LayaAnswers { answers, ms: asked.ms, model })
     }
     #[cfg(not(laya))]
     {
-        let _ = (app, laya, state, question, options);
+        let _ = (app, laya, state, questions);
         Err(UNSUPPORTED.into())
     }
 }
@@ -287,30 +349,55 @@ mod tests {
     fn opt(id: &str, text: &str) -> LayaOption {
         LayaOption { id: id.into(), text: text.into() }
     }
+    fn choice(id: &str, options: Vec<LayaOption>) -> LayaQuestion {
+        LayaQuestion { id: id.into(), kind: LayaKind::Choice, question: "q?".into(), options }
+    }
+    fn noul(id: &str) -> LayaQuestion {
+        LayaQuestion { id: id.into(), kind: LayaKind::Noul, question: "It holds.".into(), options: vec![] }
+    }
+    fn two() -> Vec<LayaOption> {
+        vec![opt("a", "x"), opt("b", "y")]
+    }
 
     #[test]
-    fn accepts_a_normal_decision() {
-        assert!(validate("state", "q?", &[opt("answer_now", "Answer"), opt("kb_search", "Search")]).is_ok());
+    fn accepts_a_choice_with_a_yes_no_question() {
+        assert!(validate("state", &[choice("next", vec![opt("answer_now", "Answer"), opt("kb_search", "Search")]), noul("stop")]).is_ok());
     }
 
     #[test]
     fn bounds_every_input() {
-        let two = [opt("a", "x"), opt("b", "y")];
-        assert!(validate(&"s".repeat(MAX_STATE + 1), "q", &two).unwrap_err().contains("state"));
-        assert!(validate("s", "", &two).is_err());
-        assert!(validate("s", &"q".repeat(MAX_QUESTION + 1), &two).is_err());
-        assert!(validate("s", "q", &two[..1]).unwrap_err().contains("2–16"));
-        let many: Vec<_> = (0..17).map(|i| opt(&format!("o{i}"), "t")).collect();
-        assert!(validate("s", "q", &many).unwrap_err().contains("2–16"));
-        assert!(validate("s", "q", &[opt("a", "x"), opt("b", &"t".repeat(MAX_OPTION_TEXT + 1))]).is_err());
+        assert!(validate(&"s".repeat(MAX_STATE + 1), &[choice("c", two())]).unwrap_err().contains("state"));
+        assert!(validate("s", &[]).unwrap_err().contains("1–4"));
+        assert!(validate("s", &(0..5).map(|i| noul(&format!("n{i}"))).collect::<Vec<_>>()).unwrap_err().contains("1–4"));
+        let mut empty = noul("n");
+        empty.question.clear();
+        assert!(validate("s", &[empty]).is_err());
+        let mut long = noul("n");
+        long.question = "q".repeat(MAX_QUESTION + 1);
+        assert!(validate("s", &[long]).is_err());
+        assert!(validate("s", &[choice("c", two()[..1].to_vec())]).unwrap_err().contains("2–16"));
+        assert!(validate("s", &[choice("c", (0..17).map(|i| opt(&format!("o{i}"), "t")).collect())]).unwrap_err().contains("2–16"));
+        assert!(validate("s", &[choice("c", vec![opt("a", "x"), opt("b", &"t".repeat(MAX_OPTION_TEXT + 1))])]).is_err());
+        let mut with_options = noul("n");
+        with_options.options = two();
+        assert!(validate("s", &[with_options]).unwrap_err().contains("takes no options"));
     }
 
     #[test]
-    fn option_ids_are_plain_slugs_and_unique() {
+    fn ids_are_plain_slugs_and_unique() {
         for bad in ["", "Answer", "a-b", "../x", "a b", "<mask>", &"a".repeat(65)] {
-            assert!(validate("s", "q", &[opt(bad, "x"), opt("b", "y")]).is_err(), "{bad:?}");
+            assert!(validate("s", &[choice("c", vec![opt(bad, "x"), opt("b", "y")])]).is_err(), "{bad:?}");
+            assert!(validate("s", &[noul(bad)]).is_err(), "{bad:?}");
         }
-        assert!(validate("s", "q", &[opt("a", "x"), opt("a", "y")]).unwrap_err().contains("duplicate"));
+        assert!(validate("s", &[choice("c", vec![opt("a", "x"), opt("a", "y")])]).unwrap_err().contains("duplicate"));
+        assert!(validate("s", &[noul("q"), noul("q")]).unwrap_err().contains("duplicate"));
+    }
+
+    #[test]
+    fn questions_parse_from_the_webview_shape() {
+        let q: Vec<LayaQuestion> = serde_json::from_str(r#"[{"id":"next","kind":"choice","question":"q?","options":[{"id":"a","text":"x"},{"id":"b","text":"y"}]},{"id":"stop","kind":"noul","question":"It holds."}]"#).unwrap();
+        assert_eq!((q[0].kind, q[1].kind, q[1].options.len()), (LayaKind::Choice, LayaKind::Noul, 0));
+        assert!(serde_json::from_str::<Vec<LayaQuestion>>(r#"[{"id":"x","kind":"score","question":"q"}]"#).is_err(), "only choice and noul");
     }
 
     #[cfg(not(laya))]

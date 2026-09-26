@@ -30,3 +30,15 @@ tokenizers = { version = "=0.23.2", default-features = false, features = ["onig"
 
 [dev-dependencies]
 tempfile = "3"
+
+# mlx-sys builds MLX's C++ as CMake "Debug" when its build script has debug
+# assertions, which made Laya ~4× slower in `tauri dev` and the agent eval
+# (53 ms vs 12.7 ms per decision). Build MLX and the Laya path's Rust
+# dependencies optimized even in dev builds.
+[profile.dev.package.mlx-sys]
+opt-level = 3
+debug-assertions = false
+[profile.dev.package.mlx-rs]
+opt-level = 3
+[profile.dev.package.tokenizers]
+opt-level = 3

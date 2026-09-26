@@ -38,6 +38,8 @@ export type Decision = {
   io: DecisionIO;
   /** Laya only: an option, the question or the state was cut to fit its input. */
   truncated?: boolean;
+  /** Laya only, when asked: the probability that the stop statement holds (the results suffice). */
+  stop?: { statement: string; probability: number };
 };
 
 /**
@@ -52,7 +54,7 @@ export type DecisionIO = {
     sampled: string | null;
     topLogprobs: { token: string; logprob: number }[];
     /** Laya: calibrated score per option id, its input size, whether input was cut, and its own time (Rust, ms). */
-    laya?: { scores: { id: string; probability: number }[]; inputTokens: number; truncated: boolean; ms: number };
+    laya?: { scores: { id: string; probability: number }[]; inputTokens: number; truncated: boolean; ms: number; stop?: number };
   } | null;
 };
 
@@ -135,11 +137,20 @@ export function seededShuffle<T>(items: T[], seed: number): T[] {
 }
 
 /** Scores `options` for `question` given `state`, on the decision model (or the chat model as fallback). */
+/** Whether decisions go to a Laya checkpoint, which can also answer a yes/no `stop` question. */
+export const decidesWithLaya = () => deciderLaya() != null;
+
+/**
+ * Scores `options` for `question` given `state`. With a Laya checkpoint, a
+ * `stop` statement is asked in the same pass as a yes/no question and its
+ * probability comes back as `Decision.stop`; other deciders ignore it.
+ */
 export async function decide(
   state: string,
   question: string,
   options: DecisionOption[],
   signal?: AbortSignal,
+  extra: { stop?: string } = {},
 ): Promise<Decision> {
   if (options.length < 2 || options.length > MAX_OPTIONS) {
     throw new Error(`A decision needs 2–${MAX_OPTIONS} options, got ${options.length}.`);
@@ -147,7 +158,7 @@ export async function decide(
   const started = performance.now();
   const labels = labelsFor(options.length);
   const laya = deciderLaya();
-  if (laya) return decideWithLaya(laya.name, state, question, options, labels, started);
+  if (laya) return decideWithLaya(laya.name, state, question, options, labels, started, extra.stop);
   const target = slotFor('decider');
   if (!target) throw new Error('No model loaded — open Settings → Models to load one.');
   if (!target.def.decider) throw new Error(`${target.def.name} can't make decisions; load a decision model in Settings → Models.`);
@@ -209,7 +220,8 @@ export async function decide(
 /**
  * The same decision on a Laya checkpoint (Rust, MLX): the options go in as
  * `id: text` criteria and come back as calibrated probabilities, in ~10–20 ms.
- * No letters or logprobs; the trace shows the state, question and options as
+ * A `stop` statement rides along as a yes/no question in the same batch. No
+ * letters or logprobs; the trace shows the state, questions and options as
  * the input and the scores as the output.
  */
 async function decideWithLaya(
@@ -219,6 +231,7 @@ async function decideWithLaya(
   options: DecisionOption[],
   labels: string[],
   started: number,
+  stop?: string,
 ): Promise<Decision> {
   const io: DecisionIO = {
     request: {
@@ -226,26 +239,41 @@ async function decideWithLaya(
         { role: 'state', content: state },
         { role: 'question', content: question },
         { role: 'options', content: options.map((o) => `${o.id}: ${o.text}`).join('\n') },
+        ...(stop ? [{ role: 'yes/no', content: stop }] : []),
       ],
-      params: { model: name, type: 'choice' },
+      params: { model: name, type: stop ? 'choice + noul' : 'choice' },
     },
     response: null,
   };
-  let c: Awaited<ReturnType<typeof layaDecide>>;
+  let r: Awaited<ReturnType<typeof layaDecide>>;
   try {
-    c = await layaDecide(state, question, options.map(({ id, text }) => ({ id, text })));
+    r = await layaDecide(state, [
+      { id: 'next', kind: 'choice', question, options: options.map(({ id, text }) => ({ id, text })) },
+      ...(stop ? [{ id: 'stop', kind: 'noul' as const, question: stop }] : []),
+    ]);
   } catch (e) {
     throw new DecisionError(e instanceof Error ? e.message : String(e), io, performance.now() - started);
   }
-  if (c.probabilities.length !== options.length || !c.probabilities.every(Number.isFinite)) {
-    throw new DecisionError(`${name} returned ${c.probabilities.length} scores for ${options.length} options.`, io, performance.now() - started);
+  const choice = r.answers.find((a) => a.id === 'next');
+  const p = choice?.probabilities ?? [];
+  if (p.length !== options.length || !p.every(Number.isFinite)) {
+    throw new DecisionError(`${name} returned ${p.length} scores for ${options.length} options.`, io, performance.now() - started);
   }
+  const stopP = stop ? r.answers.find((a) => a.id === 'stop')?.probabilities[1] : undefined;
+  if (stop && !Number.isFinite(stopP)) throw new DecisionError(`${name} didn't answer the yes/no question.`, io, performance.now() - started);
+  const truncated = r.answers.some((a) => a.truncated);
   io.response = {
     sampled: null,
     topLogprobs: [],
-    laya: { scores: options.map((o, i) => ({ id: o.id, probability: c.probabilities[i] })), inputTokens: c.inputTokens, truncated: c.truncated, ms: c.ms },
+    laya: {
+      scores: options.map((o, i) => ({ id: o.id, probability: p[i] })),
+      inputTokens: choice!.inputTokens,
+      truncated,
+      ms: r.ms,
+      ...(stopP != null ? { stop: stopP } : {}),
+    },
   };
-  const scored = options.map((o, i) => ({ id: o.id, label: labels[i], text: o.text, probability: c.probabilities[i], logprob: Math.log(c.probabilities[i]) }));
+  const scored = options.map((o, i) => ({ id: o.id, label: labels[i], text: o.text, probability: p[i], logprob: Math.log(p[i]) }));
   const best = scored.reduce((a, b) => (b.probability > a.probability ? b : a));
   return {
     options: scored,
@@ -255,8 +283,9 @@ async function decideWithLaya(
     model: name,
     slot: 'decider',
     ms: performance.now() - started,
-    promptTokens: c.inputTokens,
+    promptTokens: choice!.inputTokens,
     io,
-    truncated: c.truncated,
+    truncated,
+    ...(stop && stopP != null ? { stop: { statement: stop, probability: stopP } } : {}),
   };
 }

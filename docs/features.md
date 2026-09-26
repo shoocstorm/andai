@@ -89,12 +89,15 @@ pasting in whatever one search returns:
   Laya Multilingual and 20 ms with Laya English, against about 0.6 s for a
   Qwen3 0.6B decision (measured on an Apple M5 Max). Each downloads once from
   a fixed Hugging Face commit and is checked against its recorded sha256
-  before it's kept. Not available on Intel Macs or Windows. **It's an early
-  option:** in our agent eval (34 questions, Qwen3 0.6B answering) Laya
-  rarely chose to answer once the first search had found passages and kept
-  calling other tools, so questions took longer overall (4.7 s with Laya
-  English and 8.1 s with Laya Multilingual, against 4.2 s with Qwen3 0.6B
-  deciding). Qwen3 0.6B remains the recommended decision model.
+  before it's kept. Not available on Intel Macs or Windows. Once a tool has
+  found something, Laya also answers a yes/no question in the same pass, *do
+  the results already cover the request?*, and the agent answers when it
+  says yes. In our agent eval (34 questions, Qwen3 0.6B writing the answers)
+  Laya Multilingual made questions faster overall, 3.4 s against 4.2 s with
+  Qwen3 0.6B deciding, but its answers had the expected facts slightly less
+  often (82.8% against 86.2%) and it searched on greetings and small talk.
+  Laya English was slower overall (5.1 s). Qwen3 0.6B stays the most
+  accurate decision model; Laya Multilingual is the fastest.
 - **Every step is visible.** The Execution Trace lists each decision with
   its options and probabilities, and each tool call with its arguments, the
   ug command that ran, timing and what it returned. Each step shows how long

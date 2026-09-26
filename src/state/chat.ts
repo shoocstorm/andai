@@ -35,6 +35,8 @@ export type DecisionRecord = {
   io?: DecisionIO;
   /** Laya: its input was cut to fit (an option, the question or the state). */
   truncated?: boolean;
+  /** Laya: how likely the tool results already suffice (asked with the choice once there are results). */
+  stop?: { statement: string; probability: number };
 };
 
 export type CallStatus = 'filling' | 'awaiting' | 'running' | 'done' | 'error' | 'denied' | 'skipped';

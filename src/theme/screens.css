@@ -1926,6 +1926,10 @@ tr:hover .kn-remove {
 .ag-err {
   color: var(--red);
 }
+.ag-stop {
+  margin-top: 4px;
+  color: var(--text-2);
+}
 .ag-summary {
   font-size: 12px;
   padding: 2px 2px 0;
