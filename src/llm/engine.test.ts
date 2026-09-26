@@ -10,6 +10,8 @@ const state = vi.hoisted(() => ({
   removed: [] as string[],
   loaded: 0,
   opened: 0,
+  gpuLine: null as string | null,
+  stream: { promptMs: 0, tokens: 0, gapMs: 0, timings: null as Record<string, number> | null },
 }));
 
 vi.mock('./models', () => {
@@ -50,9 +52,25 @@ vi.mock('@wllama/wllama', () => {
     }
   }
   class Wllama {
+    logger?: { log: (...a: unknown[]) => void };
+    constructor(_paths: unknown, config: { logger?: { log: (...a: unknown[]) => void } }) {
+      this.logger = config.logger;
+    }
     setCompat() {}
     async loadModel() {
       state.loaded++;
+      if (state.gpuLine) this.logger?.log(state.gpuLine);
+    }
+    async createChatCompletion() {
+      const { promptMs, tokens, gapMs, timings } = state.stream;
+      return (async function* () {
+        await new Promise((r) => setTimeout(r, promptMs));
+        for (let i = 0; i < tokens; i++) {
+          if (i) await new Promise((r) => setTimeout(r, gapMs));
+          yield { choices: [{ delta: { content: 't' } }] };
+        }
+        yield { choices: [{ delta: {} }], usage: { prompt_tokens: 500 }, ...(timings ? { timings } : {}) };
+      })();
     }
     getLoadedContextInfo() {
       return { n_ctx: 1024, n_ctx_train: 1024, n_layer: 1 };
@@ -77,11 +95,11 @@ vi.mock('@wllama/wllama', () => {
   return { ModelManager, Wllama, WllamaAbortError: class extends Error {} };
 });
 
-const { loadModel, unloadModel, refreshCache, removeLegacyCopies, useEngine } = await import('./engine');
+const { chat, gpuFromLog, loadModel, unloadModel, refreshCache, removeLegacyCopies, useEngine } = await import('./engine');
 
 beforeEach(async () => {
   await unloadModel();
-  Object.assign(state, { cached: [], blob: new Blob([bytes]), removed: [], loaded: 0, opened: 0 });
+  Object.assign(state, { cached: [], blob: new Blob([bytes]), removed: [], loaded: 0, opened: 0, gpuLine: null });
   localStorage.clear();
   useEngine.setState({ status: 'idle', error: null });
 });
@@ -132,5 +150,42 @@ describe('pre-pinning copies', () => {
     expect(state.removed).toEqual([]);
     await removeLegacyCopies('tiny');
     expect(state.removed).toEqual([legacy]);
+  });
+});
+
+describe('what the engine reports', () => {
+  const drain = async () => {
+    const events = [];
+    for await (const ev of chat([{ role: 'user', content: 'hi' }], { temperature: 0, maxTokens: 64, thinking: false, signal: new AbortController().signal })) events.push(ev);
+    return events;
+  };
+
+  it('times generation from the first token, and reports the prompt apart', async () => {
+    // Counting the prompt made a 60 tok/s answer look like 15 tok/s (AGENTS.md §2).
+    await loadModel('tiny');
+    state.stream = { promptMs: 200, tokens: 5, gapMs: 10, timings: null };
+    const done = (await drain()).at(-1) as { type: 'done'; tokPerSec: number; promptTokPerSec: number; promptTokens: number };
+    expect(done.promptTokens).toBe(500);
+    expect(done.tokPerSec).toBeGreaterThan(40); // 4 tokens in ~40 ms, not 5 in ~240 ms (~21)
+    expect(done.promptTokPerSec).toBeGreaterThan(1000);
+    expect(done.promptTokPerSec).toBeLessThan(3000); // 500 tokens in ~200 ms
+  });
+
+  it("prefers llama.cpp's own timings when the stream has them", async () => {
+    await loadModel('tiny');
+    state.stream = { promptMs: 0, tokens: 3, gapMs: 1, timings: { prompt_n: 500, prompt_per_second: 185, predicted_per_second: 63 } };
+    expect((await drain()).at(-1)).toMatchObject({ type: 'done', tokPerSec: 63, promptTokPerSec: 185 });
+    expect(useEngine.getState().tokPerSec).toBe(63);
+  });
+
+  it('reports the GPU layers llama.cpp offloaded, not just that WebGPU exists', async () => {
+    state.gpuLine = 'load_tensors: offloaded 29/29 layers to GPU';
+    await loadModel('tiny');
+    expect(useEngine.getState().info?.backend).toBe('WebGPU · 29/29 layers');
+    await unloadModel();
+    state.gpuLine = 'ggml_webgpu: Failed to get an adapter: WebGPU not available on this browser (requestAdapter returned null)';
+    await loadModel('tiny');
+    expect(useEngine.getState().info?.backend).toBe('WASM · CPU (no GPU adapter)');
+    expect(gpuFromLog('llama_context: n_ctx = 4096')).toBeNull();
   });
 });

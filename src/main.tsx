@@ -24,7 +24,10 @@ document.documentElement.dataset.platform = isMac ? 'mac' : 'other';
 initTheme();
 
 const smoke = import.meta.env.VITE_SMOKE as string | undefined;
-if (smoke && smoke !== 'e2e' && smoke !== 'eval') {
+if (smoke === 'bench') {
+  // Engine benchmark (src/bench.ts): no UI, one model under several settings.
+  void import('./bench').then((m) => m.runBench(JSON.parse(String(import.meta.env.VITE_BENCH))));
+} else if (smoke && smoke !== 'e2e' && smoke !== 'eval') {
   void runSmoke(smoke);
 } else {
   // The agent eval (src/eval.ts) is its own chunk, loaded only here.

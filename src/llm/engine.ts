@@ -100,8 +100,28 @@ function manager(): ModelManager | null {
   return modelManager;
 }
 
-function newWllama(): Wllama {
-  const w = new Wllama({ default: asset('/wllama/default/wllama.wasm') }, { parallelDownloads: 3 });
+/**
+ * What llama.cpp's load log says about the GPU: "offloaded 29/29 layers to
+ * GPU" when WebGPU took the layers, or "Failed to get an adapter" when it
+ * ran on the CPU. `navigator.gpu` existing says neither (AGENTS.md §2).
+ */
+export function gpuFromLog(line: string): { layers: number; total: number } | null {
+  const m = /offloaded (\d+)\/(\d+) layers to GPU/.exec(line);
+  if (m) return { layers: Number(m[1]), total: Number(m[2]) };
+  return /ggml_webgpu: Failed to get an adapter/.test(line) ? { layers: 0, total: 0 } : null;
+}
+
+function newWllama(onGpu?: (gpu: { layers: number; total: number }) => void): Wllama {
+  // Native logs still reach the console; the GPU lines are also kept for EngineInfo.
+  const watch =
+    (fn: (...a: unknown[]) => void) =>
+    (...a: unknown[]) => {
+      const gpu = onGpu && gpuFromLog(a.map(String).join(' '));
+      if (gpu) onGpu(gpu);
+      fn(...a);
+    };
+  const logger = { debug: watch(console.debug), log: watch(console.log), warn: watch(console.warn), error: watch(console.error) };
+  const w = new Wllama({ default: asset('/wllama/default/wllama.wasm') }, { parallelDownloads: 3, logger });
   w.setCompat({ worker: asset('/wllama/compat/wllama.js'), wasm: asset('/wllama/compat/wllama.wasm') });
   return w;
 }
@@ -198,7 +218,8 @@ export async function loadModel(id: string): Promise<void> {
   try {
     const { model, verifyMs } = await openVerified(def, (progress) => useEngine.setState({ progress }));
     useEngine.setState({ lastVerifyMs: verifyMs });
-    const w = newWllama();
+    let gpu: { layers: number; total: number } | null = null;
+    const w = newWllama((g) => (gpu = g));
     await w.loadModel(model, {
       n_ctx: def.n_ctx,
       // keep <think> blocks in the raw stream so the UI can fold them itself
@@ -210,7 +231,7 @@ export async function loadModel(id: string): Promise<void> {
       loadingId: null,
       loadedId: id,
       progress: null,
-      info: readInfo(w),
+      info: readInfo(w, gpu),
       lastLoadMs: performance.now() - started,
     });
     localStorage.setItem('andai.lastModel', id);
@@ -327,11 +348,17 @@ export async function removeLegacyCopies(id: string): Promise<void> {
   await refreshCache();
 }
 
-function readInfo(w: Wllama): EngineInfo {
+function readInfo(w: Wllama, gpu: { layers: number; total: number } | null): EngineInfo {
   const i = w.getLoadedContextInfo();
   const meta = w.getModelMetadata().meta;
   return {
-    backend: w.isSupportWebGPU() ? 'WebGPU' : 'WASM · CPU',
+    backend: gpu
+      ? gpu.layers > 0
+        ? `WebGPU · ${gpu.layers}/${gpu.total} layers`
+        : 'WASM · CPU (no GPU adapter)'
+      : w.isSupportWebGPU()
+        ? 'WebGPU (unconfirmed)'
+        : 'WASM · CPU',
     threads: w.isMultithread() ? `${w.getNumThreads()} (multi)` : '1 (single)',
     context: `${i.n_ctx} / ${i.n_ctx_train}`,
     layers: i.n_layer,
@@ -345,9 +372,15 @@ export const loadedModel = (): ModelDef | undefined => modelById(useEngine.getSt
 export const isAbort = (e: unknown) =>
   e instanceof WllamaAbortError || (e instanceof Error && e.name === 'AbortError');
 
+/**
+ * `tokPerSec` is generation speed, timed from the first token: reading the
+ * prompt comes first and is reported apart, as `promptTokPerSec`. Counted
+ * together, a 3 s prompt made a 60 tok/s answer look like 15 tok/s
+ * (Qwen3 1.7B on WebGPU, AGENTS.md §2).
+ */
 export type StreamEvent =
   | { type: 'delta'; text: string; tokens: number; tokPerSec: number }
-  | { type: 'done'; promptTokens: number | null; completionTokens: number };
+  | { type: 'done'; promptTokens: number | null; completionTokens: number; tokPerSec: number | null; promptTokPerSec: number | null };
 
 /** Streams a chat completion. Throws `WllamaAbortError` when `signal` aborts. */
 export async function* chat(
@@ -360,8 +393,10 @@ export async function* chat(
 
   useEngine.setState({ generating: true });
   const started = performance.now();
+  let firstAt: number | null = null;
   let tokens = 0;
   let promptTokens: number | null = null;
+  let timings: { prompt_per_second?: number; predicted_per_second?: number } | undefined;
   try {
     const stream = await w.createChatCompletion({
       messages,
@@ -377,19 +412,30 @@ export async function* chat(
     for await (const chunk of stream as AsyncIterable<{
       choices?: { delta?: { content?: string | null } }[];
       usage?: { prompt_tokens: number } | null;
-      timings?: { prompt_n: number };
+      timings?: { prompt_n: number; prompt_per_second?: number; predicted_per_second?: number };
     }>) {
       if (chunk.usage?.prompt_tokens) promptTokens = chunk.usage.prompt_tokens;
       else if (chunk.timings?.prompt_n) promptTokens = chunk.timings.prompt_n;
+      if (chunk.timings) timings = chunk.timings;
       const delta = chunk.choices?.[0]?.delta?.content;
       if (!delta) continue;
       tokens++;
-      const secs = (performance.now() - started) / 1000;
-      const tokPerSec = secs > 0 ? tokens / secs : 0;
-      useEngine.setState({ tokPerSec });
+      const now = performance.now();
+      firstAt ??= now;
+      // The first token only ends the prompt; the rate starts from it.
+      const secs = (now - firstAt) / 1000;
+      const tokPerSec = tokens > 1 && secs > 0 ? (tokens - 1) / secs : 0;
+      if (tokens > 1) useEngine.setState({ tokPerSec });
       yield { type: 'delta', text: delta, tokens, tokPerSec };
     }
-    yield { type: 'done', promptTokens, completionTokens: tokens };
+    // llama.cpp's own timings when the stream carries them, else the wall clock.
+    const rate = (v: number | undefined) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+    const genSecs = firstAt != null ? (performance.now() - firstAt) / 1000 : 0;
+    const tokPerSec = rate(timings?.predicted_per_second) ?? (tokens > 1 && genSecs > 0 ? (tokens - 1) / genSecs : null);
+    const promptSecs = firstAt != null ? (firstAt - started) / 1000 : 0;
+    const promptTokPerSec = rate(timings?.prompt_per_second) ?? (promptTokens && promptSecs > 0 ? promptTokens / promptSecs : null);
+    if (tokPerSec != null) useEngine.setState({ tokPerSec });
+    yield { type: 'done', promptTokens, completionTokens: tokens, tokPerSec, promptTokPerSec };
   } finally {
     useEngine.setState({ generating: false });
   }

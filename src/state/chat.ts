@@ -88,7 +88,10 @@ export const OUTPUT_KEEP = 16_000;
 
 export type TurnStats = {
   tokens: number;
+  /** Generation speed, from the first token on (engine.ts `StreamEvent`). */
   tokPerSec: number;
+  /** How fast the prompt was read, before the first token; null when unknown. */
+  promptTokPerSec?: number | null;
   promptTokens: number | null;
   nCtx: number;
   totalMs: number;

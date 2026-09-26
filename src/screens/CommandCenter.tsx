@@ -273,6 +273,7 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
           <div className="cc-answer-meta">
             {fmtTime(m.createdAt)} · {m.stats?.model ?? 'Andai'}
             {m.stats && ` · ${m.stats.tokens} tok · ${m.stats.tokPerSec.toFixed(1)} tok/s`}
+            {m.stats?.promptTokPerSec ? ` · prompt ${Math.round(m.stats.promptTokPerSec)} tok/s` : ''}
             {m.stopped && ' · stopped'}
             <CopyButton text={() => reportFor(m)} label="Copy debug report" />
           </div>

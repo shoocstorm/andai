@@ -84,6 +84,7 @@ Andai/
 │  ├─ lib/platform.ts        macOS vs Windows in the UI: shortcut labels (⌘ / Ctrl), traffic-light room
 │  ├─ mock/workflows.ts      data for the simulated Workflows screens
 │  ├─ smoke.ts               in-webview test harness (VITE_SMOKE)
+│  ├─ bench.ts               engine benchmark (VITE_SMOKE=bench; not in production builds)
 │  └─ eval.ts                agent eval harness (VITE_SMOKE=eval; not in production builds)
 ├─ src-tauri/
 │  ├─ src/lib.rs             app setup, navigation lock, drop → file grants
@@ -207,6 +208,21 @@ level defaults to *Ask*.
   fresh download is always verified.
 - **RTK rewrites `curl` output** and can mangle JSON. Use `rtk proxy curl`
   when you parse an API response.
+- **WKWebView runs wllama's compat build on the GPU.** WebGPU works in the
+  compat (Asyncify) worker: llama.cpp logs `offloaded 29/29 layers to GPU`
+  for Qwen3 1.7B (e2e checks every layer is on the GPU, from that log line;
+  `navigator.gpu` existing proves nothing). CPU-only is 10× slower. WebKit
+  reports 8 cores (`hardwareConcurrency`), so wllama uses 4 threads; 8
+  threads made GPU generation 2–4× *slower*, 2 threads was no different.
+  Flash attention isn't supported on WebGPU and is switched off by
+  llama.cpp. Measured 2026-09-26 on an M5 Max with `bun run bench:engine`.
+- **Prompt reading, not generation, is the wait.** Qwen3 1.7B reads about
+  185 prompt tok/s and generates 30–65 tok/s (0.6B: about 520 and 65), so a
+  550-token grounded prompt costs 3 s before the first word. Generation
+  speed is timed from the first token (`StreamEvent`); it used to include
+  the prompt, which made 60 tok/s read as 15–20. The ceiling is the
+  WebAssembly build: native llama.cpp on Metal would be several times
+  faster, but it's a native-code dependency (§1.10).
 - **wllama loads single GGUF files up to 2 GB.** Larger models need gguf-split
   shards; `models.test.ts` enforces the limit.
 - **wllama's chat logprobs are the raw next-token distribution** (wllama
@@ -358,6 +374,7 @@ bun run test:e2e         # full app in WKWebView: ingest → retrieve → genera
 bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and releases run it
 bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
 bun run perf             # bundle size (CI too) + micro-benchmarks vs. perf/baseline.json
+bun run bench:engine     # engine probe: GPU layers, threads, prompt and generation tok/s per wllama setting (needs a downloaded model)
 bun run eval:agent       # agent eval: 27 questions through the real agent → scorecard vs. perf/baseline.json (needs ug + model); read and compare reports with bun run eval:view
 ```
 

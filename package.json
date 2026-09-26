@@ -22,6 +22,7 @@
     "perf": "bun scripts/perf.mjs",
     "eval:agent": "bun scripts/eval-agent.mjs",
     "eval:view": "bun scripts/eval-view.mjs",
+    "bench:engine": "bun scripts/bench-engine.mjs",
     "audit": "bun audit --audit-level=high && cargo audit --file src-tauri/Cargo.lock",
     "check": "bun run typecheck && bun run test && bun run test:rust && bun run lint:rust",
     "version": "bun scripts/version.mjs",

@@ -119,7 +119,7 @@ gpuix renders with Bun. wllama's default wasm needs **Memory64 + JSPI**, which B
 
 On macOS, Tauri uses **WKWebView**, which is the Safari engine. (On Windows it uses **WebView2**, which is Chromium: wllama runs its default build there, and the loopback server below provides isolation the same way.)
 
-- **Compat build.** wllama detects the missing features (`needCompat()`), and `engine.ts` points `setCompat()` at the bundled `@wllama/wllama-compat` files. Measured on an M-series Mac, Qwen3 0.6B runs at about **31 tok/s** on the WebGPU backend with 4 threads.
+- **Compat build.** wllama detects the missing features (`needCompat()`), and `engine.ts` points `setCompat()` at the bundled `@wllama/wllama-compat` files. The compat build still runs on the GPU: llama.cpp offloads every layer through WebGPU. Measured on an Apple M5 Max, Qwen3 0.6B generates about **65 tok/s** and reads its prompt at about **520 tok/s** (`bun run bench:engine` shows the load log and speeds).
 - **Cross-origin isolation.** Multi-threading needs `SharedArrayBuffer`, which needs COOP/COEP. WebKit **ignores isolation on custom schemes**: `tauri://` sends the headers, but `crossOriginIsolated` stays false. Release builds therefore serve the UI from `http://localhost:14230` through Andai's own loopback server (`src-tauri/src/ui_server.rs`), which adds the headers. It binds the port before any window exists and refuses to start if another process holds it. Dev gets the same headers from Vite.
 - **ACL.** That loopback origin counts as "remote", so every app command is declared in `build.rs` and granted in `capabilities/default.json`. When you add a command, add it in both places.
 - Fonts are bundled with `@fontsource`, because COEP blocks cross-origin font CSS.

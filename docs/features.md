@@ -122,8 +122,12 @@ pasting in whatever one search returns:
   download once more; **Settings → Models** offers to remove the older copy,
   after asking you to confirm.
 - Runs with [wllama](https://github.com/ngxson/wllama) (llama.cpp compiled to
-  WebAssembly) on the GPU through WebGPU, multi-threaded. We measured ~30
-  tokens/second for Qwen3 0.6B on an Apple Silicon Mac.
+  WebAssembly) on the GPU through WebGPU: every layer of the model runs on
+  the GPU. On an Apple M5 Max we measured Qwen3 0.6B writing about 65
+  tokens/second after reading its prompt at about 520 tokens/second; Qwen3
+  1.7B writes 30–65 tokens/second (it varies with how busy the Mac is) and
+  reads about 185 tokens/second, so a grounded answer starts after about
+  3 s. The answer footer shows both speeds.
 - Unload or delete cached models from **Settings**.
 
 ## Workspace

@@ -218,6 +218,7 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
         modelBytes: modelById(model)?.bytes ?? null,
         firstTokenMs: msg?.stats?.firstTokenMs ?? null,
         tokPerSec: msg?.stats?.tokPerSec ?? null,
+        promptTokPerSec: msg?.stats?.promptTokPerSec ?? null,
         promptTokens: msg?.stats?.promptTokens ?? null,
       },
     };

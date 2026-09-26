@@ -81,7 +81,7 @@ export function debugReport(m: Message, question: string, env: ReportEnv): strin
     lines.push(
       '',
       `### Stats`,
-      `${s.tokens} tokens · ${s.tokPerSec.toFixed(1)} tok/s · prompt ${s.promptTokens ?? '—'} / ctx ${s.nCtx} · first token ${s.firstTokenMs != null ? Math.round(s.firstTokenMs) : '—'} ms · total ${Math.round(s.totalMs)} ms`,
+      `${s.tokens} tokens · ${s.tokPerSec.toFixed(1)} tok/s · prompt ${s.promptTokens ?? '—'}${s.promptTokPerSec ? ` at ${Math.round(s.promptTokPerSec)} tok/s` : ''} / ctx ${s.nCtx} · first token ${s.firstTokenMs != null ? Math.round(s.firstTokenMs) : '—'} ms · total ${Math.round(s.totalMs)} ms`,
     );
   }
   return lines.filter((l, i, a) => !(l === '' && a[i - 1] === '')).join('\n');

@@ -89,28 +89,34 @@
     "recorded": "2026-09-26",
     "metrics": {
       "ingest-ms": {
-        "value": 1955,
+        "value": 2122,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 1000
       },
       "search-ms": {
-        "value": 101,
+        "value": 110,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 150
       },
       "first-token-ms": {
-        "value": 943,
+        "value": 967,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 300
       },
       "generation-tok-per-sec": {
-        "value": 17.839,
+        "value": 66.649,
+        "unit": "tok/s",
+        "better": "higher",
+        "tolerance": 1.5
+      },
+      "prompt-tok-per-sec": {
+        "value": 520,
         "unit": "tok/s",
         "better": "higher",
         "tolerance": 1.5
@@ -122,7 +128,7 @@
         "tolerance": 1.25
       },
       "warm-load-ms": {
-        "value": 1309,
+        "value": 1800,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
@@ -135,28 +141,34 @@
     "recorded": "2026-09-26",
     "metrics": {
       "ingest-ms": {
-        "value": 2135,
+        "value": 2095,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 1000
       },
       "search-ms": {
-        "value": 91,
+        "value": 95,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 150
       },
       "first-token-ms": {
-        "value": 935,
+        "value": 944,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,
         "slack": 300
       },
       "generation-tok-per-sec": {
-        "value": 21.97,
+        "value": 68.713,
+        "unit": "tok/s",
+        "better": "higher",
+        "tolerance": 1.5
+      },
+      "prompt-tok-per-sec": {
+        "value": 532,
         "unit": "tok/s",
         "better": "higher",
         "tolerance": 1.5
@@ -168,7 +180,7 @@
         "tolerance": 1.25
       },
       "warm-load-ms": {
-        "value": 1338,
+        "value": 1324,
         "unit": "ms",
         "better": "lower",
         "tolerance": 1.5,

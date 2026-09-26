@@ -84,17 +84,21 @@ grounded question. Recorded on Apple M5 Max · 18 cores · 128 GB.
 
 | Metric | Dev | Release | Slack | What it is |
 |---|---|---|---|---|
-| `ingest-ms` | 1,955 ms | 2,135 ms | 1,000 ms | ug ingests and indexes a Markdown file and a PDF |
-| `search-ms` | 101 ms | 91 ms | 150 ms | One `ug search` through the Rust bridge |
-| `warm-load-ms` | 1,309 ms | 1,338 ms | 1,000 ms | Loading an already downloaded and verified model into wllama |
-| `first-token-ms` | 943 ms | 935 ms | 300 ms | Time from sending the question to the first streamed token: analyze, retrieve, build and prompt eval. This is the wait the user sees |
-| `generation-tok-per-sec` | 17.8 tok/s | 22.0 tok/s | — | Streamed tokens ÷ time since generation started, prompt eval included |
+| `ingest-ms` | 2,122 ms | 2,095 ms | 1,000 ms | ug ingests and indexes a Markdown file and a PDF |
+| `search-ms` | 110 ms | 95 ms | 150 ms | One `ug search` through the Rust bridge |
+| `warm-load-ms` | 1,800 ms | 1,324 ms | 1,000 ms | Loading an already downloaded and verified model into wllama |
+| `first-token-ms` | 967 ms | 944 ms | 300 ms | Time from sending the question to the first streamed token: analyze, retrieve, build and prompt eval. This is the wait the user sees |
+| `generation-tok-per-sec` | 66.6 tok/s | 68.7 tok/s | — | Answer tokens per second from the first token on (llama.cpp's own timing). Until 2026-09-26 this counted the prompt eval too and read 17.8 / 22.0 |
+| `prompt-tok-per-sec` | 520 tok/s | 532 tok/s | — | How fast the prompt is read before the first token (llama.cpp's timing) |
 | `prompt-tokens` | 361 | 367 | tolerance 1.25 | Size of the grounded prompt. Deterministic for the fixtures, so growth means the prompt got bigger |
 | `verify-mb-per-sec` | not measured yet | not measured yet | — | SHA-256 in WKWebView, only on a run that downloads or re-verifies the model. AGENTS.md §2 has an earlier release-build measurement: about 93 MB/s |
 
-A second run on each build stayed within 10% on every metric except
-`generation-tok-per-sec`, which moved by up to 22% (17.2–22.0 tok/s in
-release). Treat tok/s changes under about 25% as noise. The two builds
+Generation speed depends on how busy the machine is: `bun run bench:engine`
+measured the same Qwen3 1.7B setting at 22–64 tok/s within minutes, while
+its prompt speed held at 180–186 tok/s. Treat generation changes under about
+50% as noise unless the machine was idle; prompt speed is the steadier
+number. The earlier baseline's second runs stayed within 10% on every other
+metric. The two builds
 retrieve slightly different passages (361 vs. 367 prompt tokens), which is
 why each has its own baseline.
 
@@ -104,7 +108,7 @@ can't measure is left out of the comparison and kept in the baseline.
 
 ### Agent eval: `bun run eval:agent`, section `agent-eval`
 
-Not a speed suite only: it scores what the agent *does* on 27 fixed
+Not a speed suite only: it scores what the agent *does* on 30 fixed
 questions (`tests/fixtures/eval/cases.json`) over three knowledge bases built
 from `tests/fixtures/eval/` (documents, code, both). Each question lists the
 acceptable first actions and regexes the answer must match. The option
@@ -147,6 +151,36 @@ bun run eval:agent --update                       # re-record the baseline
 EVAL_MODEL=qwen3-1.7b bun run eval:agent          # another answer model (not compared with the baseline)
 EVAL_DECIDER=qwen3-1.7b bun run eval:agent        # a separate decision model
 ```
+
+### Engine: `bun run bench:engine`
+
+Not a baseline: a probe for engine questions ("is the GPU used?", "do more
+threads help?"). It loads one model under several wllama settings in the
+real webview (`src/bench.ts`) and prints llama.cpp's own load log (GPU
+adapter, layers offloaded, threads) with prompt and generation speed for a
+grounded-size prompt (about 550 tokens). Measured 2026-09-26, Qwen3 1.7B,
+Apple M5 Max, dev build:
+
+| Setting | Generation | Prompt |
+|---|---|---|
+| Default: WebGPU (29/29 layers), 4 threads | 29–64 tok/s | 183–186 tok/s |
+| WebGPU, 2 threads | 34–64 tok/s | 177–186 tok/s |
+| WebGPU, 8 threads | 13–16 tok/s | 180 tok/s |
+| CPU only (`n_gpu_layers: 0`), 4 threads | 3.6 tok/s | 27 tok/s |
+
+Also measured, and not worth changing:
+- **Flash attention** is requested but llama.cpp turns it off on WebGPU
+  ("Flash Attention not supported"); it only runs CPU-only, which is 10×
+  slower overall. wllama 3.6.1 is the newest release.
+- **Batch size** (`n_ubatch`): 1024 read a 548-token prompt at 212 tok/s
+  against 178–183 at the default 512, but only because 548 tokens spill
+  just past one 512 chunk; at 1,448 tokens 512, 1024 and 2048 all read
+  196–219 tok/s. Each doubling doubles the WebGPU compute buffer (160 → 304
+  → 608 MiB), and Qwen3 1.7B already takes about 1.66 GiB of the 2 GiB
+  WebGPU budget llama.cpp reports.
+
+Settings in one launch affect each other (the first is always fastest), so
+compare settings in separate launches: `BENCH_CONFIGS='[{"name":"x","n_threads":2}]'`.
 
 ## Workflow
 

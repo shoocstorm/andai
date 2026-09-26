@@ -6,7 +6,7 @@
 
 import { kbSearch, type SearchHit } from '../kb/api';
 import { budgets, buildHistory, buildSystem, CHARS_PER_TOKEN, keywords } from './prompt';
-import { chat, isAbort, loadedModel, useEngine, type ChatMessage } from '../llm/engine';
+import { chat, isAbort, loadedModel, type ChatMessage } from '../llm/engine';
 import {
   addMessage,
   patchMessage,
@@ -175,7 +175,8 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
           content: reply,
           stats: {
             tokens: ev.completionTokens,
-            tokPerSec: useEngine.getState().tokPerSec ?? 0,
+            tokPerSec: ev.tokPerSec ?? 0,
+            promptTokPerSec: ev.promptTokPerSec,
             promptTokens: ev.promptTokens,
             nCtx,
             totalMs: secs * 1000,
@@ -185,7 +186,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
         });
         patchStep(id, 'generate', {
           status: 'done',
-          detail: `${ev.completionTokens} tokens · ${(useEngine.getState().tokPerSec ?? 0).toFixed(1)} tok/s`,
+          detail: `${ev.completionTokens} tokens · ${(ev.tokPerSec ?? 0).toFixed(1)} tok/s${ev.promptTokPerSec ? ` · prompt ${Math.round(ev.promptTokPerSec)} tok/s` : ''}`,
         });
       }
     }

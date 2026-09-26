@@ -114,6 +114,9 @@ if (failure || !result) {
   check('webview is cross-origin isolated', caps.isolated && caps.sharedArrayBuffer);
   check('CSP blocked egress (the canary got no requests)', canaryHits.length === 0, JSON.stringify(canaryHits));
   check('wllama runs multi-threaded', /multi/.test(engine?.threads ?? ''), engine?.threads);
+  // llama.cpp's own load log, not just navigator.gpu (engine.ts gpuFromLog).
+  const layers = /WebGPU · (\d+)\/(\d+) layers/.exec(engine?.backend ?? '');
+  check('every layer runs on the GPU (WebGPU)', layers && layers[1] === layers[2], engine?.backend);
   check('knowledge base indexed by ug', kb.status === 'ready' && kb.nodes > 0 && !kb.error, JSON.stringify(kb));
   check('every source indexed', kb.sources.length === fixtures.length && kb.sources.every((s) => s.status === 'indexed'));
   check('ug progress streamed to the UI', result.ugLogLines > 5, `${result.ugLogLines} lines`);
@@ -158,7 +161,9 @@ if (result?.perf && model === 'qwen3-0.6b' && !failure) {
     'ingest-ms': lower(p.ingestMs, 'ms', 1000),
     'search-ms': lower(p.searchMs, 'ms', 150),
     'first-token-ms': lower(p.firstTokenMs, 'ms', 300),
+    // Timed from the first token; reading the prompt is its own metric.
     'generation-tok-per-sec': { value: p.tokPerSec, unit: 'tok/s', better: 'higher', tolerance: 1.5 },
+    'prompt-tok-per-sec': { value: p.promptTokPerSec, unit: 'tok/s', better: 'higher', tolerance: 1.5 },
     // Deterministic for a fixed KB and question: growth means the prompt got bigger.
     'prompt-tokens': { value: p.promptTokens, unit: 'tokens', better: 'lower', tolerance: 1.25 },
   };
