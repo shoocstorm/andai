@@ -18,6 +18,7 @@
     "test:e2e": "node scripts/e2e.mjs",
     "test:e2e:release": "node scripts/e2e.mjs --release",
     "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "audit": "npm audit --omit=dev --audit-level=high && cargo audit --file src-tauri/Cargo.lock",
     "check": "npm run typecheck && npm test && npm run test:rust && npm run lint:rust",
     "version": "node scripts/version.mjs",
     "release": "scripts/release.sh"

@@ -126,6 +126,7 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
     const result = {
       caps: useEngine.getState().caps,
       engine: info,
+      verifyMs: useEngine.getState().lastVerifyMs,
       kb: { status: after.status, nodes: after.nodes, edges: after.edges, error: after.lastError, sources: after.sources.map((x) => ({ file: x.file, kind: x.kind, status: x.status })) },
       ugLogLines: logs.length,
       steps: msg?.steps?.map((x) => ({ kind: x.kind, status: x.status, detail: x.detail })),

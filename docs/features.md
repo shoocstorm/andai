@@ -57,6 +57,11 @@ model download nothing leaves the machine: no account, no API key, no cloud.
   (1.1 GB, smarter and slower) and a tiny test model.
 - One-time download from Hugging Face with progress. After that the model loads
   from the Mac's local cache: about 1.3 s for Qwen3 0.6B in our tests on an Apple Silicon Mac.
+- **Verified downloads.** Each model comes from a fixed Hugging Face commit and
+  must match its recorded sha256 before it loads. This takes about 7 s for
+  Qwen3 0.6B, once per download, shown as *Verifying…*. After upgrading, models
+  download once more; **Settings → Models** offers to remove the older copy,
+  after asking you to confirm.
 - Runs with [wllama](https://github.com/ngxson/wllama) (llama.cpp compiled to
   WebAssembly) on the GPU through WebGPU, multi-threaded. We measured ~30
   tokens/second for Qwen3 0.6B on an Apple Silicon Mac.
@@ -96,6 +101,14 @@ executed**; every action says it's simulated.
   drop or pick with **Upload**, nothing else on your Mac. Files over 100 MB are
   refused.
 - Knowledge-base copies are readable only by your macOS user account.
+- **Documents can't take over the model.** Retrieved passages are sent as
+  fenced, untrusted data that the model is told not to follow as
+  instructions. The protections above hold even if a document fools the
+  model anyway.
+- **Model files are verified** (sha256) before they load, and dependencies are
+  checked for known vulnerabilities on every build and release.
+- The full picture, including what isn't protected yet, is in
+  [security.md](security.md).
 - No telemetry, analytics or accounts.
 - Your data lives in `~/Library/Application Support/dev.andai.agent/`
   (knowledge-base copies), `~/.ug/andai-*` (knowledge graphs) and the app's

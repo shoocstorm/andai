@@ -30,3 +30,21 @@ jobs:
       - run: npm run build
       # test:ug and test:e2e need the ug CLI, an embedding model and a model
       # download; run them locally or on a self-hosted runner (see AGENTS.md §6).
+
+  # Known vulnerabilities in shipped dependencies fail the build (AGENTS.md §9).
+  # Separate job: it needs the network, and a new advisory shouldn't hide test results.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: npm audit (runtime dependencies)
+        run: npm audit --omit=dev --audit-level=high
+      - name: cargo audit (RustSec advisory DB)
+        run: cargo audit --file src-tauri/Cargo.lock
+

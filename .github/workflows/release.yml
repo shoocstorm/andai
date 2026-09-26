@@ -56,6 +56,11 @@ jobs:
       - run: npm test
       - run: npm run test:rust
       - run: npm run lint:rust
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # No release ships with a known vulnerability (AGENTS.md §9).
+      - run: npm run audit
 
   # ── 2. build the macOS app for both architectures
   build:

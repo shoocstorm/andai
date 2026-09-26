@@ -57,7 +57,8 @@ the product.
 Andai/
 ├─ src/                      React 19 + Vite UI (runs in the Tauri webview)
 │  ├─ llm/engine.ts          wllama: load / cache / stream. Compat build on WKWebView
-│  ├─ llm/models.ts          model catalog (single-file GGUF, < 2 GB each)
+│  ├─ llm/models.ts          model catalog (single-file GGUF, < 2 GB each, pinned commit + sha256)
+│  ├─ llm/integrity.ts       incremental SHA-256 + download verification
 │  ├─ agent/prompt.ts        PURE prompt assembly: keywords, system prompt, history, budgets
 │  ├─ agent/turn.ts          one turn: analyze → retrieve (ug) → build → generate; writes the trace
 │  ├─ kb/api.ts              typed wrappers over the Rust ug bridge + hit dedupe
@@ -133,6 +134,18 @@ Execution Trace.
   Inline `style` attributes need `style-src 'unsafe-inline'`, so
   `dangerousDisableAssetCspModification: ["style-src"]` keeps Tauri from adding
   a nonce there. A nonce would make browsers ignore `'unsafe-inline'`.
+- **Hugging Face commit URLs are immutable; `resolve/main` isn't.** The
+  catalog pins `resolve/<40-hex sha>/…`. The file's sha256 is the LFS oid
+  (`POST /api/models/<repo>/paths-info/<sha>`, and also the `X-Linked-ETag`
+  header on the resolve URL). `ggml-org/models` was renamed to
+  `ggml-org/models-moved` and 307-redirects, so the pin uses the new name.
+- **Web Crypto has no streaming digest.** `integrity.ts` has an incremental
+  SHA-256. Measured: 305 MB/s in V8 and about 93 MB/s in WKWebView (release
+  build, Qwen3 0.6B, 639 MB in 6.9 s on an Apple Silicon Mac). It runs once per
+  download, and `andai.verifiedModels` in localStorage skips re-hashing. A
+  fresh download is always verified.
+- **RTK rewrites `curl` output** and can mangle JSON. Use `rtk proxy curl`
+  when you parse an API response.
 - **wllama loads single GGUF files up to 2 GB.** Larger models need gguf-split
   shards; `models.test.ts` enforces the limit.
 
@@ -228,6 +241,7 @@ npm run test:coverage    # same, with a coverage report in coverage/
 npm run test:rust        # Rust unit tests
 npm run test:ug          # Rust ↔ real ug integration (needs ug)
 npm run test:e2e         # full app in WKWebView: ingest → retrieve → generate (needs ug; downloads model once)
+npm run audit            # npm audit (runtime deps) + cargo audit (RustSec); CI and releases run it
 npm run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
 ```
 
@@ -283,8 +297,9 @@ Rules:
 
 Releases are **tag-driven**. Pushing a `vX.Y.Z` tag runs
 `.github/workflows/release.yml`, which does three things:
-1. **verify:** the tag must equal the version in every manifest, and the full
-   check suite must pass.
+1. **verify:** the tag must equal the version in every manifest, the full
+   check suite must pass, and `npm run audit` must find no known
+   vulnerability (§9).
 2. **build:** `Andai.app` + `.dmg` for Apple Silicon and Intel, with
    `.sha256` checksums. It also asserts that the built `Info.plist` reports the
    tag's version.
@@ -428,7 +443,10 @@ access (rely on FileVault). Encryption at rest is planned (below).
    (`grants.rs`). Each grant is one file, canonicalized and consumed once.
 5. **Fail closed.** If the port can't be owned, there is no window. If a
    path isn't granted, it isn't read. If a query looks like a flag, it's
-   neutralized.
+   neutralized. If a model doesn't match its sha256, it isn't loaded.
+6. **Don't rely on the model behaving.** Fencing passages makes injection
+   harder, but the real guarantees are that output is inert (no images, no
+   live links, no HTML) and that egress is blocked.
 
 ### What enforces it
 
@@ -443,6 +461,10 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Private files (0700 dirs / 0600 files), 100 MB cap, absolute PATH only | `ug.rs` | Rust unit tests |
 | `dev_log` / `dev_exit` need `ANDAI_SMOKE=1` | `lib.rs` | `security.test.ts` |
 | Webview holds no fs/shell/http/opener/dialog permission | `capabilities/default.json` | `security.test.ts` |
+| Model downloads pinned to a commit and verified (size + sha256) before load; mismatch → removed | `llm/models.ts`, `llm/integrity.ts`, `engine.loadModel` | `integrity.test.ts` (FIPS vectors, tamper), `engine.test.ts` (gate), `models.test.ts` (pinning); e2e logs the check |
+| Pre-pinning model copies removed only after the user confirms | `engine.removeLegacyCopies`, Settings | `Settings.test.tsx` |
+| Retrieved passages fenced as untrusted data; a passage can't close its fence | `agent/prompt.ts` | `prompt.test.ts` |
+| No known vulnerabilities in shipped dependencies | `npm run audit`, `ci.yml` (audit job), `release.yml` (verify) | CI |
 
 `ANDAI_SMOKE` and `ANDAI_E2E_FILES` are read from the environment by Rust. The
 webview can't set them. Only the e2e runner does.
@@ -461,19 +483,32 @@ webview can't set them. Only the e2e runner does.
       allowlist in `security.test.ts`.
 - [ ] New files under app data are created with private permissions
       (`create_private_dir` / `private_file`).
+- [ ] New or updated catalog model: `url` pinned to a commit, with `bytes` and
+      `sha256` taken from Hugging Face's `paths-info` (download it once and
+      check). Move the old URL into `legacyUrls`.
+- [ ] Retrieved or user-supplied text goes to the model through
+      `buildSystem`'s fences, never spliced into instructions.
+
+### Known advisories
+
+`cargo audit` reports no vulnerabilities, but it does report warnings (checked
+2026-09-26), all transitive through Tauri: unmaintained `unic-*`
+(RUSTSEC-2025-0075/0080/0081/0098/0100), `proc-macro-error`
+(RUSTSEC-2024-0370), and `glib` unsoundness (RUSTSEC-2024-0429, Linux-only
+GTK stack, not in the macOS build). Warnings don't fail the audit. Re-check
+them when bumping Tauri.
 
 ### Planned
 
-- **Model integrity:** pin catalog URLs to an immutable Hugging Face commit and
-  verify size. Changing URLs re-downloads cached models, so evicting the old
-  cache needs a confirm step (§1.5).
-- **Dependency audit in CI:** `npm audit --omit=dev` and `cargo audit`.
-- **Prompt-injection hygiene:** delimit retrieved passages, and have the
-  system prompt say they are data, not instructions.
 - **Encryption at rest** (needs a human decision, §1.10): a Keychain-held key,
   chats moved to an encrypted file owned by Rust, and encrypted KB copies, with
   a one-time migration behind a confirm step.
 - **Gate for promoting simulated features (§3):** before any tool or workflow
   becomes real, every model-initiated action needs explicit user approval in
   the UI, a per-tool capability, and an entry in the Execution Trace.
+- **Code signing and notarization:** the workflow is ready (§7); it needs the
+  Apple secrets.
+
+The user-facing version of this section is [docs/security.md](docs/security.md).
+Keep the two in sync (§8).
 

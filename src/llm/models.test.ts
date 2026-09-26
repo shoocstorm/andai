@@ -12,6 +12,11 @@ describe('model catalog', () => {
     expect(m.bytes).toBeLessThan(2 * 1024 ** 3);
     expect(m.n_ctx).toBeGreaterThanOrEqual(1024);
   });
+  it.each(MODELS.map((m) => [m.id, m]))('%s is pinned to an immutable commit with a sha256 (AGENTS.md §9)', (_, m) => {
+    expect(m.url).toMatch(/^https:\/\/huggingface\.co\/[^/]+\/[^/]+\/resolve\/[0-9a-f]{40}\/.+\.gguf$/);
+    expect(m.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(m.legacyUrls).not.toContain(m.url);
+  });
   it('returns undefined for unknown ids', () => {
     expect(modelById('nope')).toBeUndefined();
     expect(modelById(null)).toBeUndefined();

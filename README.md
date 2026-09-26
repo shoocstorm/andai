@@ -59,9 +59,13 @@ Andai treats its own webview as untrusted, because model output can be steered
 by a poisoned document. A content security policy limits the network to
 Hugging Face. Answers never load images or open links. Rust ingests only files
 you dropped or picked, and the app refuses to start if another process holds
-its UI port. The threat model and the checklist for every change are in
-[AGENTS.md §9](AGENTS.md#9-security). To report a vulnerability, see
-[SECURITY.md](SECURITY.md).
+its UI port. Retrieved passages reach the model as fenced, untrusted data.
+Model downloads are pinned to a Hugging Face commit and verified by sha256
+before loading, and `npm run audit` (npm + RustSec) gates CI and releases.
+
+- What each protection means for users: [docs/security.md](docs/security.md)
+- Threat model and the checklist for every change: [AGENTS.md §9](AGENTS.md#9-security)
+- Reporting a vulnerability: [SECURITY.md](SECURITY.md)
 
 ## Why Tauri, and the WebKit details that matter
 
@@ -70,7 +74,7 @@ gpuix renders with Bun. wllama's default wasm needs **Memory64 + JSPI**, which B
 On macOS, Tauri uses **WKWebView**, which is the Safari engine:
 
 - **Compat build.** wllama detects the missing features (`needCompat()`), and `engine.ts` points `setCompat()` at the bundled `@wllama/wllama-compat` files. Measured on an M-series Mac, Qwen3 0.6B runs at about **31 tok/s** on the WebGPU backend with 4 threads.
-- **Cross-origin isolation.** Multi-threading needs `SharedArrayBuffer`, which needs COOP/COEP. WebKit **ignores isolation on custom schemes**: `tauri://` sends the headers, but `crossOriginIsolated` stays false. Release builds therefore serve the UI from `http://localhost:14230` using `tauri-plugin-localhost`, which adds the headers. Dev gets the same headers from Vite.
+- **Cross-origin isolation.** Multi-threading needs `SharedArrayBuffer`, which needs COOP/COEP. WebKit **ignores isolation on custom schemes**: `tauri://` sends the headers, but `crossOriginIsolated` stays false. Release builds therefore serve the UI from `http://localhost:14230` through Andai's own loopback server (`src-tauri/src/ui_server.rs`), which adds the headers. It binds the port before any window exists and refuses to start if another process holds it. Dev gets the same headers from Vite.
 - **ACL.** That loopback origin counts as "remote", so every app command is declared in `build.rs` and granted in `capabilities/default.json`. When you add a command, add it in both places.
 - Fonts are bundled with `@fontsource`, because COEP blocks cross-origin font CSS.
 
@@ -81,6 +85,7 @@ npm run check            # typecheck + Vitest + Rust tests + clippy — run befo
 npm run test:ug          # Rust ↔ real ug round trip
 npm run test:e2e         # the real app in WKWebView: ingest fixtures → retrieve → grounded answer
 npm run test:e2e:release # the same against the release binary
+npm run audit            # known vulnerabilities in npm + Rust dependencies (CI and releases run it)
 ```
 
 The layers, the rules and the definition of done are in [AGENTS.md](AGENTS.md) §6.

@@ -1,7 +1,8 @@
 import { Check, Cpu, Download, HardDrive, Loader2, Monitor, Moon, Palette, Power, Radio, Sun, Trash2, X } from 'lucide-react';
-import { Bar, fmtBytes } from '../components/ui';
-import { evictModel, loadModel, unloadModel, useEngine } from '../llm/engine';
-import { MODELS } from '../llm/models';
+import { useState } from 'react';
+import { Bar, Modal, fmtBytes } from '../components/ui';
+import { evictModel, loadModel, removeLegacyCopies, unloadModel, useEngine } from '../llm/engine';
+import { MODELS, type ModelDef } from '../llm/models';
 import { clearChat } from '../state/chat';
 import { useKb } from '../state/kb';
 import { useTheme, type ThemeMode } from '../state/theme';
@@ -11,6 +12,7 @@ export function Settings() {
   const e = useEngine();
   const ug = useKb((s) => s.ug);
   const kbs = useKb((s) => s.kbs);
+  const [legacyFor, setLegacyFor] = useState<ModelDef | null>(null);
 
   return (
     <div className="screen">
@@ -56,6 +58,17 @@ export function Settings() {
                   {m.thinking ? ' · reasoning' : ''}
                 </div>
                 <p className="muted">{m.note}</p>
+                {e.legacy[m.id] && (
+                  <div className="st-legacy">
+                    <span>
+                      An older copy ({fmtBytes(e.legacy[m.id])}) from before downloads were pinned and verified is still
+                      cached.
+                    </span>
+                    <button className="btn ghost sm" onClick={() => setLegacyFor(m)}>
+                      <Trash2 size={13} /> Remove old copy
+                    </button>
+                  </div>
+                )}
                 {loading && (
                   <div className="st-progress">
                     <Bar value={pct} indeterminate={!pct} />
@@ -99,6 +112,28 @@ export function Settings() {
             );
           })}
         </div>
+        <Modal open={!!legacyFor} onClose={() => setLegacyFor(null)}>
+          <h3>Remove the old copy of {legacyFor?.name}?</h3>
+          <p className="muted" style={{ margin: '4px 0 22px' }}>
+            It was downloaded before Andai pinned and verified model files, so it isn’t used anymore. Removing it frees{' '}
+            {fmtBytes(legacyFor ? (e.legacy[legacyFor.id] ?? 0) : 0)}. The verified copy, if you have one, stays.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <button className="btn ghost" onClick={() => setLegacyFor(null)}>
+              Cancel
+            </button>
+            <button
+              className="btn danger"
+              onClick={() => {
+                const m = legacyFor;
+                setLegacyFor(null);
+                if (m) void removeLegacyCopies(m.id).then(() => toast({ tone: 'info', title: `Old copy of ${m.name} removed` }));
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        </Modal>
         {e.error && (
           <div className="kn-error" style={{ marginTop: 16 }}>
             <X size={15} /> Model load failed: {e.error}

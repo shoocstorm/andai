@@ -116,6 +116,7 @@ if (failure || !result) {
   check('ug progress streamed to the UI', result.ugLogLines > 5, `${result.ugLogLines} lines`);
   check('all four agent steps completed', steps?.length === 4 && steps.every((s) => s.status === 'done'), JSON.stringify(steps));
   check('retrieval returned the notes', sources?.includes('wllama-notes.md'), JSON.stringify(sources));
+  console.log(`[e2e] model sha256 check: ${result.verifyMs == null ? 'reused a verified copy' : `${Math.round(result.verifyMs)} ms`}`);
   check('generation produced tokens', stats?.tokens > 0 && stats?.tokPerSec > 1, JSON.stringify(stats));
   if (model !== 'stories-260k') {
     check('answer is grounded in the retrieved passage', /cross-origin|coop|coep/i.test(answer ?? ''), answer?.slice(0, 200));

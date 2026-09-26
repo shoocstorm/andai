@@ -7,9 +7,12 @@
 // `vite` in a browser) the default build runs and `setCompat` is ignored.
 //
 // Models are cached in OPFS by wllama's ModelManager, so each downloads once.
+// Every download is checked against the catalog's pinned size and sha256
+// before it is loaded (integrity.ts, AGENTS.md §9).
 
 import { ModelManager, Wllama, WllamaAbortError } from '@wllama/wllama';
 import { create } from 'zustand';
+import { verifyBlobs } from './integrity';
 import { MODELS, modelById, type ModelDef } from './models';
 
 const asset = (path: string) => new URL(path, window.location.href).href;
@@ -42,10 +45,14 @@ type EngineState = {
   error: string | null;
   info: EngineInfo | null;
   cached: Record<string, number>; // url -> bytes
+  /** Copies cached under a model's pre-pinning URL, by model id -> bytes. */
+  legacy: Record<string, number>;
   caps: Caps;
   generating: boolean;
   tokPerSec: number | null;
   lastLoadMs: number | null;
+  /** How long the last sha256 check took; null when a verified copy was reused. */
+  lastVerifyMs: number | null;
 };
 
 export const useEngine = create<EngineState>(() => ({
@@ -56,6 +63,7 @@ export const useEngine = create<EngineState>(() => ({
   error: null,
   info: null,
   cached: {},
+  legacy: {},
   caps: {
     isolated: window.crossOriginIsolated === true,
     sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
@@ -66,6 +74,7 @@ export const useEngine = create<EngineState>(() => ({
   generating: false,
   tokPerSec: null,
   lastLoadMs: null,
+  lastVerifyMs: null,
 }));
 
 let wllama: Wllama | null = null;
@@ -96,8 +105,30 @@ export async function refreshCache(): Promise<void> {
   } catch (e) {
     console.warn('[engine] cache listing failed', e);
   }
-  useEngine.setState({ cached });
+  const legacy: Record<string, number> = {};
+  for (const def of MODELS) {
+    const bytes = def.legacyUrls.reduce((n, url) => n + (cached[url] ?? 0), 0);
+    if (bytes) legacy[def.id] = bytes;
+  }
+  useEngine.setState({ cached, legacy });
 }
+
+// Models already verified, url -> sha256, so a cached copy isn't re-hashed on
+// every launch. A fresh download is always verified regardless.
+const VERIFIED_KEY = 'andai.verifiedModels';
+const verified = (): Record<string, string> => {
+  try {
+    return JSON.parse(localStorage.getItem(VERIFIED_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+};
+const setVerified = (url: string, sha256: string | null) => {
+  const v = verified();
+  if (sha256) v[url] = sha256;
+  else delete v[url];
+  localStorage.setItem(VERIFIED_KEY, JSON.stringify(v));
+};
 
 export async function loadModel(id: string): Promise<void> {
   const def = modelById(id);
@@ -115,22 +146,43 @@ export async function loadModel(id: string): Promise<void> {
   });
   const started = performance.now();
   try {
+    const mm = manager();
+    if (!mm) throw new Error('The model cache is unavailable in this webview.');
+    const wasCached = (await mm.getModels()).some((m) => m.url === def.url && m.size > 0);
+    const model = await mm.getModelOrDownload(
+      { url: def.url },
+      {
+        progressCallback: ({ loaded, total }: { loaded: number; total: number }) => {
+          const secs = (performance.now() - started) / 1000;
+          useEngine.setState({
+            progress: { loaded, total: total || def.bytes, speed: secs > 0 ? loaded / secs : 0, phase: 'Downloading' },
+          });
+        },
+      },
+    );
+    useEngine.setState({ lastVerifyMs: null });
+    if (!wasCached || verified()[def.url] !== def.sha256) {
+      const t = performance.now();
+      const setDone = (loaded: number) =>
+        useEngine.setState({ progress: { loaded, total: def.bytes, speed: 0, phase: 'Verifying…' } });
+      setDone(0);
+      const verdict = await verifyBlobs(await model.open(), def, setDone);
+      if (!verdict.ok) {
+        await model.remove();
+        setVerified(def.url, null);
+        throw new Error(
+          `The downloaded ${def.name} failed its integrity check (${verdict.reason}), so it was removed and not loaded. Try again; if it keeps failing, something is altering the download.`,
+        );
+      }
+      setVerified(def.url, def.sha256);
+      useEngine.setState({ lastVerifyMs: performance.now() - t });
+    }
+    useEngine.setState({ progress: { loaded: def.bytes, total: def.bytes, speed: 0, phase: 'Warming up…' } });
     const w = newWllama();
-    await w.loadModelFromUrl(def.url, {
+    await w.loadModel(model, {
       n_ctx: def.n_ctx,
       // keep <think> blocks in the raw stream so the UI can fold them itself
       reasoning_format: 'none',
-      progressCallback: ({ loaded, total }: { loaded: number; total: number }) => {
-        const secs = (performance.now() - started) / 1000;
-        useEngine.setState({
-          progress: {
-            loaded,
-            total: total || def.bytes,
-            speed: secs > 0 ? loaded / secs : 0,
-            phase: loaded >= total && total > 0 ? 'Warming up…' : 'Downloading',
-          },
-        });
-      },
     });
     wllama = w;
     useEngine.setState({
@@ -168,6 +220,19 @@ export async function evictModel(id: string): Promise<void> {
   if (!def || !mm) return;
   if (useEngine.getState().loadedId === id) await unloadModel();
   for (const m of await mm.getModels()) if (m.url === def.url) await m.remove();
+  setVerified(def.url, null);
+  await refreshCache();
+}
+
+/**
+ * Removes copies of a model cached under its pre-pinning URLs (AGENTS.md §9).
+ * Only called after the user confirms in Settings (user data, §1.5).
+ */
+export async function removeLegacyCopies(id: string): Promise<void> {
+  const def = modelById(id);
+  const mm = manager();
+  if (!def || !mm) return;
+  for (const m of await mm.getModels()) if (def.legacyUrls.includes(m.url)) await m.remove();
   await refreshCache();
 }
 

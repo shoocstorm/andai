@@ -16,9 +16,16 @@ only network traffic is a model download you start, from Hugging Face.
   arguments to the `ug` CLI that could be parsed as flags.
 - **Andai only loads a UI it serves itself.** If another process holds its
   local port (14230), Andai shows an error instead of starting.
+- **Models are verified.** Downloads come from a fixed Hugging Face commit and
+  must match a recorded sha256 before they load.
+- **Documents are data, not instructions.** Retrieved passages reach the model
+  fenced and marked untrusted.
+- **Dependencies are audited.** `npm audit` and `cargo audit` run in CI, and a
+  release can't ship with a known vulnerability.
 
-Details, the threat model and what is planned (model pinning, encryption at
-rest) are in [AGENTS.md §9](AGENTS.md#9-security).
+The full user-facing explanation, including what isn't protected yet, is in
+[docs/security.md](docs/security.md). The threat model and the rules
+contributors follow are in [AGENTS.md §9](AGENTS.md#9-security).
 
 ## Reporting a vulnerability
 
