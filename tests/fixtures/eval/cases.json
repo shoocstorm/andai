@@ -43,10 +43,13 @@
     { "id": "code-retry-default", "kb": "code", "prompt": "How many attempts does withRetry make by default?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["\\b3\\b|three"] },
     { "id": "code-peak", "kb": "code", "prompt": "What is the peak multiplier, and on which days does it apply?", "first": ["kb_search", "kb_find_symbols", "kb_get_code"], "facts": ["1\\.25", "fri"] },
     { "id": "code-refund-where", "kb": "code", "prompt": "Where is the refund share for a cancellation computed?", "first": ["kb_search", "kb_find_symbols"], "facts": ["refundFraction|refunds\\.ts"] },
+    { "id": "code-source-retry", "kb": "code", "prompt": "Show me the full source code of withRetry.", "first": ["kb_find_symbols", "kb_search", "kb_get_code"], "facts": ["2 \\*\\* i|baseDelayMs \\*"] },
+    { "id": "code-usages-refund", "kb": "code", "prompt": "Who calls refundFraction, and on which line?", "first": ["kb_find_usages", "kb_search", "kb_find_symbols", "kb_symbol_context"], "facts": ["cancelBooking"] },
     { "id": "code-smalltalk", "kb": "code", "prompt": "Good morning!", "first": ["answer_now"], "facts": [] },
     { "id": "mixed-refund-match", "kb": "mixed", "prompt": "Does the refund code give the same share as the policy for a cancellation 10 hours before departure?", "first": ["kb_search", "kb_find_symbols", "kb_get_code"], "facts": ["0\\.5|50 ?%|half"] },
     { "id": "mixed-group-impl", "kb": "mixed", "prompt": "Which function implements the group discount from the release notes?", "first": ["kb_search", "kb_find_symbols"], "facts": ["applyGroupDiscount"] },
     { "id": "mixed-cancel", "kb": "mixed", "prompt": "What does cancelBooking do to work out the refund?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["refundFraction"] },
+    { "id": "mixed-context-createbooking", "kb": "mixed", "prompt": "Explain createBooking: which functions does it call?", "first": ["kb_symbol_context", "kb_search", "kb_find_symbols", "kb_get_code"], "facts": ["computeFare", "withRetry"] },
     { "id": "mixed-unanswerable", "kb": "mixed", "prompt": "Which database does the booking service store bookings in?", "first": ["kb_search", "kb_find_symbols"], "facts": ["$notFound"] },
     {
       "id": "mixed-followup-surcharge",

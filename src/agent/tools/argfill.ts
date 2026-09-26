@@ -14,6 +14,8 @@ export type FillContext = {
   kind: 'document' | 'code' | 'mixed';
   /** Paths ug knows: the KB's indexed sources and files seen in results so far (loop.ts). */
   files?: string[];
+  /** Code symbols the tools have shown this turn (loop.ts); a `symbol` argument must be one of them. */
+  symbols?: string[];
   signal?: AbortSignal;
 };
 
@@ -22,18 +24,24 @@ export type Fill =
   | { ok: false; errors: string[]; raw: string; attempts: number; model: string | null };
 
 const MAX_ATTEMPTS = 2;
-/** Up to this many known files become an enum for a `file` argument; past it they're only listed. */
+/** Up to this many known files (or symbols) become an enum for a `file` (or `symbol`) argument; past it they're only listed. */
 export const MAX_FILE_ENUM = 64;
 
 /**
- * The tool's schema, with a `file` argument held to the files that exist.
- * Left free, Qwen3 0.6B wrote the knowledge base's name ("kb1") as the file
- * for File outline, and every retry repeated it.
+ * The tool's schema, with a `file` argument held to the files that exist and
+ * a `symbol` argument to the symbols seen so far. Left free, Qwen3 0.6B wrote
+ * the knowledge base's name ("kb1") as the file for File outline, and every
+ * retry repeated it; a free symbol name fails the same way ("No symbol named …").
  */
-export function schemaFor(tool: ToolDef, files: string[] = []): ObjectSchema | null {
-  const file = tool.schema?.properties.file;
-  if (!tool.schema || file?.type !== 'string' || !files.length || files.length > MAX_FILE_ENUM) return tool.schema;
-  return { ...tool.schema, properties: { ...tool.schema.properties, file: { ...file, enum: files } } };
+export function schemaFor(tool: ToolDef, files: string[] = [], symbols: string[] = []): ObjectSchema | null {
+  if (!tool.schema) return null;
+  let schema = tool.schema;
+  for (const [key, known] of [['file', files], ['symbol', symbols]] as const) {
+    const prop = schema.properties[key];
+    if (prop?.type !== 'string' || !known.length || known.length > MAX_FILE_ENUM) continue;
+    schema = { ...schema, properties: { ...schema.properties, [key]: { ...prop, enum: known } } };
+  }
+  return schema;
 }
 
 /** The first `{…}` in a reply, in case the model wrapped the object in prose or a fence. */
@@ -50,10 +58,10 @@ export function parseObject(text: string): unknown {
 }
 
 export function fillMessages(tool: ToolDef, ctx: FillContext, previous?: { raw: string; errors: string[] }): ChatMessage[] {
-  const schema = schemaFor(tool, ctx.files);
-  const files = schema?.properties.file && ctx.files?.length
-    ? `Files in the knowledge base: ${ctx.files.slice(0, MAX_FILE_ENUM).join(', ')}${ctx.files.length > MAX_FILE_ENUM ? ', …' : ''}\n`
-    : '';
+  const schema = schemaFor(tool, ctx.files, ctx.symbols);
+  const listed = (label: string, key: string, known?: string[]) =>
+    schema?.properties[key] && known?.length ? `${label}: ${known.slice(0, MAX_FILE_ENUM).join(', ')}${known.length > MAX_FILE_ENUM ? ', …' : ''}\n` : '';
+  const files = listed('Files in the knowledge base', 'file', ctx.files) + listed('Symbols seen so far', 'symbol', ctx.symbols);
   const msgs: ChatMessage[] = [
     {
       role: 'system',
@@ -79,7 +87,7 @@ export function fillMessages(tool: ToolDef, ctx: FillContext, previous?: { raw: 
 }
 
 export async function fillArgs(tool: ToolDef, ctx: FillContext): Promise<Fill> {
-  const schema = schemaFor(tool, ctx.files);
+  const schema = schemaFor(tool, ctx.files, ctx.symbols);
   if (!schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null };
   let previous: { raw: string; errors: string[] } | undefined;
   let model: string | null = null;

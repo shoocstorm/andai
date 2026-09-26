@@ -19,7 +19,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | # | Item | Status |
 |---|---|---|
 | 1 | [Agent eval set](#1-agent-eval-set) | done 2026-09-26 · baseline below |
-| 2 | [Known symbols for code tools](#2-known-symbols-for-code-tools) | todo |
+| 2 | [Known symbols for code tools](#2-known-symbols-for-code-tools) | done 2026-09-26 · no change on the eval; hiding tools measured worse |
 | 3 | [Grounded line ranges for Read lines](#3-grounded-line-ranges-for-read-lines) | todo |
 | 4 | [Richer observations](#4-richer-observations) | todo |
 | 5 | [Merge evidence before answering](#5-merge-evidence-before-answering) | todo |
@@ -117,6 +117,36 @@ the agent has to look one up or search first.
 **Done when.** The eval's code questions show fewer "No symbol named" errors
 and no drop in first-action accuracy.
 
+**Done (2026-09-26).** The eval got 3 questions that call for the code tools
+(`code-source-retry`, `code-usages-refund`, `mixed-context-createbooking`),
+making 30. The "before" run on those 30 is the new `agent-eval` baseline
+(`eval/item2-before-0.6b.json`: 96.7% first action, 81.5% facts, 50.0%
+grounded).
+
+- **Not offering the symbol tools until a symbol is seen made things much
+  worse**, so it isn't shipped. With the shorter option list, Qwen3 0.6B
+  answered without searching on 12 of the 16 code and mixed questions: first
+  action 96.7% → 56.7%, facts 81.5% → 48.1% (`eval/item2-after-0.6b.json`
+  from that attempt was overwritten; the numbers are from its scorecard).
+- **What ships:** the option list is unchanged. `symbol` is held to the code
+  symbols seen so far in the turn (`symbolsIn` in `loop.ts`: Find symbols
+  items, search and context hits whose node type is a code symbol; ug calls
+  document sections `Concept`), as an enum when there are 1–64, and they're
+  listed in the argument prompt. If the model picks a symbol tool before any
+  symbol has been seen, the loop runs Find symbols first and records it on
+  the trace (`fallback: 'needs-symbol'`).
+- **Measured:** the same outcome on all 30 questions as before (`--against`
+  lists no change). There were no "No symbol named" errors before either:
+  0.6B never picks a symbol tool before searching, so the gain can't show on
+  this setup. The unit tests cover both paths. Timings in the after runs were
+  taken on a loaded machine (the unchanged document questions were 29%
+  slower too), so the baseline's timings were kept.
+- **Found on the way (item 5):** on `code-usages-refund`, Symbol context
+  and Find usages returned the call site of `refundFraction` in
+  `cancelBooking`, but the loop dropped both passages because a search had
+  already returned the same ug node ids with a shorter snippet. They counted
+  as empty calls and the answer never saw the call site.
+
 ## 3. Grounded line ranges for Read lines
 
 **Why.** In a probe the model asked for lines 100–200 of a file it hadn't
@@ -147,6 +177,9 @@ at no more than +25% prompt tokens per decision.
 ## 5. Merge evidence before answering
 
 **Why.** Passages from later calls are appended in arrival order, and
+`loop.ts` drops a passage whose node id was already seen, even when the later
+one has more in it (item 2 measured this: the call site Find usages found was
+thrown away because a search had returned the same node). Also
 `buildSystem` cuts at the context budget from the end, so a better passage
 found later can be dropped. Overlapping ranges from different tools (search
 hit vs. Read lines vs. symbol source) can repeat the same text.

@@ -23,6 +23,7 @@ const agent = vi.hoisted(() => ({
   fills: {} as Record<string, unknown>,
   fillFail: null as string | null,
   fillFiles: [] as (string[] | undefined)[],
+  fillSymbols: [] as (string[] | undefined)[],
   failTools: [] as string[],
   tool: [] as { slug: string; call: Record<string, unknown> }[],
   output: {} as Record<string, unknown>,
@@ -57,8 +58,9 @@ vi.mock('../llm/decide', async (orig) => ({
 }));
 
 vi.mock('./tools/argfill', () => ({
-  fillArgs: async (tool: { id: string; schema: unknown }, ctx: { files?: string[] }) => {
+  fillArgs: async (tool: { id: string; schema: unknown }, ctx: { files?: string[]; symbols?: string[] }) => {
     agent.fillFiles.push(ctx.files);
+    agent.fillSymbols.push(ctx.symbols);
     if (!tool.schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null };
     if (agent.fillFail) return { ok: false, errors: [agent.fillFail], raw: 'nope', attempts: 2, model: 'Qwen3 0.6B' };
     // a list is consumed one fill per call
@@ -158,6 +160,7 @@ beforeEach(() => {
     fills: { kb_search: { query: 'wllama COOP COEP headers', scope: 'broad' }, kb_find_usages: { symbol: 'add' } },
     fillFail: null,
     fillFiles: [],
+    fillSymbols: [],
     failTools: [],
     tool: [],
     output: { kb_search: { items: [hit] } },
@@ -320,6 +323,41 @@ describe('runTurn (agent mode)', () => {
     expect(agent.seenOptions[1]).toContain('kb_find_usages');
   });
 
+  it('looks symbols up first when a symbol tool is chosen before any symbol was seen, then holds `symbol` to them', async () => {
+    // Free-text symbol names drew "No symbol named …" from ug (docs/agentic-rag-improvements.md, item 2).
+    useKb.setState({ kbs: [kb({ kind: 'code' })] });
+    agent.output.kb_find_symbols = { queries: [{ items: [{ id: 'f:add', name: 'add', node_type: 'Function', file: 'math.ts', start_line: 1, end_line: 3 }] }] };
+    agent.fills.kb_find_symbols = { names: ['add*'], node_type: 'any' };
+    agent.decisions = [{ chosen: 'kb_find_usages' }, { chosen: 'kb_find_usages' }, { chosen: 'answer_now' }];
+    await runTurn('who calls add?');
+    // The option list doesn't change: a shorter one moved Qwen3 0.6B's choices.
+    expect(agent.seenOptions[0]).toContain('kb_find_usages');
+    expect(steps()[0]).toMatchObject({ action: 'kb_find_symbols', fallback: 'needs-symbol' });
+    expect(steps()[0].decision!.chosen).toBe('kb_find_usages');
+    expect(steps()[0].note).toMatch(/Find usages needs a symbol name, .* looking symbols up first/);
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_find_symbols', 'kb_find_usages']);
+    expect(agent.fillSymbols).toEqual([[], ['add']]);
+  });
+
+  it('does not count document sections as symbols', async () => {
+    useKb.setState({ kbs: [kb({ kind: 'mixed' })] });
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_get_code' }, { chosen: 'answer_now' }];
+    agent.fills.kb_find_symbols = { names: ['readme'], node_type: 'any' };
+    await runTurn('what does the readme say?');
+    expect(steps()[1]).toMatchObject({ action: 'kb_find_symbols', fallback: 'needs-symbol' });
+  });
+
+  it('counts code hits from a search as symbols', async () => {
+    useKb.setState({ kbs: [kb({ kind: 'mixed' })] });
+    agent.output.kb_search = { items: [hit, { ...hit, id: 'c:VAT', name: 'VAT_RATE', node_type: 'Constant', file: 'tax.ts' }] };
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_get_code' }, { chosen: 'answer_now' }];
+    agent.fills.kb_get_code = { symbol: 'VAT_RATE' };
+    await runTurn('what is the VAT rate?');
+    expect(steps()[1]).toMatchObject({ action: 'kb_get_code' });
+    expect(steps()[1].fallback).toBeUndefined();
+    expect(agent.fillSymbols[1]).toEqual(['VAT_RATE']);
+  });
+
   it('never offers a tool the user switched off', async () => {
     setPolicy('kb_search', 'off');
     await runTurn('q');
@@ -456,11 +494,12 @@ describe('runTurn (agent mode)', () => {
   it('keeps going after a tool error, then stops after repeated errors', async () => {
     agent.toolFail = new Error('No symbol named add');
     useKb.setState({ kbs: [kb({ kind: 'code' })] });
-    agent.decisions = [{ chosen: 'kb_find_usages' }, { chosen: 'kb_search' }, { chosen: 'kb_overview' }];
+    agent.fills.kb_find_symbols = { names: ['add'], node_type: 'any' };
+    agent.decisions = [{ chosen: 'kb_find_symbols' }, { chosen: 'kb_search' }, { chosen: 'kb_overview' }];
     await runTurn('who calls add?');
     expect(steps().map((s) => s.call?.status ?? s.action)).toEqual(['error', 'error', 'answer_now']);
     expect(steps()[0].call!.error).toBe('No symbol named add');
-    expect(agent.seenStates[1]).toContain('kb_find_usages {"symbol":"add"} → Failed: No symbol named add');
+    expect(agent.seenStates[1]).toContain('kb_find_symbols {"names":["add"],"node_type":"any"} → Failed: No symbol named add');
     expect(steps().at(-1)!.note).toMatch(/repeated tool errors/);
     expect(statusesOf(assistant()).generate).toBe('done');
   });

@@ -25,6 +25,7 @@ import { recordToolRun, requestApproval, useTools } from '../state/tools';
 import { agentState, type Observation } from './prompt';
 import { fillArgs, parseObject } from './tools/argfill';
 import { available, policyOf } from './tools/registry';
+import { needsSymbol, SYMBOL_TYPES } from './tools/ug';
 import type { ToolDef } from './tools/types';
 
 export const ANSWER = 'answer_now';
@@ -59,6 +60,9 @@ export function offered(tools: ToolDef[], usage: Map<string, { calls: number; fo
     return !denied.has(t.id) && !(u && (u.found > 0 || u.calls >= MAX_CALLS_PER_TOOL));
   });
 }
+
+/** Names of the code symbols among the hits, first seen first. */
+export const symbolsIn = (hits: SearchHit[]) => [...new Set(hits.filter((h) => SYMBOL_TYPES.has(h.node_type) && h.name).map((h) => h.name))];
 
 /** JS-side cap on one tool run; Rust stops ug at 20 s (src-tauri/src/tools.rs). */
 const CALL_TIMEOUT_MS = 30_000;
@@ -218,6 +222,19 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       note = `Decision failed (${errText(e)}), so ${action === ANSWER ? 'answering' : 'searching the knowledge base'} instead.`;
     }
 
+    // A symbol tool needs a name ug knows, and none has been seen yet: look
+    // symbols up first. Not offering these tools until then was measured
+    // instead, and it cost more than it saved: with the shorter option list,
+    // Qwen3 0.6B answered without searching on 12 of 16 code and mixed
+    // questions (docs/agentic-rag-improvements.md, item 2).
+    const lookup = tools.find((t) => t.id === 'kb_find_symbols') ?? searchTool;
+    const chosenTool = tools.find((t) => t.id === action);
+    if (chosenTool && needsSymbol(chosenTool) && !symbolsIn(hits).length && lookup) {
+      fallback = 'needs-symbol';
+      note = `${chosenTool.title} needs a symbol name, and none has been seen yet, so ${lookup.id === 'kb_find_symbols' ? 'looking symbols up' : 'searching'} first.`;
+      action = lookup.id;
+    }
+
     if (action === ANSWER || action === CLARIFY) {
       step({ decision, action, note, fallback });
       progress(action === CLARIFY ? 'Asking a clarifying question' : `Answering · ${calls} tool call${calls === 1 ? '' : 's'}`);
@@ -245,7 +262,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     progress(`Step ${s.index + 1} · ${tool.title}: writing arguments…`);
     let args: Record<string, unknown>;
     try {
-      const fill = await fillArgs(tool, { state: state(), kind, files: knownFiles(), signal });
+      const fill = await fillArgs(tool, { state: state(), kind, files: knownFiles(), symbols: symbolsIn(hits), signal });
       if (fill.ok) {
         args = fill.args;
         patch({ args, argsRaw: sameJson(fill.raw, args) ? null : fill.raw, argModel: fill.model, argAttempts: fill.attempts });

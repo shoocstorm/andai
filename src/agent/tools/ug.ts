@@ -6,6 +6,10 @@ import { dedupeHits, type KbKind, type SearchHit } from '../../kb/api';
 import type { Evidence, ToolDef } from './types';
 
 const NODE_TYPES = ['any', 'Function', 'Method', 'Class', 'Interface', 'Struct', 'Enum', 'Trait', 'Type', 'Constant', 'Variable', 'Module', 'File'];
+/** Node types that are code symbols, which the symbol tools accept. ug calls document sections `Concept`. */
+export const SYMBOL_TYPES = new Set(NODE_TYPES.filter((t) => t !== 'any' && t !== 'File'));
+/** Tools that take a `symbol`: only worth offering once one has been seen (loop.ts `offered`). */
+export const needsSymbol = (t: ToolDef) => !!t.schema?.properties.symbol;
 
 type Node = {
   id?: string;

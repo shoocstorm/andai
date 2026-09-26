@@ -152,6 +152,24 @@ describe('fillArgs', () => {
     expect(schemaFor(tool('kb_search'), ['notes.md'])).toBe(tool('kb_search').schema);
   });
 
+  it('holds a symbol argument to the symbols seen so far, and lists them', async () => {
+    const symbols = ['computeFare', 'VEHICLE_SURCHARGE'];
+    eng.replies = ['{"symbol":"computeFare"}'];
+    const fill = await fillArgs(tool('kb_get_code'), { ...ctx, kind: 'code', symbols });
+    expect(fill).toMatchObject({ ok: true, args: { symbol: 'computeFare' } });
+    const p = eng.seen[0] as { grammar: string; messages: { content: string }[] };
+    expect(p.grammar.split('\n')[0]).toContain('("\\"computeFare\\"" | "\\"VEHICLE_SURCHARGE\\"")');
+    expect(p.messages[1].content).toContain('Symbols seen so far: computeFare, VEHICLE_SURCHARGE');
+    for (const id of ['kb_symbol_context', 'kb_find_usages']) expect(schemaFor(tool(id), [], symbols)!.properties.symbol).toMatchObject({ enum: symbols });
+  });
+
+  it('leaves the symbol argument free when none or too many are known', () => {
+    const t = tool('kb_get_code');
+    expect(schemaFor(t, [], [])).toBe(t.schema);
+    expect(schemaFor(t, [], Array.from({ length: MAX_FILE_ENUM + 1 }, (_, i) => `s${i}`))).toBe(t.schema);
+    expect(schemaFor(tool('kb_file_context'), [], ['add'])).toBe(tool('kb_file_context').schema);
+  });
+
   it('needs no model for a tool without arguments', async () => {
     expect(await fillArgs(tool('kb_overview'), ctx)).toEqual({ ok: true, args: {}, raw: '{}', attempts: 0, model: null });
     expect(eng.seen).toHaveLength(0);

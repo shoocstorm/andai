@@ -118,7 +118,9 @@ they are held to a grammar, validated in TS, then validated again in Rust,
 which is the trust boundary. When a decision can't be trusted (it failed,
 chose something not offered, or is below `minConfidence`), the loop falls
 back to what the fixed pipeline does: one plain search, then answer. Tools
-are offered by KB kind (`KbKind`: code tools only for code/mixed). Read-only
+are offered by KB kind (`KbKind`: code tools only for code/mixed). A `file`
+or `symbol` argument is held to the files and code symbols known so far
+(`schemaFor`), because free-text names were the commonest failed call. Read-only
 tools default to *Auto* (a product decision, 2026-09-26: they only read the
 KB the user selected, and every call is traced); anything with another risk
 level defaults to *Ask*.
@@ -223,8 +225,11 @@ level defaults to *Ask*.
   *answer* as option A, 12/15 as the last option, 11/15 shuffled. After a
   search that found passages, it re-picked search 9/9 times while search was
   still offered and answered 9/9 once it wasn't, hence `offered()` in
-  `loop.ts`. Re-measure (a throwaway `VITE_SMOKE` probe) before rewording
-  options.
+  `loop.ts`. Removing options moves its choices too: hiding the three
+  symbol tools until a symbol was seen made it answer without searching on
+  12 of 16 code questions (agent eval, 2026-09-26), so a symbol tool chosen
+  too early is redirected to Find symbols instead. Measure with
+  `bun run eval:agent` before rewording or removing options.
 - **Agent eval baseline (Qwen3 0.6B, 2026-09-26, `bun run eval:agent`):**
   the first action was `kb_search` for 23 of the 24 lookup questions,
   including every code question: the code tools were never chosen first.

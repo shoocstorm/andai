@@ -74,8 +74,12 @@ export type AgentStep = {
   action: string;
   /** Why the loop did something other than the plain argmax (fallback, low confidence, guard). */
   note?: string;
-  /** Set when the decision wasn't trusted and the loop fell back (search once, or answer). */
-  fallback?: 'low-confidence' | 'decision-failed';
+  /**
+   * Set when the loop didn't take the decision as chosen: it wasn't trusted
+   * (search once, or answer), or it picked a symbol tool before any symbol
+   * was seen (look symbols up first).
+   */
+  fallback?: 'low-confidence' | 'decision-failed' | 'needs-symbol';
   call?: ToolCallRecord;
 };
 
