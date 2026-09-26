@@ -27,7 +27,8 @@ let controller: AbortController | null = null;
 export const isBusy = () => controller !== null;
 export const stopTurn = () => controller?.abort();
 
-export async function runTurn(text: string): Promise<void> {
+/** `seed` fixes the agent's option shuffle (the agent eval, src/eval.ts). */
+export async function runTurn(text: string, opts: { seed?: number } = {}): Promise<void> {
   const prompt = text.trim();
   if (!prompt || controller) return;
   const model = loadedModel();
@@ -96,7 +97,7 @@ export async function runTurn(text: string): Promise<void> {
     let clarify = false;
     if (agent) {
       patchStep(id, 'plan', { status: 'running' });
-      const res = await runAgent({ msgId: id, prompt, history, kb, k: kbState.k, maxChars: kbState.maxChars, signal });
+      const res = await runAgent({ msgId: id, prompt, history, kb, k: kbState.k, maxChars: kbState.maxChars, signal, seed: opts.seed });
       hits = res.hits;
       searched = res.calls > 0;
       clarify = res.clarify;

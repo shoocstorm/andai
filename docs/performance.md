@@ -102,6 +102,38 @@ Each run measures either warm load or verify throughput, never both,
 because a load that hashed the model isn't a warm load. The metric a run
 can't measure is left out of the comparison and kept in the baseline.
 
+### Agent eval: `bun run eval:agent`, section `agent-eval`
+
+Not a speed suite only: it scores what the agent *does* on 27 fixed
+questions (`tests/fixtures/eval/cases.json`) over three knowledge bases built
+from `tests/fixtures/eval/` (documents, code, both). Each question lists the
+acceptable first actions and regexes the answer must match. The option
+shuffle is seeded and the answer is greedy (temperature 0), so a run is
+repeatable. It needs ug and the model, so it isn't part of `bun run check`.
+Recorded on Apple M5 Max · 18 cores · 128 GB with Qwen3 0.6B.
+
+| Metric | Baseline | Tolerance | What it is |
+|---|---|---|---|
+| `first-action-accuracy` | 96.3% | 1.1 (higher) | First action taken (after any fallback) is one the question allows |
+| `fact-hit-rate` | 83.3% | 1.1 (higher) | Answers that match every fact regex, over questions with facts |
+| `grounded-rate` | 56.5% | 1.1 (higher) | Answers with sources that cite at least one `[n]`, and only listed ones |
+| `wasted-calls-per-question` | 0.00 | 1.5 + 0.2 | Tool calls that errored, came back empty, or were skipped as repeats |
+| `decisions-per-question` | 1.85 | 1.25 + 0.1 | Decision readouts per turn |
+| `seconds-per-question` | 4.04 s | 1.5 + 1 s | Whole turn, answer included |
+| `ms-per-decision` | 710 ms | 1.5 + 100 ms | One decision readout |
+| `prompt-tokens-per-decision` | 302 | 1.25 | Size of the decision prompt |
+
+Two runs gave the same outcome on every question (`--against` listed no
+change); only timings moved (3.45 and 4.04 s per question). Each run writes a
+full report (every step, argument, source and answer) to `.eval/`.
+
+```bash
+bun run eval:agent                                # scorecard, compared with the baseline
+bun run eval:agent --against .eval/<earlier>.json # which questions changed
+bun run eval:agent --only doc-wind,code-peak      # a subset (not compared)
+bun run eval:agent --update                       # re-record the baseline
+```
+
 ## Workflow
 
 **Before calling a change done** (AGENTS.md §6), if it touches a hot path

@@ -83,7 +83,8 @@ Andai/
 │  ├─ theme/tokens.css       ALL colors, both themes
 │  ├─ lib/platform.ts        macOS vs Windows in the UI: shortcut labels (⌘ / Ctrl), traffic-light room
 │  ├─ mock/workflows.ts      data for the simulated Workflows screens
-│  └─ smoke.ts               in-webview test harness (VITE_SMOKE)
+│  ├─ smoke.ts               in-webview test harness (VITE_SMOKE)
+│  └─ eval.ts                agent eval harness (VITE_SMOKE=eval; not in production builds)
 ├─ src-tauri/
 │  ├─ src/lib.rs             app setup, navigation lock, drop → file grants
 │  ├─ src/ui_server.rs       loopback server for the release UI (http://localhost:14230)
@@ -96,7 +97,7 @@ Andai/
 │  └─ andai-website/         static product site: index.html + img/ (real app screenshots)
 ├─ tests/                    setup, guard tests, e2e fixtures, perf/ micro-benchmarks
 ├─ perf/baseline.json        performance baselines (docs/performance.md)
-└─ scripts/                  copy-wllama (postinstall), e2e runner, perf runner
+└─ scripts/                  copy-wllama (postinstall), e2e runner, perf runner, agent eval runner
 ```
 
 **Data flow of a turn (agent mode, a KB selected):** `runTurn` → `runAgent`:
@@ -224,6 +225,13 @@ level defaults to *Ask*.
   still offered and answered 9/9 once it wasn't, hence `offered()` in
   `loop.ts`. Re-measure (a throwaway `VITE_SMOKE` probe) before rewording
   options.
+- **Agent eval baseline (Qwen3 0.6B, 2026-09-26, `bun run eval:agent`):**
+  the first action was `kb_search` for 23 of the 24 lookup questions,
+  including every code question: the code tools were never chosen first.
+  The miss was a pronoun follow-up ("What does it add for a vehicle?"),
+  answered from history without a lookup. Small talk got `answer_now` 3/3.
+  Only 56% of answers with sources cited them. Two seeded runs agreed on
+  every question.
 - **ug's lookups fail with the useful message in stdout JSON** (`"error":
   "No symbol named …, try find_symbols"`) and exit 1 with a bare `error:` on
   stderr. `tools::run` surfaces the JSON message.
@@ -345,6 +353,7 @@ bun run test:e2e         # full app in WKWebView: ingest → retrieve → genera
 bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and releases run it
 bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
 bun run perf             # bundle size (CI too) + micro-benchmarks vs. perf/baseline.json
+bun run eval:agent       # agent eval: 27 questions through the real agent → scorecard vs. perf/baseline.json (needs ug + model)
 ```
 
 **Run the e2e tests with the default model, `qwen3-0.6b`** (don't set
@@ -390,6 +399,7 @@ command with `rtk proxy` to see the raw output.
 | Rust ↔ ug | `cargo test -- --ignored` | same | real `ug gen` + `search` round trip |
 | End-to-end | `scripts/e2e.mjs` + `src/smoke.ts` | real app | isolation, threads, ingest, retrieval, grounded answer; dev and release |
 | Performance | `scripts/perf.mjs`, `tests/perf/`, e2e runner | `perf/baseline.json` | bundle sizes; hot-path timings; ingest, search, load, first token, tok/s ([docs/performance.md](docs/performance.md)) |
+| Agent eval | `scripts/eval-agent.mjs` + `src/eval.ts` | `tests/fixtures/eval/`, `perf/baseline.json` | what the agent does: first-action accuracy, answer facts, grounding, wasted calls, decisions and time per question ([docs/performance.md](docs/performance.md#agent-eval-bun-run-evalagent-section-agent-eval)) |
 
 Rules:
 - **New behavior ships with a test at the lowest layer that can catch its
@@ -407,6 +417,11 @@ Rules:
   and give the reason in the commit. Don't raise a tolerance to get a change
   through. Timing baselines are machine-bound: they're enforced only on the
   machine that recorded them (docs/performance.md).
+- **Agent changes are measured, not argued.** A change to the agent loop,
+  decision options, tool offers, argument filling or observations runs
+  `bun run eval:agent` before and after, and the commit says what moved
+  (`--against` lists the questions that changed). A worse scorecard needs
+  a reason, like any other regression.
 - Visual checks: headless Chrome against `bun run dev` renders every screen
   (`/#command`, `/#knowledge`, …). Seed `localStorage` (`andai.theme`,
   `andai.chat`) to check both themes and populated states. Look at the images;

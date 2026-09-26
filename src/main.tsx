@@ -24,9 +24,11 @@ document.documentElement.dataset.platform = isMac ? 'mac' : 'other';
 initTheme();
 
 const smoke = import.meta.env.VITE_SMOKE as string | undefined;
-if (smoke && smoke !== 'e2e') {
+if (smoke && smoke !== 'e2e' && smoke !== 'eval') {
   void runSmoke(smoke);
 } else {
+  // The agent eval (src/eval.ts) is its own chunk, loaded only here.
+  if (smoke === 'eval') void import('./eval').then((m) => m.runEval(JSON.parse(String(import.meta.env.VITE_EVAL))));
   if (smoke === 'e2e')
     void runE2E(
       String(import.meta.env.VITE_SMOKE_FILES ?? '').split(',').filter(Boolean),

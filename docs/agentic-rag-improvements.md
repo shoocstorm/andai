@@ -18,7 +18,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 
 | # | Item | Status |
 |---|---|---|
-| 1 | [Agent eval set](#1-agent-eval-set) | todo · **first** |
+| 1 | [Agent eval set](#1-agent-eval-set) | done 2026-09-26 · baseline below |
 | 2 | [Known symbols for code tools](#2-known-symbols-for-code-tools) | todo |
 | 3 | [Grounded line ranges for Read lines](#3-grounded-line-ranges-for-read-lines) | todo |
 | 4 | [Richer observations](#4-richer-observations) | todo |
@@ -55,6 +55,34 @@ change can only be argued about, not measured.
 
 **Done when.** The eval runs from one command and gives a stable scorecard
 (two runs agree), and the baseline is recorded here.
+
+**Done (2026-09-26).** `bun run eval:agent`: 27 questions over three
+knowledge bases (documents, code, both) built from `tests/fixtures/eval/`,
+a fictional ferry operator, so the model can't answer from general
+knowledge. The option shuffle is seeded (`runTurn(text, { seed })`), the
+answer is greedy, and each run writes a full report to `.eval/`. How to run
+it and the metrics: [performance.md](performance.md#agent-eval-bun-run-evalagent-section-agent-eval).
+Two runs gave the same outcome on every question.
+
+Baseline (Qwen3 0.6B chat and decision model, Apple M5 Max):
+
+| First action | Answer facts | Grounded | Wasted calls | Decisions / q | ms / decision | Prompt tokens / decision | s / q |
+|---|---|---|---|---|---|---|---|
+| 96.3% | 83.3% | 56.5% | 0 | 1.85 | 710 | 302 | 4.04 |
+
+What it says about the later items:
+- **Items 2 and 3** have little to show yet: every lookup question started
+  with `kb_search`, no code tool or Read lines was ever chosen, and there
+  were no "No symbol named" errors. Their effect will only show once the
+  agent uses those tools (or with questions that need them).
+- **Item 4 / 5:** the misses are in the answer, not the retrieval: the
+  weather answer drops "30 days", the refund comparison doesn't say 50%, an
+  unanswerable mixed question invents a database, and only 56% of answers
+  cite their sources.
+- **Item 7:** with the first decision `kb_search` 23/24 times and small talk
+  `answer_now` 3/3, a fast path has the numbers to be judged against.
+- The one first-action miss is a pronoun follow-up ("What does it add for a
+  vehicle?") answered from history without a lookup.
 
 ## 2. Known symbols for code tools
 

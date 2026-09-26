@@ -175,5 +175,63 @@
         "slack": 1000
       }
     }
+  },
+  "agent-eval": {
+    "machine": "Apple M5 Max · 18 cores · 128 GB",
+    "recorded": "2026-09-26",
+    "metrics": {
+      "first-action-accuracy": {
+        "value": 96.296,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "fact-hit-rate": {
+        "value": 83.333,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "grounded-rate": {
+        "value": 56.522,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "wasted-calls-per-question": {
+        "value": 0,
+        "unit": "calls",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 0.2
+      },
+      "decisions-per-question": {
+        "value": 1.852,
+        "unit": "decisions",
+        "better": "lower",
+        "tolerance": 1.25,
+        "slack": 0.1
+      },
+      "seconds-per-question": {
+        "value": 4.039,
+        "unit": "s",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1
+      },
+      "ms-per-decision": {
+        "value": 710,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 100
+      },
+      "prompt-tokens-per-decision": {
+        "value": 302,
+        "unit": "tokens",
+        "better": "lower",
+        "tolerance": 1.25
+      }
+    }
   }
 }

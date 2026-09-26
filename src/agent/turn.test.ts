@@ -372,6 +372,12 @@ describe('runTurn (agent mode)', () => {
     expect(agent.seenOptions[2]).not.toContain('kb_search');
   });
 
+  it('uses the given seed for the option shuffle, so a run can be repeated (the agent eval)', async () => {
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    await runTurn('headers?', { seed: 5 });
+    expect(steps().map((s) => s.decision?.seed)).toEqual([5, 6]);
+  });
+
   it('treats a choice that was not offered as a failed decision', async () => {
     setPolicy('kb_overview', 'off');
     agent.decisions = [{ chosen: 'kb_overview' }, { chosen: 'answer_now' }];
@@ -428,6 +434,7 @@ describe('runTurn (agent mode)', () => {
     await runTurn('headers?');
     expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
     expect(steps()[0].note).toMatch(/Low confidence \(20% < 30%\) in “kb_overview”/);
+    expect(steps()[0].fallback).toBe('low-confidence');
   });
 
   it('falls back to the fixed search when the decision model fails, with the reason on the trace', async () => {
@@ -435,6 +442,7 @@ describe('runTurn (agent mode)', () => {
     await runTurn('headers?');
     expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
     expect(steps()[0].note).toMatch(/Decision failed \(no scores for every option\)/);
+    expect(steps()[0].fallback).toBe('decision-failed');
   });
 
   it('searches with the question as written when the arguments are invalid', async () => {

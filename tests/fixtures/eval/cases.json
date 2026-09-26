@@ -1,0 +1,63 @@
+{
+  "about": "Agent eval set (docs/agentic-rag-improvements.md, item 1). `kb` names the knowledge base the question runs against (docs/, code/, or both = mixed). `first` lists the acceptable first actions. `facts` are case-insensitive regexes the answer must all match; for a question the knowledge base can't answer, the fact is that the answer says so.",
+  "notFound": "(not (mention|contain|include|specif|state|say|provide|list|found|available|have|find|know|able)|no (information|mention|details?|data|record)|does(n't| not) (mention|contain|include|specif|state|say|provide|list|have)|unable|cannot|can't|unknown)",
+  "cases": [
+    { "id": "doc-refund-full", "kb": "docs", "prompt": "How long before departure do I need to cancel to get a full refund?", "first": ["kb_search"], "facts": ["48"] },
+    { "id": "doc-weather", "kb": "docs", "prompt": "What happens to my ticket if a sailing is cancelled because of bad weather?", "first": ["kb_search"], "facts": ["rebook|full refund", "30 days"] },
+    { "id": "doc-vehicles", "kb": "docs", "prompt": "Which of the ferries can take my car?", "first": ["kb_search"], "facts": ["kestrel"] },
+    { "id": "doc-crossing-time", "kb": "docs", "prompt": "How long is the crossing from Harlow to Pellin Island?", "first": ["kb_search"], "facts": ["55"] },
+    { "id": "doc-checkin-cars", "kb": "docs", "prompt": "When does check-in close if I'm bringing a vehicle?", "first": ["kb_search"], "facts": ["45"] },
+    { "id": "doc-wind", "kb": "docs", "prompt": "At what wind speed are sailings cancelled?", "first": ["kb_search"], "facts": ["38"] },
+    { "id": "doc-group", "kb": "docs", "prompt": "Is there a discount for large groups, and from how many people?", "first": ["kb_search"], "facts": ["15 ?%|15 percent", "\\b10\\b|ten"] },
+    { "id": "doc-paper", "kb": "docs", "prompt": "Can I still use a paper ticket?", "first": ["kb_search"], "facts": ["qr"] },
+    { "id": "doc-refund-time", "kb": "docs", "prompt": "How long does it take to get my money back after a refund?", "first": ["kb_search"], "facts": ["5 business days|five business days"] },
+    { "id": "doc-pager", "kb": "docs", "prompt": "What code is used to page the on-call duty manager?", "first": ["kb_search"], "facts": ["tw-7"] },
+    { "id": "doc-smalltalk-hi", "kb": "docs", "prompt": "Hi there!", "first": ["answer_now"], "facts": [] },
+    { "id": "doc-smalltalk-thanks", "kb": "docs", "prompt": "Thanks, that's all I needed.", "first": ["answer_now"], "facts": [] },
+    { "id": "doc-unanswerable", "kb": "docs", "prompt": "Who is the CEO of Tidewater Ferries?", "first": ["kb_search"], "facts": ["$notFound"] },
+    {
+      "id": "doc-followup-osprey",
+      "kb": "docs",
+      "history": [
+        { "role": "user", "content": "How many passengers does the MV Kestrel carry?" },
+        { "role": "assistant", "content": "The MV Kestrel carries 212 passengers and 40 vehicles [1]." }
+      ],
+      "prompt": "And the Osprey?",
+      "first": ["kb_search"],
+      "facts": ["150"]
+    },
+    {
+      "id": "doc-followup-late-cancel",
+      "kb": "docs",
+      "history": [
+        { "role": "user", "content": "Do I get a refund if I cancel two days early?" },
+        { "role": "assistant", "content": "Yes: cancelling more than 48 hours before departure gets a full refund [1]." }
+      ],
+      "prompt": "What if I cancel 3 hours before?",
+      "first": ["kb_search"],
+      "facts": ["no refund|not (get|receive|be (eligible|entitled))|non-refundable|0 ?%|nothing|isn't refund|is not refund|won't|will not"]
+    },
+    { "id": "code-compute-fare", "kb": "code", "prompt": "How does computeFare work out the price?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["base.?fare", "surcharge|peak|discount"] },
+    { "id": "code-surcharge", "kb": "code", "prompt": "How much is the vehicle surcharge?", "first": ["kb_search", "kb_find_symbols", "kb_get_code"], "facts": ["18\\.5"] },
+    { "id": "code-callers", "kb": "code", "prompt": "Which functions call computeFare?", "first": ["kb_find_usages", "kb_search", "kb_symbol_context", "kb_find_symbols"], "facts": ["createBooking"] },
+    { "id": "code-retry-default", "kb": "code", "prompt": "How many attempts does withRetry make by default?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["\\b3\\b|three"] },
+    { "id": "code-peak", "kb": "code", "prompt": "What is the peak multiplier, and on which days does it apply?", "first": ["kb_search", "kb_find_symbols", "kb_get_code"], "facts": ["1\\.25", "fri"] },
+    { "id": "code-refund-where", "kb": "code", "prompt": "Where is the refund share for a cancellation computed?", "first": ["kb_search", "kb_find_symbols"], "facts": ["refundFraction|refunds\\.ts"] },
+    { "id": "code-smalltalk", "kb": "code", "prompt": "Good morning!", "first": ["answer_now"], "facts": [] },
+    { "id": "mixed-refund-match", "kb": "mixed", "prompt": "Does the refund code give the same share as the policy for a cancellation 10 hours before departure?", "first": ["kb_search", "kb_find_symbols", "kb_get_code"], "facts": ["0\\.5|50 ?%|half"] },
+    { "id": "mixed-group-impl", "kb": "mixed", "prompt": "Which function implements the group discount from the release notes?", "first": ["kb_search", "kb_find_symbols"], "facts": ["applyGroupDiscount"] },
+    { "id": "mixed-cancel", "kb": "mixed", "prompt": "What does cancelBooking do to work out the refund?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["refundFraction"] },
+    { "id": "mixed-unanswerable", "kb": "mixed", "prompt": "Which database does the booking service store bookings in?", "first": ["kb_search", "kb_find_symbols"], "facts": ["$notFound"] },
+    {
+      "id": "mixed-followup-surcharge",
+      "kb": "mixed",
+      "history": [
+        { "role": "user", "content": "Which function computes the fare?" },
+        { "role": "assistant", "content": "`computeFare` in fares.ts computes the fare [1]." }
+      ],
+      "prompt": "What does it add for a vehicle?",
+      "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"],
+      "facts": ["18\\.5"]
+    }
+  ]
+}

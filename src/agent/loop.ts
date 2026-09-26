@@ -75,6 +75,8 @@ type LoopInput = {
   k: number;
   maxChars: number;
   signal: AbortSignal;
+  /** Seed for the option shuffle; random when unset. The agent eval fixes it so runs are comparable. */
+  seed?: number;
 };
 
 const aborted = () => new DOMException('aborted', 'AbortError');
@@ -137,7 +139,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
   const settings = useTools.getState();
   const kind = kb.kind;
   const history = input.history;
-  const seed = Math.floor(Math.random() * 2 ** 31);
+  const seed = input.seed ?? Math.floor(Math.random() * 2 ** 31);
   const observations: Observation[] = [];
   const hits: SearchHit[] = [];
   const done = new Map<string, number>(); // argKey → step index
@@ -191,10 +193,11 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     let decision: DecisionRecord | null = null;
     let action: string;
     let note: string | undefined;
+    let fallback: AgentStep['fallback'];
     const searchTool = tools.find((t) => t.id === 'kb_search');
     // What to do when the decision can't be trusted: search once if nothing
     // was looked up yet (the fixed pipeline's behavior), else answer.
-    const fallback = () => (calls === 0 && searchTool ? searchTool.id : ANSWER);
+    const fallbackAction = () => (calls === 0 && searchTool ? searchTool.id : ANSWER);
     try {
       const d = await decide(state(), QUESTION, decisionOptions(tools, seed + index, hits.length > 0), signal);
       decision = record(d, seed + index);
@@ -203,18 +206,20 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
         throw new Error(`chose “${action}”, which wasn't offered`);
       }
       if (action !== ANSWER && action !== CLARIFY && d.confidence < settings.minConfidence) {
-        const next = fallback();
+        const next = fallbackAction();
+        fallback = 'low-confidence';
         note = `Low confidence (${Math.round(d.confidence * 100)}% < ${Math.round(settings.minConfidence * 100)}%) in “${action}”, so ${next === ANSWER ? 'answering' : 'searching the knowledge base'} instead.`;
         action = next;
       }
     } catch (e) {
       if (signal.aborted) throw aborted();
-      action = fallback();
+      action = fallbackAction();
+      fallback = 'decision-failed';
       note = `Decision failed (${errText(e)}), so ${action === ANSWER ? 'answering' : 'searching the knowledge base'} instead.`;
     }
 
     if (action === ANSWER || action === CLARIFY) {
-      step({ decision, action, note });
+      step({ decision, action, note, fallback });
       progress(action === CLARIFY ? 'Asking a clarifying question' : `Answering · ${calls} tool call${calls === 1 ? '' : 's'}`);
       return { hits, clarify: action === CLARIFY, calls };
     }
@@ -232,7 +237,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       startedAt: Date.now(),
       status: 'filling',
     };
-    const s = step({ decision, action, note, call });
+    const s = step({ decision, action, note, fallback, call });
     const patch = (p: Partial<ToolCallRecord>) => patchCall(msgId, s.id, p);
     calls++;
 
