@@ -120,6 +120,7 @@ export async function runTurn(text: string): Promise<void> {
     patchStep(id, 'generate', { status: 'running' });
     let reply = '';
     let lastPaint = 0;
+    let firstTokenMs: number | null = null;
     for await (const ev of chat(messages, {
       temperature: persona.temperature,
       maxTokens: persona.maxTokens,
@@ -129,6 +130,7 @@ export async function runTurn(text: string): Promise<void> {
       if (ev.type === 'delta') {
         reply += ev.text;
         const now = performance.now();
+        firstTokenMs ??= now - started;
         if (now - lastPaint > 33) {
           lastPaint = now;
           patchMessage(id, { content: reply });
@@ -144,6 +146,7 @@ export async function runTurn(text: string): Promise<void> {
             promptTokens: ev.promptTokens,
             nCtx,
             totalMs: secs * 1000,
+            firstTokenMs,
             model: model.name,
           },
         });

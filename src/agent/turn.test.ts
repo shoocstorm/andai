@@ -102,6 +102,20 @@ describe('runTurn', () => {
     expect(m.steps!.find((s) => s.kind === 'retrieve')!.detail).toMatch(/Retrieved 1 passage from “Docs”/);
   });
 
+  it('records time to first token, measured from the start of the turn (docs/performance.md)', async () => {
+    await runTurn('What headers does wllama need?');
+    const { firstTokenMs, totalMs } = assistant().stats!;
+    // analyze alone waits 120 ms before retrieval starts
+    expect(firstTokenMs).toBeGreaterThanOrEqual(120);
+    expect(firstTokenMs).toBeLessThanOrEqual(totalMs);
+  });
+
+  it('leaves time to first token empty when the model produced no tokens', async () => {
+    engine.deltas = [];
+    await runTurn('hi');
+    expect(assistant().stats!.firstTokenMs).toBeNull();
+  });
+
   it('grounds the system prompt in retrieved passages and passes persona settings to the model', async () => {
     usePersona.getState().set({ temperature: 0.2, maxTokens: 300, verbose: true });
     await runTurn('headers?');

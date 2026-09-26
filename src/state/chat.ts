@@ -20,6 +20,8 @@ export type TurnStats = {
   promptTokens: number | null;
   nCtx: number;
   totalMs: number;
+  /** From the start of the turn to the first streamed token: the wait the user sees. Null when no token came. */
+  firstTokenMs: number | null;
   model: string;
 };
 

@@ -47,7 +47,7 @@ describe('Command Center', () => {
         { kind: 'generate', title: 'Generate · Qwen3 0.6B', detail: '9 tokens · 30.0 tok/s', status: 'done' },
       ],
       sources: [{ id: 's', name: 'Run it', node_type: 'Concept', file: 'README.md', start_line: 11, end_line: 33, snippet: 'x' }],
-      stats: { tokens: 9, tokPerSec: 30, promptTokens: 800, nCtx: 4096, totalMs: 900, model: 'Qwen3 0.6B' },
+      stats: { tokens: 9, tokPerSec: 30, promptTokens: 800, nCtx: 4096, totalMs: 900, firstTokenMs: 400, model: 'Qwen3 0.6B' },
     });
     render(<CommandCenter />);
     expect(screen.getAllByText('What headers?')).toHaveLength(2); // bubble + trace root task
