@@ -82,6 +82,14 @@ pasting in whatever one search returns:
   expected facts, against 86.2% with 0.6B alone, at about 7 s per question
   instead of 3.6 s. A 1.7B decision model did worse: it often asked a
   clarifying question instead of answering.
+- **Laya decision models (Apple Silicon Macs).** *Settings → Decision model*
+  also offers **Laya Multilingual** (322M parameters, 614 MB) and **Laya
+  English** (421M, 804 MB): small encoders built for exactly this kind of
+  choice, run natively on the Mac's GPU. A decision takes about 10 ms with
+  Laya Multilingual and 20 ms with Laya English, against about 0.6 s for a
+  Qwen3 0.6B decision (measured on an Apple M5 Max). Each downloads once from
+  a fixed Hugging Face commit and is checked against its recorded sha256
+  before it's kept. Not available on Intel Macs or Windows.
 - **Every step is visible.** The Execution Trace lists each decision with
   its options and probabilities, and each tool call with its arguments, the
   ug command that ran, timing and what it returned. Each step shows how long
@@ -199,7 +207,8 @@ executed**; every action says it's simulated.
 ## Requirements & known limits
 
 - **macOS**, tested on macOS 26 (Apple Silicon). The release pipeline also
-  builds for Intel Macs; that build hasn't been tested on Intel hardware yet.
+  builds for Intel Macs; that build hasn't been tested on Intel hardware yet. The Laya
+  decision models need Apple Silicon.
 - **Windows 10/11 (x64)**: the release pipeline builds an installer, and the
   test suite runs on Windows in CI. It hasn't been tested on a Windows PC yet.
   Needs the Microsoft Edge WebView2 runtime (preinstalled on Windows 11); the

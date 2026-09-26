@@ -112,6 +112,10 @@ base (see *Agentic retrieval* in [features.md](features.md)).
 - After downloading, Andai checks the file's **size and sha256** against the
   values in its catalog before loading it. A file that doesn't match is
   deleted and never loaded. You'll see "failed its integrity check".
+- **Laya decision models** are checked the same way, by the app's native
+  side: each file is written to a temporary name while it downloads and only
+  kept once its size and sha256 match; if any file is off, the whole
+  download is deleted.
 - The check runs once per download. On a recent Apple Silicon Mac it took
   about 7 seconds for Qwen3 0.6B (639 MB), shown as *Verifying…*. Later
   launches reuse the verified copy.

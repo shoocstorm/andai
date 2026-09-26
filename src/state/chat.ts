@@ -33,6 +33,8 @@ export type DecisionRecord = {
   promptTokens: number | null;
   /** What the decision model was sent and its raw readout (llm/decide.ts). */
   io?: DecisionIO;
+  /** Laya: its input was cut to fit (an option, the question or the state). */
+  truncated?: boolean;
 };
 
 export type CallStatus = 'filling' | 'awaiting' | 'running' | 'done' | 'error' | 'denied' | 'skipped';

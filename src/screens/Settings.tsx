@@ -1,8 +1,8 @@
 import { Check, Cpu, Download, GitFork, HardDrive, Loader2, Monitor, Moon, Palette, Power, Radio, Sun, Trash2, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bar, Modal, fmtBytes } from '../components/ui';
-import { evictModel, loadDecider, loadModel, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
-import { MODELS, modelById, type ModelDef } from '../llm/models';
+import { evictModel, loadDecider, loadModel, refreshLaya, removeLaya, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
+import { LAYA_MODELS, layaById, MODELS, modelById, type LayaDef, type ModelDef } from '../llm/models';
 import { clearChat } from '../state/chat';
 import { useKb } from '../state/kb';
 import { useTheme, type ThemeMode } from '../state/theme';
@@ -21,13 +21,50 @@ function DecisionModel() {
   const d = e.decider;
   const chat = modelById(e.loadedId);
   const candidates = MODELS.filter((m) => m.decider);
+  const [removing, setRemoving] = useState<LayaDef | null>(null);
+  useEffect(() => {
+    void refreshLaya();
+  }, []);
+  // Laya runs on MLX: only offered where Rust reports it (Apple Silicon).
+  const layas = e.laya.supported ? LAYA_MODELS.flatMap((m) => {
+    const c = e.laya.checkpoints.find((x) => x.id === m.id);
+    return c ? [{ m, c }] : [];
+  }) : [];
+  const loadedName = layaById(d.loadedId)?.name ?? modelById(d.loadedId)?.name;
+  const row = (id: string, name: string, meta: string, extra?: React.ReactNode) => {
+    const loaded = d.loadedId === id;
+    const loading = d.loadingId === id;
+    const pct = loading && d.progress?.total ? d.progress.loaded / d.progress.total : 0;
+    return (
+      <div key={id} className="st-decider-row">
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600 }}>{name}</div>
+          <div className="faint mono" style={{ fontSize: 11.5 }}>
+            {meta}
+            {loading && d.progress ? ` · ${d.progress.phase} ${Math.round(pct * 100)}%` : ''}
+          </div>
+        </div>
+        {extra}
+        {loaded ? (
+          <button className="btn secondary sm" onClick={() => void unloadDecider()}>
+            <Power size={13} /> Unload
+          </button>
+        ) : (
+          <button className="btn secondary sm" disabled={d.status === 'loading'} onClick={() => void loadDecider(id)}>
+            {loading ? <Loader2 size={13} className="spin" /> : <Power size={13} />}
+            {loading ? 'Loading' : `Use for decisions`}
+          </button>
+        )}
+      </div>
+    );
+  };
   return (
     <section className="panel pad st-decider" aria-label="Decision model">
       <div className="panel-head">
         <GitFork size={20} color="var(--violet)" />
         <h3>Decision model</h3>
         <span className={`right pill ${d.status === 'ready' ? 'violet' : ''}`}>
-          {d.status === 'ready' ? modelById(d.loadedId)?.name : d.status === 'loading' ? 'loading' : 'using chat model'}
+          {d.status === 'ready' ? loadedName : d.status === 'loading' ? 'loading' : 'using chat model'}
         </span>
       </div>
       <p className="muted" style={{ marginTop: 0, fontSize: 13.5 }}>
@@ -37,38 +74,55 @@ function DecisionModel() {
         so it needs its own memory.
       </p>
       <div className="st-decider-list">
-        {candidates.map((m) => {
-          const loaded = d.loadedId === m.id;
-          const loading = d.loadingId === m.id;
-          const pct = loading && d.progress?.total ? d.progress.loaded / d.progress.total : 0;
-          return (
-            <div key={m.id} className="st-decider-row">
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600 }}>{m.name}</div>
-                <div className="faint mono" style={{ fontSize: 11.5 }}>
-                  {m.size} · {e.cached[m.url] ? 'cached' : 'download'}
-                  {loading && d.progress ? ` · ${d.progress.phase} ${Math.round(pct * 100)}%` : ''}
-                </div>
-              </div>
-              {loaded ? (
-                <button className="btn secondary sm" onClick={() => void unloadDecider()}>
-                  <Power size={13} /> Unload
-                </button>
-              ) : (
-                <button className="btn secondary sm" disabled={d.status === 'loading'} onClick={() => void loadDecider(m.id)}>
-                  {loading ? <Loader2 size={13} className="spin" /> : <Power size={13} />}
-                  {loading ? 'Loading' : `Use for decisions`}
-                </button>
-              )}
-            </div>
-          );
-        })}
+        {candidates.map((m) => row(m.id, m.name, `${m.size} · ${e.cached[m.url] ? 'cached' : 'download'}`))}
+        {layas.map(({ m, c }) =>
+          row(
+            m.id,
+            m.name,
+            `${m.family} · ${fmtBytes(c.bytes)} · ${c.downloaded ? 'downloaded' : 'download'} — ${m.note}`,
+            c.downloaded && d.loadingId !== m.id ? (
+              <button className="btn ghost sm" aria-label={`Remove ${m.name}`} onClick={() => setRemoving(m)}>
+                <Trash2 size={13} />
+              </button>
+            ) : null,
+          ),
+        )}
       </div>
+      {layas.length > 0 && (
+        <p className="faint" style={{ margin: '10px 0 0', fontSize: 12 }}>
+          Laya models are small encoders built for this kind of choice, run natively on your Mac’s GPU with MLX.
+        </p>
+      )}
       {d.error && (
         <div className="kn-error" style={{ marginTop: 12 }}>
           <X size={15} /> Decision model failed to load: {d.error}
         </div>
       )}
+      <Modal open={!!removing} onClose={() => setRemoving(null)}>
+        <h3>Remove {removing?.name}?</h3>
+        <p className="muted" style={{ margin: '4px 0 22px' }}>
+          This deletes its downloaded files ({fmtBytes(e.laya.checkpoints.find((c) => c.id === removing?.id)?.bytes ?? 0)}). You can
+          download it again later.
+        </p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button className="btn ghost" onClick={() => setRemoving(null)}>
+            Cancel
+          </button>
+          <button
+            className="btn danger"
+            onClick={() => {
+              const m = removing;
+              setRemoving(null);
+              if (m)
+                void removeLaya(m.id)
+                  .then(() => toast({ tone: 'info', title: `${m.name} removed` }))
+                  .catch((err: unknown) => toast({ tone: 'error', title: `Couldn’t remove ${m.name}`, body: String(err) }));
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      </Modal>
     </section>
   );
 }

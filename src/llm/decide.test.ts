@@ -9,6 +9,17 @@ const eng = vi.hoisted(() => ({
   top: [] as { token: string; logprob: number; bytes?: number[] | null }[],
   seen: [] as Record<string, unknown>[],
   fail: null as Error | null,
+  laya: null as string | null,
+  layaReply: null as unknown,
+  layaSeen: [] as unknown[],
+}));
+
+vi.mock('./laya', () => ({
+  layaDecide: async (...args: unknown[]) => {
+    eng.layaSeen.push(args);
+    if (eng.layaReply instanceof Error) throw eng.layaReply;
+    return eng.layaReply;
+  },
 }));
 
 vi.mock('./engine', async () => {
@@ -16,6 +27,7 @@ vi.mock('./engine', async () => {
   const target = () => (eng.slot ? { slot: eng.slot, def: MODELS[eng.modelIndex] } : null);
   return {
     slotFor: target,
+    deciderLaya: () => (eng.laya ? { id: eng.laya, name: 'Laya Multilingual' } : null),
     complete: async (_: string, params: Record<string, unknown>) => {
       eng.seen.push(params);
       if (eng.fail) throw eng.fail;
@@ -40,6 +52,9 @@ beforeEach(() => {
   eng.modelIndex = 1;
   eng.seen = [];
   eng.fail = null;
+  eng.laya = null;
+  eng.layaSeen = [];
+  eng.layaReply = { probabilities: [0.2, 0.7, 0.1], inputTokens: 476, truncated: false, ms: 8.4, model: 'laya-multilingual' };
   eng.top = [
     { token: 'B', logprob: Math.log(0.6) },
     { token: 'A', logprob: Math.log(0.3) },
@@ -162,5 +177,51 @@ describe('decide', () => {
     expect(e.message).toBe('context overflow');
     expect(e.io.request.messages).toHaveLength(2);
     expect(e.io.response).toBeNull();
+  });
+});
+
+describe('decide on a Laya checkpoint', () => {
+  it('sends ids and texts to Rust and reads calibrated probabilities, with no letters or logprobs', async () => {
+    eng.laya = 'laya-multilingual';
+    const d = await decide('state here', 'Which?', opts);
+    expect(eng.layaSeen).toEqual([['state here', 'Which?', opts]]);
+    expect(eng.seen).toEqual([]);
+    expect(d).toMatchObject({ chosen: 'kb_search', model: 'Laya Multilingual', slot: 'decider', promptTokens: 476, bounded: [], truncated: false });
+    expect(d.confidence).toBeCloseTo(0.7);
+    expect(d.options.map((o) => [o.id, o.label, o.probability])).toEqual([
+      ['answer_now', 'A', 0.2],
+      ['kb_search', 'B', 0.7],
+      ['kb_overview', 'C', 0.1],
+    ]);
+    // the trace shows what Laya read and what it returned
+    expect(d.io.request.messages.map((m) => m.role)).toEqual(['state', 'question', 'options']);
+    expect(d.io.request.messages[2].content).toBe('answer_now: Answer now\nkb_search: Search the knowledge base\nkb_overview: Overview');
+    expect(d.io.response?.laya).toEqual({
+      scores: [
+        { id: 'answer_now', probability: 0.2 },
+        { id: 'kb_search', probability: 0.7 },
+        { id: 'kb_overview', probability: 0.1 },
+      ],
+      inputTokens: 476,
+      truncated: false,
+      ms: 8.4,
+    });
+  });
+
+  it('carries the truncation flag', async () => {
+    eng.laya = 'laya-en';
+    eng.layaReply = { probabilities: [0.5, 0.3, 0.2], inputTokens: 512, truncated: true, ms: 18, model: 'laya-en' };
+    expect((await decide('s', 'q', opts)).truncated).toBe(true);
+  });
+
+  it('fails as a DecisionError with the request when Rust refuses or answers oddly', async () => {
+    eng.laya = 'laya-multilingual';
+    eng.layaReply = new Error('No Laya model is loaded.');
+    const e = (await decide('s', 'q', opts).catch((err: unknown) => err)) as InstanceType<typeof DecisionError>;
+    expect(e).toBeInstanceOf(DecisionError);
+    expect(e.message).toBe('No Laya model is loaded.');
+    expect(e.io.request.messages[0]).toEqual({ role: 'state', content: 's' });
+    eng.layaReply = { probabilities: [1], inputTokens: 3, truncated: false, ms: 1, model: 'laya-multilingual' };
+    await expect(decide('s', 'q', opts)).rejects.toThrow(/1 scores for 3 options/);
   });
 });

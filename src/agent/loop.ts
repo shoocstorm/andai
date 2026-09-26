@@ -136,6 +136,7 @@ const record = (d: Decision, seed: number): DecisionRecord => ({
   seed,
   promptTokens: d.promptTokens,
   io: d.io,
+  ...(d.truncated ? { truncated: true } : {}),
 });
 
 const argKey = (tool: string, args: Record<string, unknown>) =>

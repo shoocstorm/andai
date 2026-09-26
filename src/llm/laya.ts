@@ -1,0 +1,91 @@
+// The Laya decision model, run by Rust on MLX (src-tauri/src/laya/, Apple
+// Silicon only). Typed wrappers over its commands, and the download: the
+// Rust side has no HTTP client (AGENTS.md §9), so the webview fetches each
+// file from its pinned Hugging Face commit and streams it to Rust in chunks.
+// Rust keeps nothing it can't verify: sizes and sha256 are in its catalog.
+
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { layaFileUrl } from './models';
+
+export type LayaCheckpoint = {
+  id: string;
+  repo: string;
+  commit: string;
+  bytes: number;
+  files: { path: string; bytes: number }[];
+  downloaded: boolean;
+};
+
+export type LayaStatus = { supported: boolean; loaded: string | null; checkpoints: LayaCheckpoint[] };
+
+export type LayaChoice = {
+  /** Calibrated probability per option, in the order given. */
+  probabilities: number[];
+  inputTokens: number;
+  /** An option, the question or the state was cut to fit the model's input. */
+  truncated: boolean;
+  ms: number;
+  /** Checkpoint id. */
+  model: string;
+};
+
+export type Progress = { loaded: number; total: number; speed: number; phase: string };
+
+const UNSUPPORTED: LayaStatus = { supported: false, loaded: null, checkpoints: [] };
+
+/** In a plain browser (no Tauri) there's no Laya: same answer as a non-Apple-Silicon build. */
+export const layaStatus = (): Promise<LayaStatus> => (isTauri() ? invoke<LayaStatus>('laya_status') : Promise.resolve(UNSUPPORTED));
+export const layaLoad = (id: string) => invoke<number>('laya_load', { checkpoint: id });
+export const layaUnload = () => invoke<void>('laya_unload');
+export const layaRemove = (id: string) => invoke<void>('laya_remove', { checkpoint: id });
+export const layaDecide = (state: string, question: string, options: { id: string; text: string }[]) =>
+  invoke<LayaChoice>('laya_decide', { state, question, options });
+
+/** Bytes per IPC call; Rust accepts up to 16 MiB. */
+export const CHUNK = 8 * 1024 * 1024;
+
+/**
+ * Downloads every file of `c` and has Rust verify it. Rust discards the
+ * whole download if any file's size or sha256 is off, and says which.
+ */
+export async function downloadLaya(c: LayaCheckpoint, onProgress: (p: Progress) => void, signal?: AbortSignal): Promise<void> {
+  const started = performance.now();
+  let loaded = 0;
+  const report = (phase: string) => onProgress({ loaded, total: c.bytes, speed: loaded / Math.max(0.001, (performance.now() - started) / 1000), phase });
+  for (const f of c.files) {
+    report(`Downloading ${f.path}…`);
+    const res = await fetch(layaFileUrl(c.repo, c.commit, f.path), { signal });
+    if (!res.ok || !res.body) throw new Error(`Couldn't download ${f.path} (HTTP ${res.status}).`);
+    const reader = res.body.getReader();
+    let offset = 0;
+    let buf = new Uint8Array(Math.min(CHUNK, f.bytes));
+    let fill = 0;
+    const flush = async () => {
+      if (!fill) return;
+      offset = await invoke<number>('laya_write_chunk', buf.subarray(0, fill), {
+        headers: { 'x-laya-checkpoint': c.id, 'x-laya-file': f.path, 'x-laya-offset': String(offset) },
+      });
+      fill = 0;
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      let at = 0;
+      while (at < value.length) {
+        const n = Math.min(buf.length - fill, value.length - at);
+        buf.set(value.subarray(at, at + n), fill);
+        fill += n;
+        at += n;
+        loaded += n;
+        if (fill === buf.length) {
+          await flush();
+          buf = new Uint8Array(Math.min(CHUNK, Math.max(1, f.bytes - offset)));
+        }
+      }
+      report(`Downloading ${f.path}…`);
+    }
+    await flush();
+  }
+  report('Verifying checksums…');
+  await invoke('laya_finish', { checkpoint: c.id });
+}

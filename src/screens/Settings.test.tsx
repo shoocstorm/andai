@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { loadDecider, removeLegacyCopies, useEngine } from '../llm/engine';
+import { loadDecider, removeLaya, removeLegacyCopies, useEngine } from '../llm/engine';
 import { MODELS } from '../llm/models';
 import { useTheme } from '../state/theme';
 import { Settings } from './Settings';
@@ -11,6 +11,8 @@ vi.mock('../llm/engine', async (original) => ({
   ...(await original<typeof import('../llm/engine')>()),
   removeLegacyCopies: vi.fn().mockResolvedValue(undefined),
   loadDecider: vi.fn().mockResolvedValue(undefined),
+  refreshLaya: vi.fn().mockResolvedValue(undefined),
+  removeLaya: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('Settings', () => {
@@ -31,6 +33,33 @@ describe('Settings', () => {
     expect(panel.getByText(/using chat model/i)).toBeInTheDocument();
     await user.click(panel.getAllByRole('button', { name: /use for decisions/i })[0]);
     expect(loadDecider).toHaveBeenCalledWith(deciders[0].id);
+  });
+
+  it('offers Laya only where Rust supports it, and removes a download only after confirming', async () => {
+    const user = userEvent.setup();
+    render(<Settings />);
+    const panel = () => within(screen.getByRole('region', { name: 'Decision model' }));
+    expect(panel().queryByText('Laya Multilingual')).toBeNull();
+
+    const ckpt = (id: string, downloaded: boolean) => ({ id, repo: 'r/x', commit: 'c', bytes: 678_199_549, files: [], downloaded });
+    act(() => useEngine.setState({ laya: { supported: true, loaded: null, checkpoints: [ckpt('laya-multilingual', true), ckpt('laya-en', false)] } }));
+    expect(panel().getByText('Laya Multilingual')).toBeInTheDocument();
+    expect(panel().getByText(/Laya English/)).toBeInTheDocument();
+    expect(panel().getByText(/646\.8 MB · downloaded/)).toBeInTheDocument();
+    // only a downloaded checkpoint can be removed
+    expect(panel().queryByRole('button', { name: 'Remove Laya English' })).toBeNull();
+
+    await user.click(panel().getByRole('button', { name: 'Remove Laya Multilingual' }));
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+    expect(removeLaya).not.toHaveBeenCalled();
+    await user.click(panel().getByRole('button', { name: 'Remove Laya Multilingual' }));
+    await user.click(screen.getByRole('button', { name: /^remove$/i }));
+    expect(removeLaya).toHaveBeenCalledWith('laya-multilingual');
+
+    const uses = panel().getAllByRole('button', { name: /use for decisions/i });
+    await user.click(uses[uses.length - 1]);
+    expect(loadDecider).toHaveBeenLastCalledWith('laya-en');
+    act(() => useEngine.setState({ laya: { supported: false, loaded: null, checkpoints: [] } }));
   });
 
   it('switches appearance from the picker', async () => {

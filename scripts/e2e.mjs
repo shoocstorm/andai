@@ -8,6 +8,7 @@
 //   bun run test:e2e --release    # release binary: http://localhost origin + ACL
 //   E2E_MODEL=stories-260k ...    # engine plumbing only (answer not checked)
 //   bun run test:e2e --update-perf  # record this run as the perf baseline
+//   E2E_LAYA=none ...             # skip the Laya decision probe (Apple Silicon; default laya-multilingual)
 //
 // Needs: ug on PATH (or ~/.local/bin), network on first run for the model.
 import { spawn, spawnSync } from 'node:child_process';
@@ -15,6 +16,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { keepLaya, seedLaya } from './laya-cache.mjs';
 import { byLine, compare } from './perf-lib.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -38,9 +40,13 @@ const canaryUrl = `http://127.0.0.1:${canary.address().port}/exfil`;
 
 // Knowledge-base files go to a throwaway dir, never the user's real ones.
 const dataDir = mkdtempSync(join(tmpdir(), 'andai-e2e-'));
+// One real Laya decision on Apple Silicon (laya/, AGENTS.md §2). The checkpoint
+// downloads once into a test cache (scripts/laya-cache.mjs), never user data.
+const laya = process.platform === 'darwin' && process.arch === 'arm64' && process.env.E2E_LAYA !== 'none' ? (process.env.E2E_LAYA ?? 'laya-multilingual') : '';
 const env = {
   ...process.env,
   VITE_SMOKE: 'e2e',
+  VITE_SMOKE_LAYA: laya,
   VITE_SMOKE_FILES: fixtures.join(','),
   VITE_SMOKE_MODEL: model,
   VITE_SMOKE_CANARY: canaryUrl,
@@ -50,6 +56,8 @@ const env = {
   ANDAI_SMOKE: '1',
   ANDAI_E2E_FILES: fixtures.join(','),
 };
+
+if (laya) seedLaya(dataDir, laya);
 
 function launch() {
   if (!release) return spawn('bun', ['run', 'tauri', 'dev'], { cwd: root, env, detached: true });
@@ -100,6 +108,7 @@ await done;
 try {
   process.kill(-child.pid, 'SIGTERM');
 } catch {}
+if (laya) keepLaya(dataDir, laya);
 rmSync(dataDir, { recursive: true, force: true });
 canary.close();
 
@@ -147,6 +156,11 @@ if (failure || !result) {
       a.turn.agent.every((s) => !s.call || ['done', 'error', 'skipped'].includes(s.call.status)),
     JSON.stringify(a.turn?.agent),
   );
+  if (laya) {
+    const l = result.laya ?? {};
+    check('Laya decides in Rust on the GPU, under 100 ms', !l.error && l.slot === 'decider' && l.sum > 0.999 && l.sum < 1.001 && l.ms < 100, JSON.stringify(l));
+    console.log(`[e2e] laya: ${l.model} chose ${l.chosen} @${Math.round((l.confidence ?? 0) * 100)}% in ${l.ms?.toFixed(1)} ms (model ${l.modelMs?.toFixed(1)} ms, ${l.inputTokens} tokens${l.truncated ? ', cut to fit' : ''})`);
+  }
   if (a.turn?.agent) {
     console.log(`[e2e] agent actions: ${a.turn.agent.map((s) => `${s.action}${s.confidence != null ? `@${Math.round(s.confidence * 100)}%` : ''}${s.note ? ' (fallback)' : ''}`).join(' → ')}`);
   }

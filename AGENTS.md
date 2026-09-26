@@ -72,7 +72,8 @@ Andai/
 │  ├─ llm/engine.ts          wllama: load / cache / stream. Compat build on WKWebView
 │  ├─ llm/models.ts          model catalog (single-file GGUF, < 2 GB each, pinned commit + sha256)
 │  ├─ llm/integrity.ts       incremental SHA-256 + download verification
-│  ├─ llm/decide.ts          choice-based decisions (SemIf): lettered options → one-pass logprob readout
+│  ├─ llm/decide.ts          choice-based decisions (SemIf): lettered options → one-pass logprob readout, or Laya in Rust
+│  ├─ llm/laya.ts            Laya decision model: command wrappers + checkpoint download (streamed to Rust)
 │  ├─ agent/prompt.ts        PURE prompt assembly: keywords, system prompt, history, budgets, agent state
 │  ├─ agent/turn.ts          one turn: plan (agent loop) or analyze → retrieve (fixed) → build → generate
 │  ├─ agent/loop.ts          agent loop: decide → fill args → policy gate → run tool → observe; writes Message.agent
@@ -93,17 +94,19 @@ Andai/
 │  ├─ src/grants.rs          which files the webview may ingest (drop / Rust dialog only)
 │  ├─ src/ug.rs              knowledge bases → `ug gen/search/list/remove` CLI; KB kind
 │  ├─ src/tools.rs           agent tool calls: closed enum → validated argv → ug (scrubbed env, 20 s, 256 KB)
+│  ├─ src/laya/              Laya decision model on MLX (Apple Silicon): catalog, verified store, prompt, model, worker thread
+│  ├─ tauri.laya.conf.json   Apple Silicon build overlay: bundles mlx.metallib (bun run build:mac-arm64)
 │  ├─ build.rs               app command manifest (ACL)
 │  └─ capabilities/default.json
 ├─ docs/                     user-facing docs (features.md, …) — index in docs/README.md
 │  └─ andai-website/         static product site: index.html + img/ (real app screenshots)
 ├─ tests/                    setup, guard tests, e2e fixtures, perf/ micro-benchmarks
 ├─ perf/baseline.json        performance baselines (docs/performance.md)
-└─ scripts/                  copy-wllama (postinstall), e2e runner, perf runner, agent eval runner
+└─ scripts/                  copy-wllama (postinstall), e2e runner, perf runner, agent eval runner, mlx-metallib, laya-cache
 ```
 
 **Data flow of a turn (agent mode, a KB selected):** `runTurn` → `runAgent`:
-[`decide` (llm/decide.ts, decision slot or chat model) → `fillArgs` (chat
+[`decide` (llm/decide.ts: Laya via Rust `laya_decide`, else the wllama decision slot or chat model) → `fillArgs` (chat
 model, GBNF from the tool schema) → `validate` → policy gate (Auto / Ask →
 approval card) → `kbTool` (Rust `kb_tool` → `ug <cmd> --json`) →
 `tool.observe` → `addEvidence`] × up to `maxSteps` → `mergeEvidence` →
@@ -130,7 +133,12 @@ choices (§2). The first step of a turn is a search without a decision
 when the request plainly asks about content (`searchFirst`, `needsLookup`):
 the decision picked search 23 of 24 times, so it cost 0.7 s for nothing.
 Keep that check conservative: a false "lookup" searches for "who are u?",
-a false "not a lookup" only costs the decision. Read-only
+a false "not a lookup" only costs the decision. A Laya
+checkpoint (src-tauri/src/laya/) makes the same choice natively: a small
+encoder trained for typed decisions scores every option at its marker in one
+forward pass, about 8–20 ms instead of ~0.7 s, and returns calibrated
+probabilities. It only runs where MLX does (Apple Silicon); elsewhere the
+letter readout stays. Read-only
 tools default to *Auto* (a product decision, 2026-09-26: they only read the
 KB the user selected, and every call is traced); anything with another risk
 level defaults to *Ask*.
@@ -262,6 +270,32 @@ level defaults to *Ask*.
   answered from history without a lookup. Small talk got `answer_now` 3/3.
   Only 56% of answers with sources cited them. Two seeded runs agreed on
   every question.
+- **Laya runs on MLX through mlx-rs (pinned `=0.32.0`), Apple Silicon only.**
+  `build.rs` sets `cfg(laya)` for `aarch64-apple-darwin`; elsewhere MLX and
+  tokenizers aren't in the dependency graph and the commands say "needs an
+  Apple Silicon Mac". mlx-rs compiles MLX from source: it needs CMake and,
+  on Xcode 27, the separate Metal Toolchain component
+  (`xcodebuild -downloadComponent MetalToolchain`; CI installs it). A clean
+  build of MLX took about 2 minutes on an M5 Max.
+- **MLX needs its kernel library, `mlx.metallib` (183 MB).** It searches next
+  to the binary (and a `Resources/` folder beside it) and at its build path,
+  not the app bundle's `Contents/Resources`, so the
+  release bundle ships it there (`tauri.laya.conf.json` + `beforeBundleCommand`,
+  since `bundle.resources` is copied at build.rs time, before mlx-sys may have
+  built it) and `laya/worker.rs` points MLX at it with `set_metallib_path`.
+  Without it MLX compiles kernels at runtime: the first run measured 42 ms
+  P50 instead of 9 ms. The release job fails if the arm64 app lacks it.
+- **The Laya port matches laya-mlx** (`bun run test:laya`, 2026-09-26, M5
+  Max): identical token ids and markers, max |Δp| 0.0002 (multilingual) and
+  0.0007 (English) against laya-mlx FP32, P50 8.0 ms and 18.5 ms per decision
+  (laya-mlx in Python: 6.0 and 11.4 ms; the port has no graph compilation yet).
+  mmBERT's config sets `rope_parameters.sliding_attention.rope_theta` to
+  160000: the first port used the flat 10000 default and got every
+  probability wrong while looking plausible, so parity tests are mandatory.
+- **Laya's input budget:** options share `head_max_len` tokens (256
+  multilingual, 192 English; each option at most 48), and the state gets the
+  rest of `max_len` (1024 / 512), cut from the end. The agent's ~476-token
+  state with 9 options fits both; `truncated` in the trace says when not.
 - **ug's lookups fail with the useful message in stdout JSON** (`"error":
   "No symbol named …, try find_symbols"`) and exit 1 with a bare `error:` on
   stderr. `tools::run` surfaces the JSON message.
@@ -275,6 +309,7 @@ level defaults to *Ask*.
 | Chat, streaming, stop, think folding | Real | `llm/engine.ts`, `agent/turn.ts` |
 | Reasoning chips, Execution Trace, stats | Real (actual step timings, tokens, tok/s; every decision and tool call) | `agent/turn.ts`, `agent/loop.ts`, `screens/AgentTrace.tsx` |
 | Knowledge bases: create, ingest, index, search, delete | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts` |
+| Laya decision model (download, verify, load, decide; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
 | Agent tool loop: decisions, 8 ug tools, per-tool policy, approvals, decision model, Tools screen | Real | `agent/loop.ts`, `agent/tools/`, `llm/decide.ts`, `state/tools.ts`, `screens/Tools.tsx`, `src-tauri/src/tools.rs` |
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |
@@ -379,6 +414,8 @@ bun run test             # Vitest: unit, component, guard tests (~2 s)
 bun run test:coverage    # same, with a coverage report in coverage/
 bun run test:rust        # Rust unit tests
 bun run test:ug          # Rust ↔ real ug integration (needs ug)
+bun run test:laya        # Laya port vs laya-mlx goldens + < 100 ms per decision (needs the checkpoints in the HF cache)
+bun run build:mac-arm64  # Apple Silicon release bundle with mlx.metallib (release.yml uses it)
 bun run test:e2e         # full app in WKWebView: ingest → retrieve → generate (needs ug; downloads model once)
 bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and releases run it
 bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
@@ -526,6 +563,10 @@ Rules for agents:
   that the manifests agree (also enforced by `tests/unit/version.test.ts` and
   CI).
 
+The Apple Silicon build uses `bun run build:mac-arm64`, which bundles MLX's
+`mlx.metallib` for the Laya decision model (about 58 MB more in the DMG;
+the workflow checks it's there). Intel and Windows builds have no Laya.
+
 Code signing: builds are **unsigned** until the repository has the secrets
 `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` and `APPLE_SIGNING_IDENTITY`
 (add `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID` for notarization). The
@@ -621,8 +662,9 @@ access (rely on FileVault). Encryption at rest is planned (below).
    must justify its presence. The allowlists live in
    `tests/unit/security.test.ts`, and growing one is a product decision (§1.10).
 3. **Egress is deny-by-default.** CSP `connect-src` is `self`, IPC and Hugging
-   Face. Nothing in `src/` besides `llm/models.ts` names a remote URL, and the
-   Rust side has no HTTP client.
+   Face. Nothing in `src/` besides `llm/models.ts` names a remote URL, only
+   `llm/laya.ts` calls `fetch` (a Laya checkpoint, from pinned commit URLs),
+   and the Rust side has no HTTP client.
 4. **Users choose files, never the webview.** `kb_add_files` only accepts a
    path the user granted by drag-and-drop or the dialog opened by Rust
    (`grants.rs`). Each grant is one file, canonicalized and consumed once.
@@ -648,6 +690,9 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | `dev_log` / `dev_exit` need `ANDAI_SMOKE=1` | `lib.rs` | `security.test.ts` |
 | Webview holds no fs/shell/http/opener/dialog permission | `capabilities/default.json` | `security.test.ts` |
 | Model downloads pinned to a commit and verified (size + sha256) before load; mismatch → removed | `llm/models.ts`, `llm/integrity.ts`, `engine.loadModel` | `integrity.test.ts` (FIPS vectors, tamper), `engine.test.ts` (gate), `models.test.ts` (pinning); e2e logs the check |
+| Laya checkpoints: closed catalog in Rust (commit, sizes, sha256); chunks land in `.part` files and only `laya_finish` moves them into place, after every size and hash matches, else all are deleted; `load` reads only a verified folder | `laya/catalog.rs`, `laya/store.rs` | Rust unit tests (mismatch, order, oversize, tampering, 0600/0700); e2e downloads and verifies once |
+| Laya decisions: state ≤ 64 KB, question ≤ 2 KB, 2–16 options with `[a-z0-9_]` ids, text ≤ 1 KB; mask tokens stripped from all input | `laya/mod.rs` `validate`, `laya/prompt.rs` | Rust unit tests |
+| Only `llm/laya.ts` may `fetch`, and only `layaFileUrl(...)` (pinned HF commits); tokenizers built without its `http` feature | `llm/laya.ts`, `llm/models.ts`, `Cargo.toml` | `security.test.ts`, `models.test.ts` |
 | Pre-pinning model copies removed only after the user confirms | `engine.removeLegacyCopies`, Settings | `Settings.test.tsx` |
 | Retrieved passages fenced as untrusted data; a passage can't close its fence | `agent/prompt.ts` | `prompt.test.ts` |
 | Agent tools: closed enum, no unknown fields, flag-like and KB-escaping args rejected (incl. symlinks), scrubbed env, 20 s kill, 256 KB cap, one KB's project only | `tools.rs` | Rust unit tests; `test:ug` runs every tool against real ug; e2e |

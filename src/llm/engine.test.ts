@@ -25,7 +25,7 @@ vi.mock('./models', () => {
     n_ctx: 1024,
     thinking: false,
   };
-  return { MODELS: [def], modelById: (id: string) => (id === 'tiny' ? def : undefined) };
+  return { MODELS: [def], modelById: (id: string) => (id === 'tiny' ? def : undefined), layaById: () => undefined };
 });
 
 vi.mock('@wllama/wllama', () => {

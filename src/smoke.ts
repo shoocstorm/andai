@@ -9,7 +9,7 @@ import { fillArgs } from './agent/tools/argfill';
 import { available, toolById } from './agent/tools/registry';
 import { runTurn } from './agent/turn';
 import { decide } from './llm/decide';
-import { chat, loadModel, useEngine } from './llm/engine';
+import { chat, loadDecider, loadModel, unloadDecider, useEngine } from './llm/engine';
 import { clearChat, useChat } from './state/chat';
 import { kbAddFiles, kbTool } from './kb/api';
 import { modelById } from './llm/models';
@@ -147,6 +147,57 @@ async function agentProbes(slug: string, question: string) {
 }
 
 /**
+ * One decision on a Laya checkpoint (Rust, MLX): the runner seeds a verified
+ * copy into ANDAI_DATA_DIR, so this loads without downloading. Timed as the
+ * agent sees it, IPC included. Leaves the user's saved decider untouched.
+ */
+async function layaProbe(id: string, slug: string, question: string) {
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem('andai.lastDecider');
+  } catch {}
+  try {
+    const t = performance.now();
+    await loadDecider(id);
+    const e = useEngine.getState().decider;
+    if (e.loadedId !== id) throw new Error(`Laya load failed: ${e.error}`);
+    const loadMs = performance.now() - t;
+    const kb = useKb.getState().kbs.find((k) => k.slug === slug)!;
+    const tools = available(kb.kind, {});
+    const state = agentState({
+      prompt: question,
+      history: [],
+      kb: { name: kb.name, kind: kb.kind, nodes: kb.nodes, files: kb.sources.length },
+      observations: [],
+      step: 0,
+      maxSteps: TOOL_DEFAULTS.maxSteps,
+    });
+    await decide(state, QUESTION, decisionOptions(tools, 1)); // first call warms the kernels
+    const d = await decide(state, QUESTION, decisionOptions(tools, 1));
+    return {
+      model: d.model,
+      slot: d.slot,
+      chosen: d.chosen,
+      confidence: d.confidence,
+      ms: d.ms,
+      modelMs: d.io.response?.laya?.ms,
+      inputTokens: d.promptTokens,
+      truncated: d.truncated,
+      sum: d.options.reduce((a, o) => a + o.probability, 0),
+      loadMs,
+      options: d.options.map((o) => [o.id, Math.round(o.probability * 1000) / 1000]),
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    await unloadDecider();
+    try {
+      if (saved) localStorage.setItem('andai.lastDecider', saved);
+    } catch {}
+  }
+}
+
+/**
  * Full pipeline inside the real app: create KB → ingest via ug → load model →
  * one RAG turn through the same orchestrator the UI uses. The App is rendered
  * alongside, so UI code runs in WKWebView too.
@@ -197,6 +248,9 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
     // Read before the agent turn, which records searches of its own.
     const searchMs = useKb.getState().lastSearch?.ms ?? null;
     const agent = await agentProbes(kb.slug, question);
+    const layaId = import.meta.env.VITE_SMOKE_LAYA as string | undefined;
+    const laya = layaId ? await layaProbe(layaId, kb.slug, question) : null;
+    if (laya) await log(`laya ${JSON.stringify(laya)}`);
     const info = useEngine.getState().info;
     const result = {
       caps: useEngine.getState().caps,
@@ -209,6 +263,7 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
       stats: msg?.stats,
       answer: msg?.content,
       agent,
+      laya,
       // Compared with perf/baseline.json by the runner (docs/performance.md).
       perf: {
         ingestMs,

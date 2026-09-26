@@ -11,6 +11,7 @@
 //   bun run eval:agent --only doc-wind,code-peak
 //   EVAL_MODEL=qwen3-1.7b EVAL_SEED=7 …         # chat (answer + argument) model, option-shuffle seed
 //   EVAL_DECIDER=qwen3-1.7b …                   # a separate decision model (default: decisions on the chat model)
+//   EVAL_DECIDER=laya-multilingual …            # a Laya checkpoint (Apple Silicon; cached in ~/.cache/andai-test/laya)
 //
 // Needs ug and the model (downloaded once), like the e2e run. Machine- and
 // model-bound, and not part of `bun run check`.
@@ -19,6 +20,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { diffCases, loadCases, scoreCase, scorecard } from './eval-lib.mjs';
+import { keepLaya, seedLaya } from './laya-cache.mjs';
 import { byLine, compare } from './perf-lib.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -69,6 +71,8 @@ const env = {
   ANDAI_SMOKE: '1',
   ANDAI_E2E_FILES: files.join(','),
 };
+// A Laya decider downloads once, into a test cache, not on every run.
+seedLaya(env.ANDAI_DATA_DIR, decider);
 
 console.log(`[eval] ${cases.length} question(s), model ${model}, decisions on ${decider ?? 'the chat model'}, seed ${seed}`);
 const child = spawn('bun', ['run', 'tauri', 'dev'], { cwd: root, env, detached: true });
@@ -109,6 +113,7 @@ await new Promise((resolveDone) => {
 try {
   process.kill(-child.pid, 'SIGTERM');
 } catch {}
+keepLaya(env.ANDAI_DATA_DIR, decider);
 rmSync(dataDir, { recursive: true, force: true });
 
 if (failure || records.length !== cases.length) {

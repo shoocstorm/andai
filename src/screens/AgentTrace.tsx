@@ -93,6 +93,29 @@ export function DecisionCall({ io, labels }: { io: DecisionIO; labels?: Record<s
       <Field k="Output" copy={r ? JSON.stringify(r, null, 2) : undefined}>
         {!r ? (
           <div className="ag-small ag-err">No reply: the call failed before the model answered.</div>
+        ) : r.laya ? (
+          <>
+            <div className="ag-small">
+              Scored {r.laya.scores.length} options from {r.laya.inputTokens} input tokens in {fmtMs(r.laya.ms)} (model time)
+              {r.laya.truncated && <span className="ag-note"> · input cut to fit</span>}
+            </div>
+            <table className="ag-logprobs mono">
+              <thead>
+                <tr>
+                  <th scope="col">Option</th>
+                  <th scope="col">Probability</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.laya.scores.map((t) => (
+                  <tr key={t.id} className="option">
+                    <td className="selectable">{t.id}</td>
+                    <td>{pct(t.probability)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         ) : (
           <>
             <div className="ag-small">
@@ -135,6 +158,7 @@ export function DecisionBars({ d }: { d: DecisionRecord }) {
       <div className="ag-decision-head faint">
         {d.model} · {d.slot === 'decider' ? 'decision model' : 'chat model'} · {d.ms} ms
         {d.promptTokens != null && ` · ${d.promptTokens} tok`}
+        {d.truncated && <span className="ag-note"> · input cut to fit the model</span>}
       </div>
       <ul className="ag-bars" aria-label="Decision options and their probabilities">
         {sorted.map((o) => (
@@ -153,7 +177,7 @@ export function DecisionBars({ d }: { d: DecisionRecord }) {
         ))}
       </ul>
       <div className="faint ag-seed">
-        Option order seed {d.seed} · probabilities are uncalibrated scores
+        Option order seed {d.seed} · {d.io?.response?.laya ? 'calibrated probabilities' : 'probabilities are uncalibrated scores'}
         {!!d.bounded?.length && ' · ≤ marks options below the readout, scored at its lowest value'}
       </div>
     </div>

@@ -14,7 +14,8 @@
 // scored at most the lowest listed logprob, so it is bounded at that value and
 // flagged (`bounded`); with no letter scored at all, the decision fails.
 
-import { complete, slotFor, type Completion, type Slot } from './engine';
+import { complete, deciderLaya, slotFor, type Completion, type Slot } from './engine';
+import { layaDecide } from './laya';
 
 export const LETTERS = 'ABCDEFGHIJKLMNOP';
 export const MAX_OPTIONS = LETTERS.length;
@@ -35,6 +36,8 @@ export type Decision = {
   promptTokens: number | null;
   /** The call as sent and the raw readout, for the Execution Trace. */
   io: DecisionIO;
+  /** Laya only: an option, the question or the state was cut to fit its input. */
+  truncated?: boolean;
 };
 
 /**
@@ -45,7 +48,12 @@ export type Decision = {
 export type DecisionIO = {
   request: { messages: { role: string; content: string }[]; params: Record<string, unknown> };
   /** Null when the call itself failed (no reply to read). */
-  response: { sampled: string | null; topLogprobs: { token: string; logprob: number }[] } | null;
+  response: {
+    sampled: string | null;
+    topLogprobs: { token: string; logprob: number }[];
+    /** Laya: calibrated score per option id, its input size, whether input was cut, and its own time (Rust, ms). */
+    laya?: { scores: { id: string; probability: number }[]; inputTokens: number; truncated: boolean; ms: number };
+  } | null;
 };
 
 /** A decision that was sent but couldn't be read out; carries the call for the trace. */
@@ -138,6 +146,8 @@ export async function decide(
   }
   const started = performance.now();
   const labels = labelsFor(options.length);
+  const laya = deciderLaya();
+  if (laya) return decideWithLaya(laya.name, state, question, options, labels, started);
   const target = slotFor('decider');
   if (!target) throw new Error('No model loaded — open Settings → Models to load one.');
   if (!target.def.decider) throw new Error(`${target.def.name} can't make decisions; load a decision model in Settings → Models.`);
@@ -193,5 +203,60 @@ export async function decide(
     ms: performance.now() - started,
     promptTokens: response.usage?.prompt_tokens ?? null,
     io,
+  };
+}
+
+/**
+ * The same decision on a Laya checkpoint (Rust, MLX): the options go in as
+ * `id: text` criteria and come back as calibrated probabilities, in ~10–20 ms.
+ * No letters or logprobs; the trace shows the state, question and options as
+ * the input and the scores as the output.
+ */
+async function decideWithLaya(
+  name: string,
+  state: string,
+  question: string,
+  options: DecisionOption[],
+  labels: string[],
+  started: number,
+): Promise<Decision> {
+  const io: DecisionIO = {
+    request: {
+      messages: [
+        { role: 'state', content: state },
+        { role: 'question', content: question },
+        { role: 'options', content: options.map((o) => `${o.id}: ${o.text}`).join('\n') },
+      ],
+      params: { model: name, type: 'choice' },
+    },
+    response: null,
+  };
+  let c: Awaited<ReturnType<typeof layaDecide>>;
+  try {
+    c = await layaDecide(state, question, options.map(({ id, text }) => ({ id, text })));
+  } catch (e) {
+    throw new DecisionError(e instanceof Error ? e.message : String(e), io, performance.now() - started);
+  }
+  if (c.probabilities.length !== options.length || !c.probabilities.every(Number.isFinite)) {
+    throw new DecisionError(`${name} returned ${c.probabilities.length} scores for ${options.length} options.`, io, performance.now() - started);
+  }
+  io.response = {
+    sampled: null,
+    topLogprobs: [],
+    laya: { scores: options.map((o, i) => ({ id: o.id, probability: c.probabilities[i] })), inputTokens: c.inputTokens, truncated: c.truncated, ms: c.ms },
+  };
+  const scored = options.map((o, i) => ({ id: o.id, label: labels[i], text: o.text, probability: c.probabilities[i], logprob: Math.log(c.probabilities[i]) }));
+  const best = scored.reduce((a, b) => (b.probability > a.probability ? b : a));
+  return {
+    options: scored,
+    chosen: best.id,
+    confidence: best.probability,
+    bounded: [],
+    model: name,
+    slot: 'decider',
+    ms: performance.now() - started,
+    promptTokens: c.inputTokens,
+    io,
+    truncated: c.truncated,
   };
 }

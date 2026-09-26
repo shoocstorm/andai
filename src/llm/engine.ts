@@ -14,7 +14,8 @@
 import { ModelManager, Wllama, WllamaAbortError, type ChatCompletionParams, type ChatCompletionResponse } from '@wllama/wllama';
 import { create } from 'zustand';
 import { verifyBlobs } from './integrity';
-import { MODELS, modelById, type ModelDef } from './models';
+import { downloadLaya, layaLoad, layaRemove, layaStatus, layaUnload, type LayaStatus } from './laya';
+import { layaById, MODELS, modelById, type LayaDef, type ModelDef } from './models';
 
 const asset = (path: string) => new URL(path, window.location.href).href;
 
@@ -54,7 +55,9 @@ type EngineState = {
   lastLoadMs: number | null;
   /** How long the last sha256 check took; null when a verified copy was reused. */
   lastVerifyMs: number | null;
-  /** The optional decision model (loadDecider). */
+  /** Laya checkpoints (Rust, Apple Silicon only): which are downloaded, which is loaded. */
+  laya: LayaStatus;
+  /** The optional decision model (loadDecider): a wllama model or a Laya checkpoint. */
   decider: {
     status: 'idle' | 'loading' | 'ready' | 'error';
     loadingId: string | null;
@@ -84,6 +87,7 @@ export const useEngine = create<EngineState>(() => ({
   tokPerSec: null,
   lastLoadMs: null,
   lastVerifyMs: null,
+  laya: { supported: false, loaded: null, checkpoints: [] },
   decider: { status: 'idle', loadingId: null, loadedId: null, progress: null, error: null },
 }));
 
@@ -261,37 +265,67 @@ export async function unloadModel(): Promise<void> {
 
 let deciderWllama: Wllama | null = null;
 
+export async function refreshLaya(): Promise<LayaStatus> {
+  const laya = await layaStatus().catch(() => useEngine.getState().laya);
+  useEngine.setState({ laya });
+  return laya;
+}
+
+/** The loaded decision model when it's a Laya checkpoint (decide.ts routes to Rust then). */
+export function deciderLaya(): LayaDef | null {
+  const { decider } = useEngine.getState();
+  return decider.status === 'ready' ? (layaById(decider.loadedId) ?? null) : null;
+}
+
 export async function loadDecider(id: string): Promise<void> {
+  const laya = layaById(id);
   const def = modelById(id);
-  if (!def?.decider) throw new Error(`${def?.name ?? id} can't be used as a decision model`);
+  if (!laya && !def?.decider) throw new Error(`${def?.name ?? id} can't be used as a decision model`);
   const { decider } = useEngine.getState();
   if (decider.status === 'loading' || decider.loadedId === id) return;
-  if (deciderWllama) await unloadDecider();
+  if (decider.loadedId) await unloadDecider();
   const setDecider = (patch: Partial<EngineState['decider']>) =>
     useEngine.setState((s) => ({ decider: { ...s.decider, ...patch } }));
-  setDecider({ status: 'loading', loadingId: id, error: null, progress: { loaded: 0, total: def.bytes, speed: 0, phase: 'Connecting…' } });
+  setDecider({ status: 'loading', loadingId: id, error: null, progress: { loaded: 0, total: def?.bytes ?? 0, speed: 0, phase: 'Connecting…' } });
   try {
-    const { model } = await openVerified(def, (progress) => setDecider({ progress }));
-    const w = newWllama();
-    // Decisions are short prompts scored in one forward pass.
-    await w.loadModel(model, { n_ctx: Math.min(def.n_ctx, 4096), reasoning_format: 'none' });
-    deciderWllama = w;
+    if (laya) {
+      const c = (await refreshLaya()).checkpoints.find((x) => x.id === id);
+      if (!c) throw new Error(`${laya.name} needs an Apple Silicon Mac.`);
+      if (!c.downloaded) await downloadLaya(c, (progress) => setDecider({ progress }));
+      setDecider({ progress: { loaded: c.bytes, total: c.bytes, speed: 0, phase: 'Loading…' } });
+      await layaLoad(id);
+    } else {
+      const { model } = await openVerified(def!, (progress) => setDecider({ progress }));
+      const w = newWllama();
+      // Decisions are short prompts scored in one forward pass.
+      await w.loadModel(model, { n_ctx: Math.min(def!.n_ctx, 4096), reasoning_format: 'none' });
+      deciderWllama = w;
+    }
     setDecider({ status: 'ready', loadingId: null, loadedId: id, progress: null });
     localStorage.setItem('andai.lastDecider', id);
   } catch (e) {
     console.error('[engine] decider load failed', e);
     setDecider({ status: 'error', loadingId: null, progress: null, error: e instanceof Error ? e.message : String(e) });
   } finally {
-    await refreshCache();
+    await (laya ? refreshLaya() : refreshCache());
   }
 }
 
 export async function unloadDecider(): Promise<void> {
   const w = deciderWllama;
+  const laya = layaById(useEngine.getState().decider.loadedId);
   deciderWllama = null;
   useEngine.setState((s) => ({ decider: { ...s.decider, status: 'idle', loadedId: null } }));
   localStorage.removeItem('andai.lastDecider');
   await w?.exit().catch(() => {});
+  if (laya) await layaUnload().catch(() => {});
+}
+
+/** Deletes a downloaded Laya checkpoint (Settings confirms first), unloading it if in use. */
+export async function removeLaya(id: string): Promise<void> {
+  if (useEngine.getState().decider.loadedId === id) await unloadDecider();
+  await layaRemove(id);
+  await refreshLaya();
 }
 
 export type Slot = 'chat' | 'decider';
@@ -447,8 +481,12 @@ export async function autoload(): Promise<void> {
   const last = localStorage.getItem('andai.lastModel');
   const def = modelById(last);
   if (def && useEngine.getState().cached[def.url]) await loadModel(def.id);
-  const decider = modelById(localStorage.getItem('andai.lastDecider'));
+  const lastDecider = localStorage.getItem('andai.lastDecider');
+  const decider = modelById(lastDecider);
   if (decider && useEngine.getState().cached[decider.url]) await loadDecider(decider.id);
+  // A Laya checkpoint loads in well under a second, but only once downloaded.
+  const laya = (await refreshLaya()).checkpoints.find((c) => c.id === lastDecider && c.downloaded);
+  if (laya) await loadDecider(laya.id);
 }
 
 export { MODELS };

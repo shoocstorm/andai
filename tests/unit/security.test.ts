@@ -19,6 +19,13 @@ const CONNECT_ALLOWLIST = ["'self'", 'ipc:', 'http://ipc.localhost', 'https://hu
 const PERMISSION_ALLOWLIST = ['core:default', 'core:window:allow-set-theme', 'core:window:allow-start-dragging'];
 /** The only file outside the harness that may name a remote URL. */
 const URL_ALLOWLIST = ['llm/models.ts'];
+/**
+ * Files that may call a network API. GGUF models download through wllama's
+ * ModelManager; Laya checkpoints can't, so llm/laya.ts fetches them itself,
+ * only from pinned Hugging Face commit URLs (models.ts `layaFileUrl`), and
+ * Rust verifies every file's sha256 before keeping it (laya/store.rs).
+ */
+const NETWORK_ALLOWLIST = ['llm/laya.ts'];
 /** The e2e harness names example.com to prove it gets blocked. */
 const HARNESS = ['smoke.ts'];
 
@@ -86,8 +93,15 @@ describe('webview privileges', () => {
 
 describe('egress (AGENTS.md §1.4)', () => {
   it('app code has no network API besides the model download in llm/', () => {
-    const hits = appFiles.filter((f) => /\bfetch\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource/.test(read(`src/${f}`)));
+    const hits = appFiles.filter((f) => !NETWORK_ALLOWLIST.includes(f) && /\bfetch\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource/.test(read(`src/${f}`)));
     expect(hits).toEqual([]);
+  });
+
+  it('the Laya download fetches only pinned catalog URLs', () => {
+    const src = read('src/llm/laya.ts');
+    const calls = [...src.matchAll(/\bfetch\(([^,)]*)/g)].map((m) => m[1].trim());
+    expect(calls).toEqual(['layaFileUrl(c.repo']);
+    expect(src).not.toMatch(/XMLHttpRequest|WebSocket|sendBeacon|EventSource/);
   });
 
   it('only the model catalog names a remote URL', () => {
@@ -104,5 +118,14 @@ describe('egress (AGENTS.md §1.4)', () => {
     const deps = read('src-tauri/Cargo.toml');
     for (const crate of ['reqwest', 'ureq', 'hyper', 'isahc', 'surf', 'attohttpc', 'tauri-plugin-http', 'tauri-plugin-upload'])
       expect(deps, crate).not.toMatch(new RegExp(`^${crate}\\s*=`, 'm'));
+  });
+
+  it('the Laya tokenizer brings no HTTP client (tokenizers without its `http` feature)', () => {
+    // tokenizers' `http` feature downloads from the Hub through hf-hub + ureq.
+    // (reqwest and hyper are in the lockfile only as an optional Tauri feature
+    // outside the build graph: `cargo tree -e normal -i reqwest` prints nothing.)
+    const lock = read('src-tauri/Cargo.lock');
+    for (const crate of ['hf-hub', 'ureq']) expect(lock, crate).not.toMatch(new RegExp(`^name = "${crate}"$`, 'm'));
+    expect(read('src-tauri/Cargo.toml')).toMatch(/^tokenizers = \{[^}]*default-features = false/m);
   });
 });

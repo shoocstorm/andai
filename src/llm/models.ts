@@ -76,3 +76,36 @@ export const MODELS: ModelDef[] = [
 
 export const DEFAULT_MODEL = MODELS[0].id;
 export const modelById = (id: string | null | undefined) => MODELS.find((m) => m.id === id);
+
+/**
+ * Laya decision models (src-tauri/src/laya/): encoders that score a choice in
+ * one forward pass, Apple Silicon only. Files, sizes and sha256 live in the
+ * Rust catalog, which verifies every download; this is how they're shown.
+ * Timings measured with `bun run test:laya` on an M5 Max (2026-09-26).
+ */
+export type LayaDef = { id: string; name: string; family: string; note: string };
+
+export const LAYA_MODELS: LayaDef[] = [
+  {
+    id: 'laya-multilingual',
+    name: 'Laya Multilingual',
+    family: 'mmBERT-base · 322M params · FP16',
+    note: 'Decides in about 10 ms. Reads up to 1,024 tokens, in any language.',
+  },
+  {
+    id: 'laya-en',
+    name: 'Laya English',
+    family: 'ModernBERT-large · 421M params · FP16',
+    note: 'Decides in about 20 ms. English only, reads up to 512 tokens.',
+  },
+];
+
+export const layaById = (id: string | null | undefined) => LAYA_MODELS.find((m) => m.id === id);
+
+/** A Laya checkpoint file at its pinned commit: the only URLs a Laya download fetches. */
+export function layaFileUrl(repo: string, commit: string, path: string): string {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !/^[0-9a-f]{40}$/.test(commit) || !/^[\w.-]+(\/[\w.-]+)*$/.test(path) || path.split('/').includes('..')) {
+    throw new Error(`Not a pinned Laya file: ${repo}@${commit}/${path}`);
+  }
+  return HF(repo, commit, path);
+}
