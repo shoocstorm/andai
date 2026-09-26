@@ -127,7 +127,11 @@ export async function decide(
     // Room for every letter even when a few other tokens rank among them.
     top_logprobs: 20,
     grammar: `root ::= ${labels.map((l) => `"${l}"`).join(' | ')}`,
-    cache_prompt: false,
+    // A separate decision model only ever sees decisions, and consecutive
+    // ones share most of their prompt (instructions, request, knowledge base,
+    // earlier results), so its KV cache is reused. The chat model alternates
+    // decisions with argument writing and answers, which would evict it.
+    cache_prompt: target.slot === 'decider',
     chat_template_kwargs: { enable_thinking: false },
     abortSignal: signal,
   });

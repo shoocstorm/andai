@@ -113,6 +113,14 @@ describe('decide', () => {
     expect(p.chat_template_kwargs).toEqual({ enable_thinking: false });
   });
 
+  it('reuses the prompt cache only on a separate decision model', async () => {
+    await decide('s', 'q', opts);
+    expect(eng.seen[0].cache_prompt).toBe(true);
+    eng.slot = 'chat';
+    await decide('s', 'q', opts);
+    expect(eng.seen[1].cache_prompt).toBe(false);
+  });
+
   it('refuses a model that cannot decide, and a run with no model', async () => {
     eng.modelIndex = MODELS.findIndex((m) => !m.decider);
     await expect(decide('s', 'q', opts)).rejects.toThrow(/can't make decisions/);

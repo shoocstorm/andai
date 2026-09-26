@@ -23,7 +23,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 3 | [Grounded line ranges for Read lines](#3-grounded-line-ranges-for-read-lines) | done 2026-09-26 · Read lines lands on a found passage; one call fewer |
 | 4 | [Richer observations](#4-richer-observations) | measured 2026-09-26 · no gain, not shipped; re-measure after item 5 |
 | 5 | [Merge evidence before answering](#5-merge-evidence-before-answering) | done 2026-09-26 · 0.6B facts 82.8% → 86.2%, no wasted calls |
-| 6 | [Prompt-prefix caching](#6-prompt-prefix-caching) | todo |
+| 6 | [Prompt-prefix caching](#6-prompt-prefix-caching) | done 2026-09-26 · later decisions ~20% faster on a decision model; same outcomes |
 | 7 | [Skip the obvious first decision](#7-skip-the-obvious-first-decision) | todo |
 | 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | todo |
 | 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | todo |
@@ -269,6 +269,23 @@ check the scores don't move meaningfully (SemIf saw prefix reuse flip 5–6 of
 
 **Done when.** Decision time drops by a measured amount, and the eval's
 first-action accuracy doesn't drop.
+
+**Done (2026-09-26).** `decide` sends `cache_prompt: true` when it runs on
+the decision model and `false` on the chat model. Measured with Qwen3 1.7B
+answering and 0.6B deciding (`eval/item6-after-1.7b+0.6b.json` against
+`item5-after-…`): the same outcome on all 32 questions. A turn's first
+decision can't reuse anything; the later ones can:
+
+| | First decision | Second | Third and later |
+|---|---|---|---|
+| Cache off | 711 ms | 840 ms | 856 ms |
+| Cache on | 806 ms | 768 ms | 627 ms |
+
+The machine was loaded (first decisions moved 13% with no change to them),
+so read it relative to the first decision: later decisions went from 18%
+slower than the first to 5% faster, about 150–200 ms each. Small, because a
+turn makes about two decisions and the second prompt's new part (the tool
+results, the reshuffled options) comes after a short shared prefix.
 
 ## 7. Skip the obvious first decision
 
