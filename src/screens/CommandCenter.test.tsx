@@ -62,6 +62,40 @@ describe('Command Center', () => {
     expect(within(trace).getByText('20%')).toBeInTheDocument(); // (800+9)/4096
   });
 
+  it('folds the retrieval log until opened', async () => {
+    const user = userEvent.setup();
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'answer [1]',
+      createdAt: 0,
+      kbName: 'Docs',
+      steps: [],
+      sources: [{ id: 's', name: 'Run it', node_type: 'Concept', file: 'README.md', start_line: 11, end_line: 33, snippet: 'x' }],
+    });
+    render(<CommandCenter />);
+    const log = screen.getByText(/retrieval\.log — Docs/).closest('details')!;
+    expect(log).not.toHaveAttribute('open');
+    await user.click(screen.getByText(/retrieval\.log — Docs/));
+    expect(log).toHaveAttribute('open');
+  });
+
+  it('copies the operator’s question from its bubble', async () => {
+    const user = userEvent.setup();
+    addMessage({ id: 'u', role: 'user', content: 'What headers?', createdAt: 0 });
+    render(<CommandCenter />);
+    await user.click(screen.getByRole('button', { name: 'Copy question' }));
+    expect(await navigator.clipboard.readText()).toBe('What headers?');
+  });
+
+  it('lists only real tools under Choose tool, with no simulated ones', async () => {
+    const user = userEvent.setup();
+    render(<CommandCenter />);
+    await user.click(screen.getByRole('button', { name: /choose tool/i }));
+    expect(screen.getByRole('button', { name: /knowledge search/i })).toBeInTheDocument();
+    expect(screen.queryByText(/python interpreter|web search|email dispatcher|simulated/i)).toBeNull();
+  });
+
   it('shows a folded thought process when the model reasoned', () => {
     addMessage({ id: 'a', role: 'assistant', content: '<think>because</think>\n\nanswer', createdAt: 0, steps: [] });
     render(<CommandCenter />);

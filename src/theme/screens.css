@@ -2190,3 +2190,46 @@ tr:hover .kn-remove {
   top: 8px;
   right: 8px;
 }
+
+/* retrieval.log folds away (a <details>); the head is its toggle */
+.cc-log > summary.head {
+  cursor: pointer;
+  list-style: none;
+  margin-bottom: 0;
+}
+.cc-log > summary.head::-webkit-details-marker {
+  display: none;
+}
+.cc-log > summary.head::before {
+  content: '▸';
+  margin-right: 8px;
+  transition: transform 0.15s;
+}
+.cc-log[open] > summary.head {
+  margin-bottom: 6px;
+}
+.cc-log[open] > summary.head::before {
+  content: '▾';
+}
+.cc-log > summary.head > span:first-child {
+  margin-right: auto;
+}
+
+/* the question's copy button shows on hover or keyboard focus */
+.cc-user-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cc-user-row > .copy-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.cc-user-row:hover > .copy-btn,
+.cc-user-row > .copy-btn:focus-visible,
+.cc-user-row > .copy-btn.done {
+  opacity: 1;
+}
+.ag-step .trace-top > .label {
+  white-space: nowrap;
+}

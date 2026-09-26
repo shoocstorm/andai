@@ -6,7 +6,6 @@ import {
   Code2,
   Database,
   FileText,
-  Globe,
   Loader2,
   MessagesSquare,
   Network,
@@ -21,7 +20,6 @@ import {
   Cpu,
   Wrench,
   X,
-  Mail,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -185,7 +183,10 @@ function Thread({
 function UserMsg({ m }: { m: Message }) {
   return (
     <motion.div className="cc-user" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-      <div className="cc-user-bubble selectable">{m.content}</div>
+      <div className="cc-user-row">
+        <CopyButton text={m.content} label="Copy question" />
+        <div className="cc-user-bubble selectable">{m.content}</div>
+      </div>
       <div className="cc-meta">{fmtTime(m.createdAt)} · Operator</div>
     </motion.div>
   );
@@ -252,11 +253,11 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
           {m.stopped && !answer && <div className="faint">Stopped before an answer was produced.</div>}
 
           {!!m.sources?.length && (
-            <div className="logblock cc-log">
-              <div className="head">
+            <details className="logblock cc-log">
+              <summary className="head">
                 <span>retrieval.log — {m.kbName}</span>
                 {m.streaming ? <span className="live">LIVE</span> : <span>{m.sources.length} hits</span>}
-              </div>
+              </summary>
               {m.sources.map((h, i) => (
                 <div key={h.id + i} className="cc-log-line">
                   <span className="log-violet">[{i + 1}]</span> <span className="log-info">{h.file}</span>
@@ -266,7 +267,7 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
                   <span className="faint">{h.name !== h.file ? `— ${h.name}` : ''}</span>
                 </div>
               ))}
-            </div>
+            </details>
           )}
           <div className="cc-answer-meta">
             {fmtTime(m.createdAt)} · {m.stats?.model ?? 'Andai'}
@@ -409,12 +410,6 @@ function EmptyHub() {
 
 // ── composer ─────────────────────────────────────────────────────────────
 
-const SIMULATED_TOOLS = [
-  { id: 'py', icon: Code2, name: 'Python interpreter', sub: 'Simulated in this build', live: false },
-  { id: 'web', icon: Globe, name: 'Web search', sub: 'Simulated in this build', live: false },
-  { id: 'mail', icon: Mail, name: 'Email dispatcher', sub: 'Requires approval · simulated', live: false },
-];
-
 function Composer() {
   const [draft, setDraft] = useState('');
   const [menu, setMenu] = useState<'tools' | 'kb' | null>(null);
@@ -508,22 +503,6 @@ function Composer() {
                 <Database size={16} color="var(--blue)" />
                 <div style={{ flex: 1 }}>Manage tools…</div>
               </button>
-              {SIMULATED_TOOLS.map((t) => (
-                <button
-                  key={t.id}
-                  className="menu-item"
-                  onClick={() => {
-                    setMenu(null);
-                    toast({ tone: 'info', title: `${t.name} is simulated`, body: 'Tool routing is mocked in this build — see Workflows.' });
-                  }}
-                >
-                  <t.icon size={16} color="var(--text-3)" />
-                  <div style={{ flex: 1 }}>
-                    <div>{t.name}</div>
-                    <div className="sub">{t.sub}</div>
-                  </div>
-                </button>
-              ))}
             </Menu>
           )}
         </div>

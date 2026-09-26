@@ -83,6 +83,8 @@ pasting in whatever one search returns:
 - **Drop files to ingest them:** PDF, Markdown, plain text, CSV, and source code
   (TypeScript, JavaScript, Python, Java, Rust). Drag them from Finder onto the
   window or use **Upload**.
+- **Local files only.** Knowledge bases are built from files on your Mac, and
+  the agent searches only those. There are no remote or cloud sources.
 - **Indexed on your Mac by [ug](https://github.com/shoocstorm/ug)**, which
   splits documents along their structure (headings, pages, symbols), links the
   sections into a graph and embeds them locally. Live indexing progress is

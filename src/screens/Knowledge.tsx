@@ -167,13 +167,6 @@ function Ingest({ kb, onNeedKb }: { kb: KbInfo | null; onNeedKb: () => void }) {
         <button className="btn primary" style={{ height: 50, padding: '0 34px' }} onClick={() => void upload()} disabled={!inTauri}>
           Upload_Local
         </button>
-        <button
-          className="btn secondary"
-          style={{ height: 50, padding: '0 30px' }}
-          onClick={() => toast({ tone: 'info', title: 'S3 connector', body: 'Remote sources are on the roadmap — local files only for now.' })}
-        >
-          Connect_S3
-        </button>
       </div>
     </motion.div>
   );

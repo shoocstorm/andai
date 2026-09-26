@@ -219,7 +219,7 @@ level defaults to *Ask*.
 | Appearance (system / light / dark) | Real | `state/theme.ts` |
 | Layout: collapsible nav (⌘B), Execution Trace on/off (⌘J) | Real, persisted | `state/layout.ts` |
 | Workflows, approvals, tool library, node editor, run | **Simulated** | `mock/workflows.ts`, `screens/Workflow*.tsx` |
-| "Choose tool" (except Knowledge search), "Connect S3" | **Simulated** | toasts say so |
+| "Choose tool" menu: the tools offered for the selected KB, with their policy | Real | `screens/CommandCenter.tsx` (registry) |
 
 Promoting a simulated feature to real requires: a design note in this file,
 tests at the same level as the real features, and removal of the "simulated"
