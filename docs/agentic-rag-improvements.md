@@ -25,7 +25,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 5 | [Merge evidence before answering](#5-merge-evidence-before-answering) | done 2026-09-26 · 0.6B facts 82.8% → 86.2%, no wasted calls |
 | 6 | [Prompt-prefix caching](#6-prompt-prefix-caching) | done 2026-09-26 · later decisions ~20% faster on a decision model; same outcomes |
 | 7 | [Skip the obvious first decision](#7-skip-the-obvious-first-decision) | done 2026-09-26 · first action 100%, 45% fewer decisions |
-| 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | todo |
+| 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | done 2026-09-26 · 1.7B decides worse; recommend 1.7B answers + 0.6B decisions |
 | 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | todo |
 
 **Deferred decision:** [a native llama.cpp engine](#deferred-a-native-llamacpp-engine)
@@ -332,6 +332,29 @@ Q4_K_M, 1.56 GB, SemIf's default) to the catalog.
 
 **Done when.** The comparison is recorded here and in `docs/features.md`, with
 the decision and the reason.
+
+**Done (2026-09-26).** All four setups on the same 32 questions, with items
+2–7 in place:
+
+| Answers + decisions | First action | Answer facts | Grounded | ms / decision | s / question |
+|---|---|---|---|---|---|
+| 0.6B + 0.6B (default) | 100% | 86.2% | 55.2% | 751 | 3.62 |
+| **1.7B + 0.6B** | **100%** | **96.6%** | **86.2%** | 888 | 7.05 |
+| 0.6B + 1.7B | 90.6% | 79.3% | 51.7% | 1,645 | 6.34 |
+| 1.7B + 1.7B | 90.6% | 93.1% | 79.3% | 2,060 | 11.38 |
+
+(`eval/item7-after-*`, `eval/item8-*`; each setup has its own baseline
+section.) **Decision:** a bigger decision model is worse here, not better.
+Qwen3 1.7B deciding chose *ask a clarifying question* after the search on
+most questions (22 of 29 lookups in both setups) and for all 3
+small-talk questions, and each decision took 2–3× longer. The answer model
+is what matters: 1.7B answering with 0.6B deciding is the best setup, and
+the docs and the Settings text now recommend it. No larger model was added
+to the catalog.
+
+The option wording and the `offered` rule were tuned on 0.6B (AGENTS.md §2);
+1.7B may do better with its own wording, but that's a new measurement, not
+this item.
 
 ## 9. Two query phrasings per search
 

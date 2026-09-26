@@ -75,8 +75,12 @@ pasting in whatever one search returns:
   tool calls a question may use and the minimum confidence, or turn agent mode
   off to go back to one search per question.
 - **An optional decision model.** *Settings → Decision model* loads a second
-  model just for choosing the next step, so a larger model can decide while a
-  smaller one writes. Without it, the chat model decides.
+  model just for choosing the next step. Without it, the chat model decides.
+  In our agent eval (32 questions, Apple M5 Max) the best setup was **Qwen3
+  1.7B as the chat model with Qwen3 0.6B deciding**: 96.6% of answers had the
+  expected facts, against 86.2% with 0.6B alone, at about 7 s per question
+  instead of 3.6 s. A 1.7B decision model did worse: it often asked a
+  clarifying question instead of answering.
 - **Every step is visible.** The Execution Trace lists each decision with
   its options and probabilities, and each tool call with its arguments, the
   ug command that ran, timing and what it returned. **Copy trace** exports a

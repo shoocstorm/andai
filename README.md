@@ -29,7 +29,8 @@ With a knowledge base selected, each question runs the **agent loop**
    *ask a clarifying question*) from a lettered list. It doesn't write the
    choice: one forward pass is read out as a probability per option
    (SemIf-style, `llm/decide.ts`). An optional, separate *decision model* can
-   do this while a smaller model writes.
+   do this: Qwen3 0.6B deciding while Qwen3 1.7B writes answered best in the
+   agent eval.
 2. **Fill arguments.** The model writes the tool's arguments as JSON, held to
    the tool's schema by a grammar. This is where the question becomes a search
    phrase (or a symbol name, a file, a line range).
@@ -84,7 +85,7 @@ First launch:
 1. In **Settings → Models**, load **Qwen3 0.6B**. It is a 639 MB one-time download, cached in the webview's OPFS; a cached load takes about 1 s.
 2. In **Knowledge**, create a knowledge base and drop in PDFs, Markdown, TXT, CSV or source files.
 3. Chat in **Command Center**. The knowledge-base chip in the composer picks which KB the agent works from.
-4. Optional: **Tools** (`⌘5`, `Ctrl+5` on Windows) shows every tool and its policy; **Settings → Decision model** loads a second model (e.g. Qwen3 1.7B) to make the agent's choices.
+4. Optional: **Tools** (`⌘5`, `Ctrl+5` on Windows) shows every tool and its policy; **Settings → Decision model** loads a second model to make the agent's choices: with Qwen3 1.7B as the chat model, pick Qwen3 0.6B here (best in the agent eval).
 
 ## What's real and what's simulated
 

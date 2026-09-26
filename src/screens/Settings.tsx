@@ -10,9 +10,11 @@ import { toast } from '../state/ui';
 
 /**
  * The optional second model that scores the agent's next action
- * (llm/decide.ts). A bigger decider picks tools more reliably (SemIf measured
- * 0.44 → 0.69 → 0.81 balanced accuracy from 0.6B to 2B to 4B); without one,
- * the chat model decides.
+ * (llm/decide.ts); without one, the chat model decides. SemIf measured bigger
+ * deciders picking better, but in Andai's eval Qwen3 1.7B deciding asked for
+ * clarification instead of answering after most searches, while 1.7B
+ * answering with 0.6B deciding did best (docs/agentic-rag-improvements.md,
+ * item 8), so the copy recommends a small decider.
  */
 function DecisionModel() {
   const e = useEngine();
@@ -30,8 +32,9 @@ function DecisionModel() {
       </div>
       <p className="muted" style={{ marginTop: 0, fontSize: 13.5 }}>
         In agent mode, a model picks each next step (a tool, answer or ask) by scoring the options in one pass. A separate,
-        larger model picks more reliably while a small one writes. Without one, {chat ? chat.name : 'the chat model'} decides.
-        It runs in addition to the chat model, so it needs its own memory.
+        small model can decide while a larger one writes: Qwen3 0.6B deciding with Qwen3 1.7B as the chat model gave the best
+        answers in our tests. Without one, {chat ? chat.name : 'the chat model'} decides. It runs in addition to the chat model,
+        so it needs its own memory.
       </p>
       <div className="st-decider-list">
         {candidates.map((m) => {
