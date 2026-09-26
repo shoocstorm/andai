@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Andai — a private AI agent for your Mac</title>
+  <meta name="description" content="Andai runs an AI model on your Mac and answers from your own documents, with cited sources. No cloud, no account, no API key." />
+  <meta property="og:title" content="Andai — a private AI agent for your Mac" />
+  <meta property="og:description" content="On-device AI that answers from your own documents, with cited sources. Nothing leaves your Mac." />
+  <meta property="og:image" content="img/command-center-dark.webp" />
+  <meta name="color-scheme" content="dark light" />
+  <link rel="icon" href="img/andai-icon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    // Theme before first paint: saved choice, else the OS setting.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('andai-site-theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <style>
+    /* Tokens mirror the app (src/theme/tokens.css) so the site and product feel like one thing. */
+    :root {
+      color-scheme: dark;
+      --canvas: #0e1116; --canvas-2: #0b0e13; --panel: #151a22; --panel-2: #191f29; --raised: #1d2330;
+      --inset: #0b0e13; --border: #ffffff10; --border-strong: #ffffff1c;
+      --text: #e6e9ef; --text-strong: #fff; --text-2: #a9b1c0; --text-3: #6f7889; --ink: #fff;
+      --blue: #7db4ff; --blue-strong: #5a9bff; --violet: #c9a2ff; --amber: #f5a524; --green: #5ee0a0; --red: #ff7a7a;
+      --on-accent: #0a1220;
+      --grad-cta: linear-gradient(180deg, #9cc9ff, #5a9bff);
+      --grad-orb: linear-gradient(135deg, #8ec1ff, #d3a8ff);
+      --grad-brand: linear-gradient(90deg, #8ec1ff 0%, #b8b0ff 55%, #d3a8ff 100%);
+      --nav-bg: #0c0f14cc;
+      --shadow: 0 30px 80px -30px #000c, 0 0 0 1px var(--border-strong);
+      --glow: #5a9bff40;
+      --font-display: 'Space Grotesk', Inter, system-ui, sans-serif;
+      --font-body: Inter, system-ui, -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+      --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+    }
+    :root[data-theme='light'] {
+      color-scheme: light;
+      --canvas: #f3f5f9; --canvas-2: #eaeef4; --panel: #fff; --panel-2: #fff; --raised: #eef1f6;
+      --inset: #f6f8fb; --border: #0b12201a; --border-strong: #0b122029;
+      --text: #111827; --text-strong: #0b1220; --text-2: #465063; --text-3: #687286; --ink: #0b1220;
+      --blue: #2f6fe0; --blue-strong: #1f57c3; --violet: #7a4bd8; --amber: #b45309; --green: #13875a; --red: #d33c3c;
+      --on-accent: #fff;
+      --grad-cta: linear-gradient(180deg, #4d8cf5, #2f6fe0);
+      --grad-brand: linear-gradient(90deg, #2f6fe0 0%, #5a5ce0 55%, #7a4bd8 100%);
+      --nav-bg: #ffffffd9;
+      --shadow: 0 30px 70px -30px #0b122059, 0 0 0 1px var(--border-strong);
+      --glow: #2f6fe026;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--canvas); color: var(--text);
+      font: 400 17px/1.6 var(--font-body); -webkit-font-smoothing: antialiased;
+      background-image:
+        radial-gradient(1100px 600px at 12% -8%, color-mix(in srgb, var(--blue) 10%, transparent), transparent 60%),
+        radial-gradient(900px 600px at 100% 8%, color-mix(in srgb, var(--violet) 9%, transparent), transparent 60%),
+        radial-gradient(color-mix(in srgb, var(--ink) 5%, transparent) 1px, transparent 1px);
+      background-size: auto, auto, 22px 22px;
+      overflow-x: hidden;
+    }
+    a { color: inherit; }
+    img { max-width: 100%; display: block; }
+    .wrap { width: min(1180px, 100% - 40px); margin: 0 auto; }
+    .label { font: 600 12px/1 var(--font-mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-3); }
+    .label.blue { color: var(--blue); } .label.violet { color: var(--violet); } .label.amber { color: var(--amber); }
+    .grad { background: var(--grad-brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    :focus-visible { outline: 1.5px dashed var(--blue); outline-offset: 3px; border-radius: 6px; }
+
+    /* nav */
+    .nav { position: sticky; top: 0; z-index: 20; background: var(--nav-bg); backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); }
+    .nav .wrap { display: flex; align-items: center; gap: 28px; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .brand img { width: 32px; height: 32px; }
+    .brand b { font: 700 22px/1 var(--font-display); letter-spacing: -0.01em; }
+    .nav-links { display: flex; gap: 26px; margin-left: 12px; }
+    .nav-links a { text-decoration: none; color: var(--text-2); font-size: 15px; }
+    .nav-links a:hover { color: var(--text); }
+    .spacer { flex: 1; }
+    .theme-btn { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--border-strong); background: transparent; color: var(--blue); display: grid; place-items: center; cursor: pointer; }
+    .theme-btn:hover { background: var(--raised); }
+    [data-theme='dark'] .i-sun, [data-theme='light'] .i-moon { display: none; }
+
+    .btn { display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 22px; border-radius: 10px; font: 700 13px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; text-decoration: none; border: 1px solid transparent; transition: transform 0.12s var(--ease), box-shadow 0.2s; white-space: nowrap; }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: var(--grad-cta); color: var(--on-accent); box-shadow: 0 10px 30px -10px color-mix(in srgb, var(--blue-strong) 80%, transparent), 0 1px 0 #ffffff66 inset; }
+    .btn.primary:hover { box-shadow: 0 14px 40px -10px var(--blue-strong), 0 1px 0 #ffffff66 inset; }
+    .btn.ghost { border-color: var(--border-strong); color: var(--text); background: color-mix(in srgb, var(--ink) 3%, transparent); }
+    .btn.ghost:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
+    .btn.sm { height: 38px; padding: 0 16px; font-size: 11.5px; }
+
+    /* hero */
+    .hero { padding: 88px 0 40px; text-align: center; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 10px; padding: 8px 16px; border-radius: 999px; border: 1px solid var(--border-strong); background: color-mix(in srgb, var(--panel) 70%, transparent); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 currentColor; animation: pulse 1.8s var(--ease) infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent); } 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+    h1 { font: 700 clamp(40px, 6.4vw, 78px)/1.02 var(--font-display); letter-spacing: -0.045em; margin: 28px auto 22px; max-width: 16ch; color: var(--text-strong); }
+    .lede { font-size: clamp(17px, 2vw, 20px); color: var(--text-2); max-width: 660px; margin: 0 auto 34px; }
+    .ctas { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+    .fine { margin-top: 18px; font-size: 13.5px; color: var(--text-3); }
+
+    .shot-stage { position: relative; margin: 64px auto 0; max-width: 1120px; }
+    .shot-stage::before { content: ''; position: absolute; inset: 8% 6% -4%; background: radial-gradient(closest-side, var(--glow), transparent); filter: blur(30px); z-index: -1; }
+    .window { border-radius: 14px; overflow: hidden; background: var(--panel); box-shadow: var(--shadow); }
+    .window-bar { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: color-mix(in srgb, var(--panel-2) 85%, var(--canvas)); border-bottom: 1px solid var(--border); }
+    .window-bar i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; }
+    .window-bar i:nth-child(2) { background: #febc2e; } .window-bar i:nth-child(3) { background: #28c840; }
+    .window img { width: 100%; height: auto; aspect-ratio: 1440 / 920; }
+    [data-theme='dark'] .only-light, [data-theme='light'] .only-dark { display: none; }
+
+    /* proof strip */
+    .proof { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 56px auto 0; }
+    .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; text-align: left; }
+    .stat .v { font: 700 30px/1 var(--font-display); letter-spacing: -0.02em; margin-top: 12px; }
+    .stat .v small { font: 600 13px var(--font-body); color: var(--text-3); margin-left: 6px; }
+    .stat p { margin: 8px 0 0; font-size: 13.5px; color: var(--text-2); line-height: 1.45; }
+
+    section { padding: 110px 0 0; }
+    .section-head { max-width: 720px; margin-bottom: 44px; }
+    .section-head h2 { font: 700 clamp(30px, 4vw, 46px)/1.08 var(--font-display); letter-spacing: -0.035em; margin: 14px 0 14px; color: var(--text-strong); }
+    .section-head p { margin: 0; color: var(--text-2); font-size: 18px; }
+
+    /* features */
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px 26px 24px; transition: border-color 0.2s, transform 0.2s var(--ease); }
+    .card:hover { border-color: color-mix(in srgb, var(--blue) 40%, transparent); transform: translateY(-2px); }
+    .card .ic { width: 46px; height: 46px; border-radius: 11px; background: var(--raised); display: grid; place-items: center; margin-bottom: 18px; }
+    .card h3 { font: 600 20px/1.25 var(--font-display); margin: 0 0 8px; letter-spacing: -0.01em; }
+    .card p { margin: 0; color: var(--text-2); font-size: 15.5px; }
+    .pill { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 6px; font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid; vertical-align: middle; }
+    .pill.amber { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, transparent); background: color-mix(in srgb, var(--amber) 10%, transparent); }
+    .pill.green { color: var(--green); border-color: color-mix(in srgb, var(--green) 35%, transparent); background: color-mix(in srgb, var(--green) 10%, transparent); }
+
+    /* showcase rows */
+    .row { display: grid; grid-template-columns: 5fr 7fr; gap: 56px; align-items: center; margin-bottom: 96px; }
+    .row.flip { grid-template-columns: 7fr 5fr; }
+    .row.flip .copy { order: 2; }
+    .copy h3 { font: 700 clamp(26px, 3vw, 36px)/1.1 var(--font-display); letter-spacing: -0.03em; margin: 14px 0 14px; color: var(--text-strong); }
+    .copy p { color: var(--text-2); margin: 0 0 18px; }
+    .ticks { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+    .ticks li { display: flex; gap: 12px; color: var(--text); font-size: 15.5px; }
+    .ticks .icon { color: var(--blue); width: 18px; height: 18px; margin-top: 3px; }
+    .row .window { transform: perspective(1600px) rotateY(-4deg); transition: transform 0.5s var(--ease); }
+    .row.flip .window { transform: perspective(1600px) rotateY(4deg); }
+    .row .window:hover { transform: none; }
+
+    /* steps */
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: s; }
+    .step { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px; }
+    .step .n { font: 700 13px/1 var(--font-mono); color: var(--blue); letter-spacing: 0.14em; }
+    .step h3 { font: 600 21px/1.2 var(--font-display); margin: 14px 0 8px; }
+    .step p { color: var(--text-2); margin: 0 0 16px; font-size: 15.5px; }
+    .log { background: var(--inset); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font: 500 12.5px/1.7 var(--font-mono); color: var(--text-2); overflow-x: auto; white-space: pre; }
+    .log .k { color: var(--violet); } .log .ok { color: var(--green); } .log .b { color: var(--blue); } .log .w { color: var(--amber); }
+
+    /* privacy */
+    .privacy { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 20px; padding: 48px; position: relative; overflow: hidden; }
+    .privacy::after { content: ''; position: absolute; right: -120px; top: -120px; width: 360px; height: 360px; border-radius: 50%; background: radial-gradient(closest-side, var(--glow), transparent); }
+    .privacy h2 { font: 700 clamp(28px, 3.6vw, 42px)/1.08 var(--font-display); letter-spacing: -0.035em; margin: 14px 0 16px; color: var(--text-strong); }
+
+    /* faq */
+    .faq { display: grid; gap: 12px; max-width: 860px; }
+    details { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 0 22px; }
+    summary { cursor: pointer; list-style: none; padding: 18px 0; font: 600 17px/1.3 var(--font-display); display: flex; justify-content: space-between; gap: 16px; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: '+'; color: var(--blue); font: 500 22px/1 var(--font-mono); transition: transform 0.2s var(--ease); }
+    details[open] summary::after { transform: rotate(45deg); }
+    details p { margin: 0 0 18px; color: var(--text-2); font-size: 15.5px; }
+    code { font: 500 0.88em var(--font-mono); background: color-mix(in srgb, var(--ink) 7%, transparent); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+
+    /* final cta */
+    .final { text-align: center; padding: 120px 0 100px; }
+    .orb { width: 96px; height: 96px; margin: 0 auto 28px; border-radius: 24px; background: var(--grad-orb); display: grid; place-items: center; color: #141a26; box-shadow: 0 24px 60px -16px #8ec1ffaa, 0 0 0 1px #ffffff40 inset; animation: breathe 4s ease-in-out infinite; }
+    .orb .icon { width: 40px; height: 40px; fill: #141a26; stroke: none; }
+    @keyframes breathe { 50% { transform: translateY(-4px); filter: brightness(1.08); } }
+
+    footer { border-top: 1px solid var(--border); padding: 30px 0 40px; color: var(--text-3); font-size: 14px; }
+    footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; }
+    footer a { color: var(--text-2); text-decoration: none; } footer a:hover { color: var(--text); }
+
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } html { scroll-behavior: auto; } }
+    @media (max-width: 960px) {
+      .grid, .steps { grid-template-columns: 1fr 1fr; }
+      .proof { grid-template-columns: 1fr 1fr; }
+      .row, .row.flip { grid-template-columns: 1fr; gap: 28px; margin-bottom: 72px; }
+      .row.flip .copy { order: 0; }
+      .row .window, .row.flip .window { transform: none; }
+      .privacy { grid-template-columns: 1fr; padding: 32px; }
+    }
+    @media (max-width: 640px) {
+      body { font-size: 16px; }
+      .nav-links, .nav .btn { display: none; }
+      .grid, .steps, .proof { grid-template-columns: 1fr; }
+      .hero { padding-top: 56px; }
+      .eyebrow { font-size: 10px; letter-spacing: 0.08em; padding: 7px 12px; }
+      section { padding-top: 80px; }
+      .privacy { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+    <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
+    <symbol id="i-trace" viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3M12 12V8"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="10" cy="7" r="4"/><path d="M2 21v-2a4 4 0 0 1 4-4h6"/><circle cx="18" cy="18" r="3"/><path d="M18 13v2M18 21v2M13 18h2M21 18h2"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></symbol>
+    <symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect x="13" y="13" width="8" height="8" rx="2"/></symbol>
+  </svg>
+
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="#top" aria-label="Andai home"><img src="img/andai-icon.svg" alt="" width="32" height="32" /><b class="grad">ANDAI</b></a>
+      <nav class="nav-links" aria-label="Sections">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#privacy">Privacy</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme" type="button" aria-label="Switch between light and dark">
+        <svg class="icon i-sun"><use href="#i-sun"/></svg><svg class="icon i-moon"><use href="#i-moon"/></svg>
+      </button>
+      <a class="btn primary sm" href="https://github.com/shoocstorm/andai/releases/latest"><svg class="icon" style="width:16px;height:16px"><use href="#i-download"/></svg>Download</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <div class="wrap hero">
+      <span class="eyebrow label blue"><span class="dot"></span>On-device · No cloud · No API key</span>
+      <h1>Your AI agent,<br /><span class="grad">running on your Mac.</span></h1>
+      <p class="lede">Andai answers from <strong>your own documents</strong>, shows every step it takes, and cites its sources. The model runs on your Mac, so your questions and files never leave it.</p>
+      <div class="ctas">
+        <a class="btn primary" href="https://github.com/shoocstorm/andai/releases/latest"><svg class="icon"><use href="#i-download"/></svg>Download for macOS</a>
+        <a class="btn ghost" href="#how">See how it works <svg class="icon"><use href="#i-arrow"/></svg></a>
+      </div>
+      <p class="fine">For macOS · Apple Silicon and Intel builds · Tested on macOS 26</p>
+
+      <div class="shot-stage">
+        <div class="window">
+          <div class="window-bar"><i></i><i></i><i></i></div>
+          <img class="only-dark" src="img/command-center-dark.webp" width="1440" height="920" alt="Andai Command Center: an answer grounded in five retrieved passages, with reasoning steps and the Execution Trace" />
+          <img class="only-light" src="img/command-center-light.webp" width="1440" height="920" alt="Andai Command Center in the light theme" />
+        </div>
+      </div>
+
+      <div class="proof">
+        <div class="stat"><div class="label">Your data</div><div class="v grad">Stays local</div><p>Inference and indexing run on your Mac. The only download is the model you pick.</p></div>
+        <div class="stat"><div class="label">Throughput</div><div class="v">~30<small>tok/s</small></div><p>Qwen3 0.6B on WebGPU, measured on an Apple Silicon Mac.</p></div>
+        <div class="stat"><div class="label">Warm start</div><div class="v">~1.3<small>s</small></div><p>To load a cached model, measured. The first download is 639 MB.</p></div>
+        <div class="stat"><div class="label">Grounding</div><div class="v">[1] [2]<small>cited</small></div><p>Answers cite the exact file and lines they came from.</p></div>
+      </div>
+    </div>
+
+    <section id="features">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="label violet">Features</span>
+          <h2>An agent that shows its work.</h2>
+          <p>Everything you need to ask real questions about your own material, built to run offline.</p>
+        </div>
+        <div class="grid">
+          <article class="card"><div class="ic" style="color:var(--blue)"><svg class="icon"><use href="#i-cpu"/></svg></div><h3>On-device model</h3><p>Qwen3 runs inside the app with llama.cpp and WebGPU, multi-threaded. Download once, then work fully offline.</p></article>
+          <article class="card"><div class="ic" style="color:var(--violet)"><svg class="icon"><use href="#i-db"/></svg></div><h3>Knowledge from your files</h3><p>Drop in PDFs, Markdown, text, CSV or code. They're indexed into a local knowledge graph that follows headings, pages and symbols.</p></article>
+          <article class="card"><div class="ic" style="color:var(--green)"><svg class="icon"><use href="#i-file"/></svg></div><h3>Cited, grounded answers</h3><p>Answers cite passages as [1], [2], each matched to a source you can see. If your documents don't say, Andai tells you.</p></article>
+          <article class="card"><div class="ic" style="color:var(--amber)"><svg class="icon"><use href="#i-trace"/></svg></div><h3>Live execution trace</h3><p>Watch each step (analyze, retrieve, assemble, generate) with timings, sources, tokens per second and context use.</p></article>
+          <article class="card"><div class="ic" style="color:var(--blue)"><svg class="icon"><use href="#i-user"/></svg></div><h3>A persona you control</h3><p>Edit the system prompt, pick a tone, tune temperature and length. Auto-optimize has the local model rewrite your prompt.</p></article>
+          <article class="card"><div class="ic" style="color:var(--violet)"><svg class="icon"><use href="#i-keys"/></svg></div><h3>Made for focus</h3><p>Light and dark themes, a collapsible sidebar, a hideable trace, and keyboard shortcuts for everything that matters.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="row">
+          <div class="copy">
+            <span class="label blue">Focus mode</span>
+            <h3>Just you and the answer.</h3>
+            <p>Collapse the sidebar with <code>⌘B</code> and hide the trace with <code>⌘J</code>. While the trace is hidden, a small indicator in the header still shows each step.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg>Markdown, code and tables render as the answer streams</li>
+              <li><svg class="icon"><use href="#i-check"/></svg>Stop any time with <code>Esc</code></li>
+              <li><svg class="icon"><use href="#i-check"/></svg>Follow-up questions remember the conversation</li>
+            </ul>
+          </div>
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i></div><img src="img/focus-mode-dark.webp" width="1440" height="920" loading="lazy" alt="Andai with the sidebar collapsed and the trace hidden" /></div>
+        </div>
+
+        <div class="row flip">
+          <div class="copy">
+            <span class="label violet">Persona</span>
+            <h3>Make it yours.</h3>
+            <p>Give the agent a name, a voice and ground rules. Settings apply to the next message and are remembered between launches.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg>Professional, friendly or creative tone</li>
+              <li><svg class="icon"><use href="#i-check"/></svg>Temperature and response length</li>
+              <li><svg class="icon"><use href="#i-check"/></svg>Optional step-by-step reasoning you can expand</li>
+            </ul>
+          </div>
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i></div><img src="img/persona-dark.webp" width="1440" height="920" loading="lazy" alt="Andai Persona screen: system prompt, tone of voice and temperature" /></div>
+        </div>
+
+        <div class="row">
+          <div class="copy">
+            <span class="label blue">Appearance</span>
+            <h3>Light, dark, or follow your Mac.</h3>
+            <p>Both themes are designed together, with contrast-checked text, so every screen reads well by day or night.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg>Switch from the top bar or Settings</li>
+              <li><svg class="icon"><use href="#i-check"/></svg>Manage models: download, load, unload, evict</li>
+            </ul>
+          </div>
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i></div><img src="img/settings-light.webp" width="1440" height="920" loading="lazy" alt="Andai Settings in the light theme: model registry and appearance picker" /></div>
+        </div>
+
+        <div class="row flip">
+          <div class="copy">
+            <span class="label amber">Preview <span class="pill amber">Simulated</span></span>
+            <h3>Workflows, coming next.</h3>
+            <p>A first look at multi-step automation: a visual node editor, a tool library, and human-in-the-loop approvals. Today these screens are a <strong>simulated preview</strong>. They demonstrate the design, but they don't execute anything yet.</p>
+          </div>
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i></div><img src="img/workflow-editor-dark.webp" width="1440" height="920" loading="lazy" alt="Preview of Andai's workflow node editor" /></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how" style="padding-top:20px">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="label blue">How it works</span>
+          <h2>Three steps to a private agent.</h2>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <span class="n">01 · MODEL</span>
+            <h3>Load a model</h3>
+            <p>Pick Qwen3 0.6B in Settings. It downloads once, then loads from your Mac in about a second.</p>
+            <div class="log"><span class="b">wllama</span> WebGPU · 4 threads
+<span class="ok">✓</span> qwen3-0.6b ready</div>
+          </div>
+          <div class="step">
+            <span class="n">02 · KNOWLEDGE</span>
+            <h3>Add your documents</h3>
+            <p>Create a knowledge base and drop files on the window. They're indexed into a searchable graph on your Mac.</p>
+            <div class="log"><span class="k">ug gen</span> 2 files → 9 nodes
+<span class="ok">✓</span> index ready · 2.3 s</div>
+          </div>
+          <div class="step">
+            <span class="n">03 · ASK</span>
+            <h3>Ask, and check the sources</h3>
+            <p>Andai finds the relevant passages, answers from them, and cites them so you can verify.</p>
+            <div class="log"><span class="k">retrieve</span> 5 passages · 98 ms
+<span class="w">[1]</span> notes.md:11-33</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <div class="wrap">
+        <div class="privacy">
+          <div>
+            <span class="label blue"><svg class="icon" style="width:14px;height:14px;vertical-align:-2px"><use href="#i-shield"/></svg> Privacy by architecture</span>
+            <h2>Nothing to trust us with.</h2>
+            <p style="color:var(--text-2);margin:0 0 18px">Andai has no servers. There's nothing to sign up for and nothing that phones home: no telemetry, analytics or accounts.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg>The model runs inside the app</li>
+              <li><svg class="icon"><use href="#i-check"/></svg>Documents are indexed on your Mac</li>
+              <li><svg class="icon"><use href="#i-check"/></svg>Chats and settings stay in local storage</li>
+              <li><svg class="icon"><use href="#i-check"/></svg>Your original files are never modified</li>
+            </ul>
+          </div>
+          <div class="log" style="font-size:13px;line-height:1.9"><span class="label">network.log — after setup</span>
+
+<span class="b">inference</span>   on-device · wllama
+<span class="b">embeddings</span>  on-device · bge-small
+<span class="b">retrieval</span>   on-device · ug graph
+<span class="b">storage</span>     ~/Library · ~/.ug
+
+<span class="k">outbound</span>    <span class="ok">none</span>
+<span class="w">one-time</span>    model download (Hugging Face)</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="label violet">FAQ</span>
+          <h2>Questions, answered.</h2>
+        </div>
+        <div class="faq">
+          <details><summary>Do I need an internet connection?</summary><p>Only to download a model the first time (639 MB for the default Qwen3 0.6B). After that Andai works fully offline.</p></details>
+          <details><summary>Which Macs does it run on?</summary><p>Andai is built for macOS, with separate builds for Apple Silicon and Intel. It's tested on macOS 26 on Apple Silicon; the Intel build hasn't been tested on hardware yet.</p></details>
+          <details><summary>What files can I add to a knowledge base?</summary><p>PDF, Markdown, plain text, CSV, and source code (TypeScript, JavaScript, Python, Java, Rust). Andai works on copies, so your originals are never changed.</p></details>
+          <details><summary>What do I need for knowledge bases?</summary><p>Indexing uses <a href="https://github.com/shoocstorm/ug">ug</a>, a local knowledge-graph engine. Install the <code>ug</code> CLI (for example in <code>~/.local/bin</code>) and Andai finds it automatically.</p></details>
+          <details><summary>How good is a model that runs on a laptop?</summary><p>Small models like Qwen3 are fast and private, but less capable than large cloud models. Grounding answers in your own documents, with citations you can check, closes much of that gap for everyday questions.</p></details>
+          <details><summary>macOS says the app can't be opened.</summary><p>Current builds aren't signed yet. Right-click <code>Andai.app</code> and choose <em>Open</em>, or run <code>xattr -dr com.apple.quarantine /Applications/Andai.app</code>.</p></details>
+          <details><summary>Are workflows and tools real?</summary><p>Not yet. The Workflows screens are a clearly labeled, simulated preview of what's coming. Knowledge search is the one tool that's live today.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <div class="wrap final">
+      <div class="orb"><svg class="icon"><use href="#i-zap"/></svg></div>
+      <h2 style="font:700 clamp(32px,4.4vw,52px)/1.05 var(--font-display);letter-spacing:-0.04em;margin:0 0 14px;color:var(--text-strong)">Meet your <span class="grad">private agent.</span></h2>
+      <p class="lede" style="margin-bottom:30px">Download Andai, load a model, and ask your first question in minutes.</p>
+      <div class="ctas">
+        <a class="btn primary" href="https://github.com/shoocstorm/andai/releases/latest"><svg class="icon"><use href="#i-download"/></svg>Download for macOS</a>
+        <a class="btn ghost" href="https://github.com/shoocstorm/andai/blob/main/docs/features.md">Read the feature guide</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span><b class="grad" style="font-family:var(--font-display)">ANDAI</b> — a local-first AI agent</span>
+      <span class="spacer"></span>
+      <a href="https://github.com/shoocstorm/andai/releases">Releases</a>
+      <a href="https://github.com/shoocstorm/andai/blob/main/docs/features.md">Features</a>
+      <a href="https://github.com/shoocstorm/andai">Source</a>
+      <span>Built with wllama · ug · Tauri</span>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('theme').addEventListener('click', function () {
+      var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem('andai-site-theme', next); } catch (e) {}
+    });
+  </script>
+</body>
+</html>

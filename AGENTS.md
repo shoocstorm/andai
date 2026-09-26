@@ -71,6 +71,8 @@ Andai/
 │  ├─ src/ug.rs              knowledge bases → `ug gen/search/list/remove` CLI
 │  ├─ build.rs               app command manifest (ACL)
 │  └─ capabilities/default.json
+├─ docs/                     user-facing docs (features.md, …) — index in docs/README.md
+│  └─ andai-website/         static product site: index.html + img/ (real app screenshots)
 ├─ tests/                    setup, guard tests, e2e fixtures
 └─ scripts/                  copy-wllama (postinstall), e2e runner
 ```
@@ -127,7 +129,8 @@ Execution Trace.
 
 Promoting a simulated feature to real requires: a design note in this file,
 tests at the same level as the real features, and removal of the "simulated"
-copy.
+copy **everywhere**: app UI, `docs/features.md`, and the website's Preview
+section and FAQ (see §8).
 
 ---
 
@@ -244,6 +247,7 @@ Rules:
       `npm run test:e2e:release` pass
 - [ ] Real vs. simulated table (§3) and platform facts (§2) still true, or updated
 - [ ] README / this file updated if commands, setup or behavior changed
+- [ ] **Docs and website updated** for any user-visible change (§8), in the same change
 
 ---
 
@@ -311,3 +315,45 @@ Known constraints to keep in mind: the release UI needs port **14230** free
 (the app currently can't start without it), and dev (`localhost:1420`) and
 release (`localhost:14230`) have separate webview storage, including separate
 model caches.
+
+---
+
+## 8. Docs and website: keep them in sync with the code
+
+> **Reminder for AI coding agents:** when you change what a user can see or
+> do, update `docs/` and `docs/andai-website/` **in the same change**, before
+> you call it done. Stale docs are bugs. A website that promises something the
+> app doesn't do breaks rule §1.2 (report truthfully) in public.
+
+| You changed… | Update |
+|---|---|
+| A feature's behavior, a new feature, or a removed one | `docs/features.md` (right section, status *Available*/*Preview*) and the website's feature cards or showcase rows |
+| A screen's look (layout, theme, copy) | Re-capture the affected screenshots in `docs/andai-website/img/` (see below) |
+| Something simulated became real (or the reverse) | `docs/features.md` status, website Preview section + FAQ, §3 table here |
+| Shortcuts | `docs/features.md` → Workspace, website "Focus mode" row, README, About dialog |
+| Models, sizes, supported file types, requirements, ports | `docs/features.md` → Models / Requirements, website FAQ + proof strip |
+| Performance numbers | Only publish numbers you **measured**, and say on what (model, Mac). Re-measure before changing them |
+| Install / release / signing | Website download CTA + FAQ, `docs/features.md` → Requirements |
+| A new doc | Link it from `docs/README.md` |
+
+Rules:
+- **No claim without evidence.** Every number, platform and capability on the
+  site or in the docs must be something that was run and observed. Say
+  "tested on …" rather than implying broader support. Don't invent
+  testimonials, user counts or benchmarks.
+- **Screenshots are real captures** of the current app, never mock-ups. Use
+  2× WebP at 1440×920 viewport, named `<screen>-<theme>.webp`. Capture with
+  headless Chrome against `npm run dev`, seeding `localStorage`
+  (`andai.theme`, `andai.chat`, `andai.layout`). Look at every image before
+  committing it. Don't capture screens that show browser-only states (e.g. the
+  Knowledge screen's "desktop runtime required" notice) as if they were the app.
+- The website is **one self-contained static page** (`index.html` + `img/`):
+  no build step and no JS framework. Its tokens mirror
+  `src/theme/tokens.css`; if the app's palette changes, update the site's
+  `:root` blocks to match. It must work in light and dark and at phone width
+  (no horizontal scroll at 390 px).
+- `tests/unit/docs.test.ts` guards the mechanical part: local links and images
+  resolve, anchors exist, screenshots have alt text, and the Workflows preview
+  stays labeled simulated. It can't judge whether prose is still *true*.
+  That part is on you.
+

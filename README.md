@@ -1,6 +1,7 @@
 # Andai — a local-first AI agent
 
 > Contributors and coding agents: read **[AGENTS.md](AGENTS.md)** first. It has the grounding rules, architecture, conventions and testing strategy.
+> Users: see **[docs/features.md](docs/features.md)** and the product site in **[docs/andai-website/](docs/andai-website/index.html)**.
 
 Andai merges two demos into one desktop app:
 
