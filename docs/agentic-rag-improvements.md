@@ -26,7 +26,16 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 6 | [Prompt-prefix caching](#6-prompt-prefix-caching) | done 2026-09-26 · later decisions ~20% faster on a decision model; same outcomes |
 | 7 | [Skip the obvious first decision](#7-skip-the-obvious-first-decision) | done 2026-09-26 · first action 100%, 45% fewer decisions |
 | 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | done 2026-09-26 · 1.7B decides worse; recommend 1.7B answers + 0.6B decisions |
-| 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | todo |
+| 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | measured 2026-09-26 · worse, not shipped |
+
+**Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
+not shipped: 4, 9; 8 changed the recommendation (a small decision model with
+a larger chat model). With Qwen3 0.6B alone the agent now takes the right
+first action on 32 of 32 questions (was 31) with 1.1 decisions per question
+(was 2.0), and finds the expected facts in 86.2% of answers (82.8% on the
+same set before items 3–7). Qwen3 1.7B answering with 0.6B deciding reaches
+96.6% facts at about 7 s per question. The remaining misses are in the
+answer text, not the retrieval.
 
 **Deferred decision:** [a native llama.cpp engine](#deferred-a-native-llamacpp-engine)
 (bundled `llama-server` on Metal), to decide once items 3–9 are done.
@@ -368,6 +377,25 @@ with `dedupeHits`, with the arguments shown in the trace.
 
 **Done when.** The eval shows higher answer-fact hits for document questions
 without more decisions per question.
+
+**Measured (2026-09-26), not shipped.** `kb_search` took `queries` (1–2
+phrases); the loop ran the same validated Rust search once per phrase and
+merged the items (`dedupeHits`), as one call on the trace. Both models used
+two phrasings almost every time (0.6B 27 of 29 searches, 1.7B 29 of 29):
+
+| Setup | Answer facts | Seconds / question |
+|---|---|---|
+| 0.6B, one → two phrasings | 86.2% → 82.8% (1 gained, 2 lost) | 3.62 → 3.93 |
+| 1.7B answers + 0.6B decisions | 96.6% → 86.2% (3 lost) | 7.05 → 9.21 |
+
+The second search roughly doubles the passages, so the relevant ones are
+diluted and cut by the context budget, and the answer gets slower; no
+document question improved. Reverted (`eval/item9-after-*`). The misses left
+are in how the answer is written, not what the search finds, so a better
+retrieval item would have to show a retrieval miss first. Finding this also
+exposed a harness bug (records split across output chunks were dropped),
+fixed separately.
+
 
 ---
 
