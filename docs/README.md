@@ -7,6 +7,7 @@
 | [../README.md](../README.md) | Developers | Build, run, test, release |
 | [../AGENTS.md](../AGENTS.md) | Contributors & coding agents | Grounding rules, architecture, conventions, testing, releases, security (§9) |
 | [security.md](security.md) | Users, evaluators, security reviewers | Every security protection, what it means for you, how it's tested, and what isn't covered yet |
+| [performance.md](performance.md) | Contributors, evaluators | Performance baselines: what is measured, the current numbers, allowed drift, and how to re-record them |
 | [../SECURITY.md](../SECURITY.md) | Everyone | Security model in brief and how to report a vulnerability |
 
 Docs describe the app **as it ships today**. If a change alters behavior, the

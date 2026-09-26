@@ -31,6 +31,10 @@ jobs:
       - run: bun run test:rust
       - run: bun run lint:rust
       - run: bun run build
+      # Build output sizes vs. perf/baseline.json (docs/performance.md). Timing
+      # baselines are machine-bound, so `bun run perf micro` runs locally.
+      - name: Bundle size budget
+        run: bun run perf bundle --no-build
       # test:ug and test:e2e need the ug CLI, an embedding model and a model
       # download; run them locally or on a self-hosted runner (see AGENTS.md §6).
 

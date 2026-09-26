@@ -87,6 +87,7 @@ bun run test:ug          # Rust ↔ real ug round trip
 bun run test:e2e         # the real app in WKWebView: ingest fixtures → retrieve → grounded answer
 bun run test:e2e:release # the same against the release binary
 bun run audit            # known vulnerabilities in JS + Rust dependencies (CI and releases run it)
+bun run perf             # bundle size + hot-path benchmarks vs. perf/baseline.json (docs/performance.md)
 ```
 
 The layers, the rules and the definition of done are in [AGENTS.md](AGENTS.md) §6.

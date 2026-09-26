@@ -7,6 +7,7 @@ import { runTurn } from './agent/turn';
 import { chat, loadModel, useEngine } from './llm/engine';
 import { clearChat, useChat } from './state/chat';
 import { kbAddFiles } from './kb/api';
+import { modelById } from './llm/models';
 import { addFiles, createKb, deleteKb, useKb } from './state/kb';
 
 const log = (line: string) => invoke('dev_log', { line }).catch(() => console.log(line));
@@ -107,9 +108,10 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
     await securityChecks(kb.slug);
     const t = performance.now();
     await addFiles(kb.slug, files);
+    const ingestMs = performance.now() - t;
     const after = useKb.getState().kbs.find((k) => k.slug === kb.slug)!;
     await log(
-      `indexed in ${(performance.now() - t).toFixed(0)}ms status=${after.status} nodes=${after.nodes} edges=${after.edges} sources=${JSON.stringify(after.sources.map((s) => [s.file, s.kind, s.status]))} err=${after.lastError}`,
+      `indexed in ${ingestMs.toFixed(0)}ms status=${after.status} nodes=${after.nodes} edges=${after.edges} sources=${JSON.stringify(after.sources.map((s) => [s.file, s.kind, s.status]))} err=${after.lastError}`,
     );
     const logs = useKb.getState().logs[kb.slug] ?? [];
     await log(`ug log lines=${logs.length} last=${JSON.stringify(logs.slice(-2).map((l) => l.line))}`);
@@ -133,6 +135,17 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
       sources: msg?.sources?.map((h) => h.file),
       stats: msg?.stats,
       answer: msg?.content,
+      // Compared with perf/baseline.json by the runner (docs/performance.md).
+      perf: {
+        ingestMs,
+        searchMs: useKb.getState().lastSearch?.ms ?? null,
+        loadMs: useEngine.getState().lastLoadMs,
+        verifyMs: useEngine.getState().lastVerifyMs,
+        modelBytes: modelById(model)?.bytes ?? null,
+        firstTokenMs: msg?.stats?.firstTokenMs ?? null,
+        tokPerSec: msg?.stats?.tokPerSec ?? null,
+        promptTokens: msg?.stats?.promptTokens ?? null,
+      },
     };
     await log(`RESULT ${JSON.stringify(result)}`);
     // clean up BEFORE reporting OK: the runner may kill the app as soon as it sees it

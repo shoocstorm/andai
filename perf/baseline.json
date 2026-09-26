@@ -1,0 +1,179 @@
+{
+  "bundle": {
+    "recorded": "2026-09-26",
+    "metrics": {
+      "app-js": {
+        "value": 960484,
+        "unit": "bytes",
+        "better": "lower",
+        "tolerance": 1.1
+      },
+      "app-css": {
+        "value": 106965,
+        "unit": "bytes",
+        "better": "lower",
+        "tolerance": 1.1
+      },
+      "fonts": {
+        "value": 1479936,
+        "unit": "bytes",
+        "better": "lower",
+        "tolerance": 1.1
+      },
+      "wllama-runtime": {
+        "value": 23998032,
+        "unit": "bytes",
+        "better": "lower",
+        "tolerance": 1.1
+      },
+      "dist-total": {
+        "value": 26545807,
+        "unit": "bytes",
+        "better": "lower",
+        "tolerance": 1.1
+      }
+    }
+  },
+  "micro": {
+    "machine": "Apple M5 Max · 18 cores · 128 GB",
+    "recorded": "2026-09-26",
+    "metrics": {
+      "sha256-throughput": {
+        "tolerance": 1.5,
+        "value": 323,
+        "unit": "MB/s",
+        "better": "higher"
+      },
+      "keywords-2k": {
+        "tolerance": 1.5,
+        "value": 11.595,
+        "unit": "µs",
+        "better": "lower"
+      },
+      "dedupe-hits-64": {
+        "tolerance": 1.5,
+        "value": 2.937,
+        "unit": "µs",
+        "better": "lower"
+      },
+      "build-system-8": {
+        "tolerance": 1.5,
+        "value": 3.103,
+        "unit": "µs",
+        "better": "lower"
+      },
+      "build-history-400": {
+        "tolerance": 1.5,
+        "value": 1.542,
+        "unit": "µs",
+        "better": "lower"
+      },
+      "stream-patch-400": {
+        "tolerance": 1.5,
+        "value": 1.058,
+        "unit": "ms",
+        "better": "lower",
+        "slack": 0.5
+      },
+      "markdown-render-8k": {
+        "tolerance": 1.5,
+        "value": 2.975,
+        "unit": "ms",
+        "better": "lower",
+        "slack": 0.5
+      }
+    }
+  },
+  "e2e-dev": {
+    "machine": "Apple M5 Max · 18 cores · 128 GB",
+    "recorded": "2026-09-26",
+    "metrics": {
+      "ingest-ms": {
+        "value": 1955,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1000
+      },
+      "search-ms": {
+        "value": 101,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 150
+      },
+      "first-token-ms": {
+        "value": 943,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 300
+      },
+      "generation-tok-per-sec": {
+        "value": 17.839,
+        "unit": "tok/s",
+        "better": "higher",
+        "tolerance": 1.5
+      },
+      "prompt-tokens": {
+        "value": 361,
+        "unit": "tokens",
+        "better": "lower",
+        "tolerance": 1.25
+      },
+      "warm-load-ms": {
+        "value": 1309,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1000
+      }
+    }
+  },
+  "e2e-release": {
+    "machine": "Apple M5 Max · 18 cores · 128 GB",
+    "recorded": "2026-09-26",
+    "metrics": {
+      "ingest-ms": {
+        "value": 2135,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1000
+      },
+      "search-ms": {
+        "value": 91,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 150
+      },
+      "first-token-ms": {
+        "value": 935,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 300
+      },
+      "generation-tok-per-sec": {
+        "value": 21.97,
+        "unit": "tok/s",
+        "better": "higher",
+        "tolerance": 1.5
+      },
+      "prompt-tokens": {
+        "value": 367,
+        "unit": "tokens",
+        "better": "lower",
+        "tolerance": 1.25
+      },
+      "warm-load-ms": {
+        "value": 1338,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1000
+      }
+    }
+  }
+}

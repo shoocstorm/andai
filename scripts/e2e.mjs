@@ -7,6 +7,7 @@
 //   bun run test:e2e              # dev build (tauri dev)
 //   bun run test:e2e --release    # release binary: http://localhost origin + ACL
 //   E2E_MODEL=stories-260k ...    # engine plumbing only (answer not checked)
+//   bun run test:e2e --update-perf  # record this run as the perf baseline
 //
 // Needs: ug on PATH (or ~/.local/bin), network on first run for the model.
 import { spawn, spawnSync } from 'node:child_process';
@@ -14,9 +15,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { compare } from './perf-lib.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const release = process.argv.includes('--release');
+const updatePerf = process.argv.includes('--update-perf');
 const model = process.env.E2E_MODEL ?? 'qwen3-0.6b';
 const timeoutMs = Number(process.env.E2E_TIMEOUT_MS ?? 900_000);
 const fixtures = ['tests/fixtures/wllama-notes.md', 'tests/fixtures/hello.pdf'].map((f) => resolve(root, f));
@@ -121,6 +124,32 @@ if (failure || !result) {
   if (model !== 'stories-260k') {
     check('answer is grounded in the retrieved passage', /cross-origin|coop|coep/i.test(answer ?? ''), answer?.slice(0, 200));
   }
+}
+
+// ── performance (docs/performance.md) ─────────────────────────────────────
+// Only the default model's numbers mean anything; a failed run has none.
+if (result?.perf && model === 'qwen3-0.6b' && !failure) {
+  const p = result.perf;
+  const lower = (value, unit, slack) => ({ value, unit, better: 'lower', tolerance: 1.5, slack });
+  const metrics = {
+    'ingest-ms': lower(p.ingestMs, 'ms', 1000),
+    'search-ms': lower(p.searchMs, 'ms', 150),
+    'first-token-ms': lower(p.firstTokenMs, 'ms', 300),
+    'generation-tok-per-sec': { value: p.tokPerSec, unit: 'tok/s', better: 'higher', tolerance: 1.5 },
+    // Deterministic for a fixed KB and question: growth means the prompt got bigger.
+    'prompt-tokens': { value: p.promptTokens, unit: 'tokens', better: 'lower', tolerance: 1.25 },
+  };
+  // A load that downloaded or re-verified the model says nothing about warm load
+  // time, and a verified-copy load has no hash throughput; each run measures one.
+  if (p.verifyMs == null) metrics['warm-load-ms'] = lower(p.loadMs, 'ms', 1000);
+  else metrics['verify-mb-per-sec'] = { value: p.modelBytes / 2 ** 20 / (p.verifyMs / 1000), unit: 'MB/s', better: 'higher', tolerance: 1.5 };
+  for (const [k, m] of Object.entries(metrics)) if (m.value == null || Number.isNaN(m.value)) delete metrics[k];
+
+  const section = release ? 'e2e-release' : 'e2e-dev';
+  // Keep the metric this run couldn't measure (warm load vs. verify) in the baseline.
+  const optional = p.verifyMs == null ? 'verify-mb-per-sec' : 'warm-load-ms';
+  const failures = compare(section, metrics, { update: updatePerf, label: section, optional: [optional] });
+  check('performance within the baseline (docs/performance.md)', failures === 0, `${failures} metric(s) regressed`);
 }
 
 console.log('\n── e2e results ' + (release ? '(release)' : '(dev)') + ' ──');

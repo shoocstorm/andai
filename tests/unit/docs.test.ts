@@ -1,7 +1,7 @@
 // Keeps the docs and the marketing site honest (AGENTS.md §8):
 // every local link/image resolves, in-page anchors exist, and the site
 // never presents the simulated Workflows preview as a shipped feature.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -39,7 +39,9 @@ describe('andai-website', () => {
 describe('docs', () => {
   it('relative links in docs/*.md resolve', () => {
     const missing: string[] = [];
-    for (const f of ['docs/README.md', 'docs/features.md']) {
+    const docs = readdirSync(join(ROOT, 'docs')).filter((f) => f.endsWith('.md'));
+    expect(docs).toContain('performance.md');
+    for (const f of docs.map((d) => `docs/${d}`)) {
       const md = readFileSync(join(ROOT, f), 'utf8');
       for (const [, target] of md.matchAll(/\]\(([^)#\s]+)(?:#[^)]*)?\)/g)) {
         if (!isLocal(target)) continue;

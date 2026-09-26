@@ -85,8 +85,9 @@ Andai/
 │  └─ capabilities/default.json
 ├─ docs/                     user-facing docs (features.md, …) — index in docs/README.md
 │  └─ andai-website/         static product site: index.html + img/ (real app screenshots)
-├─ tests/                    setup, guard tests, e2e fixtures
-└─ scripts/                  copy-wllama (postinstall), e2e runner
+├─ tests/                    setup, guard tests, e2e fixtures, perf/ micro-benchmarks
+├─ perf/baseline.json        performance baselines (docs/performance.md)
+└─ scripts/                  copy-wllama (postinstall), e2e runner, perf runner
 ```
 
 **Data flow of a turn:** `runTurn` → `kbSearch` (Rust → `ug search --json`) →
@@ -252,6 +253,7 @@ bun run test:ug          # Rust ↔ real ug integration (needs ug)
 bun run test:e2e         # full app in WKWebView: ingest → retrieve → generate (needs ug; downloads model once)
 bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and releases run it
 bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
+bun run perf             # bundle size (CI too) + micro-benchmarks vs. perf/baseline.json
 ```
 
 **Run the e2e tests with the default model, `qwen3-0.6b`** (don't set
@@ -296,6 +298,7 @@ command with `rtk proxy` to see the raw output.
 | Rust unit | `cargo test` | `src-tauri/src/ug.rs` | ingestion, validation, status derivation, serialization |
 | Rust ↔ ug | `cargo test -- --ignored` | same | real `ug gen` + `search` round trip |
 | End-to-end | `scripts/e2e.mjs` + `src/smoke.ts` | real app | isolation, threads, ingest, retrieval, grounded answer; dev and release |
+| Performance | `scripts/perf.mjs`, `tests/perf/`, e2e runner | `perf/baseline.json` | bundle sizes; hot-path timings; ingest, search, load, first token, tok/s ([docs/performance.md](docs/performance.md)) |
 
 Rules:
 - **New behavior ships with a test at the lowest layer that can catch its
@@ -307,6 +310,12 @@ Rules:
 - The e2e harness **must not** touch user data: `ANDAI_DATA_DIR` isolates KB
   files, and the harness snapshots and restores chat and KB selection. The ug
   project it creates (`andai-e2e-docs`) is removed before it reports `OK`.
+- **Performance is a tested behavior.** A change that makes a baselined
+  metric worse than its tolerance fails `bun run perf` or the e2e run. If the
+  cost is intended, re-record the baseline with `--update` in the same change
+  and give the reason in the commit. Don't raise a tolerance to get a change
+  through. Timing baselines are machine-bound: they're enforced only on the
+  machine that recorded them (docs/performance.md).
 - Visual checks: headless Chrome against `bun run dev` renders every screen
   (`/#command`, `/#knowledge`, …). Seed `localStorage` (`andai.theme`,
   `andai.chat`) to check both themes and populated states. Look at the images;
@@ -318,6 +327,9 @@ Rules:
 - [ ] UI changes looked at in light **and** dark
 - [ ] Touching engine, ug, Tauri config or commands: `bun run test:e2e` and
       `bun run test:e2e:release` pass with the default model, `qwen3-0.6b` (§5)
+- [ ] Touching a hot path (prompt, retrieval, chat store, Markdown, engine,
+      dependencies): `bun run perf` passes, or the baseline was re-recorded
+      with a reason (docs/performance.md)
 - [ ] Real vs. simulated table (§3) and platform facts (§2) still true, or updated
 - [ ] README / this file updated if commands, setup or behavior changed
 - [ ] **Docs and website updated** for any user-visible change (§8), in the same change
