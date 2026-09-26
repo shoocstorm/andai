@@ -18,7 +18,10 @@ const policy = (extra: Record<string, string> = {}) =>
   Object.entries(csp)
     .map(([k, v]) => `${k} ${v}${extra[k] ? ` ${extra[k]}` : ''}`)
     .join('; ');
-const devCsp = policy({ 'script-src': "'unsafe-inline'", 'connect-src': 'ws://localhost:1420' });
+// The e2e and eval runners use their own port (ANDAI_DEV_PORT, scripts/dev-port.mjs)
+// so they never load a developer's running `tauri dev` on 1420 instead of theirs.
+const port = Number(process.env.ANDAI_DEV_PORT ?? 1420);
+const devCsp = policy({ 'script-src': "'unsafe-inline'", 'connect-src': `ws://localhost:${port}` });
 
 // Vite answers a revalidated index.html with a bare 304, and WebKit then keeps
 // the cached copy's headers: a webview that cached the page before a header
@@ -38,7 +41,7 @@ export default defineConfig({
   plugins: [react(), freshDocuments],
   clearScreen: false,
   server: {
-    port: 1420,
+    port,
     strictPort: true,
     headers: { ...isolation, 'Content-Security-Policy': devCsp },
     watch: { ignored: ['**/src-tauri/**'] },

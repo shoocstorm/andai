@@ -16,6 +16,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { devOnPort } from './dev-port.mjs';
 import { keepLaya, seedLaya } from './laya-cache.mjs';
 import { byLine, compare } from './perf-lib.mjs';
 
@@ -60,7 +61,10 @@ const env = {
 if (laya) seedLaya(dataDir, laya);
 
 function launch() {
-  if (!release) return spawn('bun', ['run', 'tauri', 'dev'], { cwd: root, env, detached: true });
+  if (!release) {
+    const dev = devOnPort();
+    return spawn('bun', ['run', 'tauri', 'dev', ...dev.args], { cwd: root, env: { ...env, ...dev.env }, detached: true });
+  }
   console.log('[e2e] building release binary with the e2e harness…');
   const b = spawnSync('bun', ['run', 'tauri', 'build', '--no-bundle'], { cwd: root, env, stdio: 'inherit' });
   if (b.status !== 0) process.exit(b.status ?? 1);

@@ -20,6 +20,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { diffCases, loadCases, scoreCase, scorecard } from './eval-lib.mjs';
+import { devOnPort } from './dev-port.mjs';
 import { keepLaya, seedLaya } from './laya-cache.mjs';
 import { byLine, compare } from './perf-lib.mjs';
 
@@ -75,7 +76,8 @@ const env = {
 seedLaya(env.ANDAI_DATA_DIR, decider);
 
 console.log(`[eval] ${cases.length} question(s), model ${model}, decisions on ${decider ?? 'the chat model'}, seed ${seed}`);
-const child = spawn('bun', ['run', 'tauri', 'dev'], { cwd: root, env, detached: true });
+const dev = devOnPort();
+const child = spawn('bun', ['run', 'tauri', 'dev', ...dev.args], { cwd: root, env: { ...env, ...dev.env }, detached: true });
 const records = [];
 let failure = null;
 let start = null;
