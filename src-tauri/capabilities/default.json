@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "core:window:allow-set-theme",
+    "core:window:allow-start-dragging",
     "allow-dev-log",
     "allow-dev-exit",
     "allow-ug-status",

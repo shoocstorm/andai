@@ -291,7 +291,7 @@ function Cap({ on, label }: { on: boolean; label: string }) {
 }
 
 const APPEARANCE: { mode: ThemeMode; label: string; icon: typeof Sun; blurb: string }[] = [
-  { mode: 'system', label: 'System', icon: Monitor, blurb: 'Follow macOS' },
+  { mode: 'system', label: 'System', icon: Monitor, blurb: 'Follow the system' },
   { mode: 'light', label: 'Light', icon: Sun, blurb: 'Bright workspace' },
   { mode: 'dark', label: 'Dark', icon: Moon, blurb: 'Command deck' },
 ];

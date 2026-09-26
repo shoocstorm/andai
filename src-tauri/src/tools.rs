@@ -174,11 +174,30 @@ pub fn plan(call: &ToolCall, slug: &str, docs: &Path) -> Result<Vec<String>, Str
 
 // ── execution ────────────────────────────────────────────────────────────
 
-/// Only what ug needs to find its data and model cache. Nothing inherited can
-/// point it at a remote embedder (`UG_*`, `OPENAI_*` and friends are dropped).
+/// What ug needs to find its data and model cache, and on Windows what any
+/// process needs to start (`SystemRoot`) and find the user's profile.
+#[cfg(not(windows))]
+const KEPT_ENV: &[&str] = &["HOME", "TMPDIR", "LANG", "UG_HOME", "UG_MODEL_CACHE", "XDG_CACHE_HOME"];
+#[cfg(windows)]
+const KEPT_ENV: &[&str] = &[
+    "SystemRoot", "SystemDrive", "windir", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "HOME", "APPDATA",
+    "LOCALAPPDATA", "TEMP", "TMP", "UG_HOME", "UG_MODEL_CACHE",
+];
+
+/// Only `KEPT_ENV` survives. Nothing inherited can point ug at a remote
+/// embedder (`UG_*`, `OPENAI_*` and friends are dropped).
 fn scrubbed(cmd: &mut Command) {
-    cmd.env_clear().env("PATH", "/usr/bin:/bin").env("NO_COLOR", "1").env("CLICOLOR", "0");
-    for key in ["HOME", "TMPDIR", "LANG", "UG_HOME", "UG_MODEL_CACHE", "XDG_CACHE_HOME"] {
+    cmd.env_clear().env("NO_COLOR", "1").env("CLICOLOR", "0");
+    #[cfg(not(windows))]
+    cmd.env("PATH", "/usr/bin:/bin");
+    #[cfg(windows)]
+    if let Some(root) = std::env::var_os("SystemRoot") {
+        let root = PathBuf::from(root);
+        if let Ok(path) = std::env::join_paths([root.join("System32"), root]) {
+            cmd.env("PATH", path);
+        }
+    }
+    for key in KEPT_ENV {
         if let Some(v) = std::env::var_os(key) {
             cmd.env(key, v);
         }

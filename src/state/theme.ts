@@ -1,6 +1,6 @@
 // Appearance: system / light / dark. The resolved theme is written to
 // <html data-theme> (tokens.css keys off it) and mirrored to the native
-// window so the macOS title bar and traffic lights match.
+// window so the native title bar matches.
 
 import { isTauri } from '@tauri-apps/api/core';
 import { create } from 'zustand';

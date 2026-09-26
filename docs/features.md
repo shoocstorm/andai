@@ -1,8 +1,8 @@
 # Andai — features
 
-Andai is a local-first **agentic RAG** agent for macOS. It answers from
-**your own knowledge bases**, and the language model runs **inside the app on
-your Mac**. Rather than pasting a few matching chunks into a prompt, the agent
+Andai is a local-first **agentic RAG** agent for macOS and Windows. It answers
+from **your own knowledge bases**, and the language model runs **inside the app
+on your computer**. Rather than pasting a few matching chunks into a prompt, the agent
 uses tools on your knowledge base: it searches, reads around a hit, outlines a
 file or follows a code symbol, then answers with citations. After a one-time
 model download nothing leaves the machine: no account, no API key, no cloud.
@@ -74,18 +74,18 @@ pasting in whatever one search returns:
   its options and probabilities, and each tool call with its arguments, the
   ug command that ran, timing and what it returned. **Copy trace** exports a
   turn as JSON.
-- **Read-only and on your Mac.** Every tool only reads the selected
+- **Read-only and on your computer.** Every tool only reads the selected
   knowledge base. Andai re-checks each call before running it, limits its
   time and output, and never lets a tool reach the network.
 
 ## Knowledge — your documents, as a knowledge graph · Available
 
 - **Drop files to ingest them:** PDF, Markdown, plain text, CSV, and source code
-  (TypeScript, JavaScript, Python, Java, Rust). Drag them from Finder onto the
-  window or use **Upload**.
-- **Local files only.** Knowledge bases are built from files on your Mac, and
+  (TypeScript, JavaScript, Python, Java, Rust). Drag them from Finder or File
+  Explorer onto the window or use **Upload**.
+- **Local files only.** Knowledge bases are built from files on your computer, and
   the agent searches only those. There are no remote or cloud sources.
-- **Indexed on your Mac by [ug](https://github.com/shoocstorm/ug)**, which
+- **Indexed on your computer by [ug](https://github.com/shoocstorm/ug)**, which
   splits documents along their structure (headings, pages, symbols), links the
   sections into a graph and embeds them locally. Live indexing progress is
   shown as it runs.
@@ -113,7 +113,7 @@ pasting in whatever one search returns:
 - Built-in catalog: **Qwen3 0.6B** (default, 639 MB), **Qwen3 1.7B**
   (1.1 GB, smarter and slower) and a tiny test model.
 - One-time download from Hugging Face with progress. After that the model loads
-  from the Mac's local cache: about 1.3 s for Qwen3 0.6B in our tests on an Apple Silicon Mac.
+  from the local cache: about 1.3 s for Qwen3 0.6B in our tests on an Apple Silicon Mac.
 - **Verified downloads.** Each model comes from a fixed Hugging Face commit and
   must match its recorded sha256 before it loads. This takes about 7 s for
   Qwen3 0.6B, once per download, shown as *Verifying…*. After upgrading, models
@@ -126,12 +126,13 @@ pasting in whatever one search returns:
 
 ## Workspace
 
-- **Appearance:** Light, Dark, or follow macOS (`Settings → Appearance`, or the
+- **Appearance:** Light, Dark, or follow the system (`Settings → Appearance`, or the
   sun/moon button in the top bar).
 - **Collapsible sidebar** (`⌘B`) and **hideable Execution Trace** (`⌘J`),
   both remembered.
 - **Keyboard shortcuts:** `⌘K` focus the input · `⌘1–5` switch screens ·
-  `⌘,` Settings · `Enter` send · `Shift+Enter` new line · `Esc` stop.
+  `⌘,` Settings · `Enter` send · `Shift+Enter` new line · `Esc` stop. On
+  Windows, use `Ctrl` instead of `⌘`; the app shows the right key.
 
 ## Workflows & tools · Preview
 
@@ -156,9 +157,11 @@ executed**; every action says it's simulated.
   and links show their real host and can only be copied, not opened. A
   document crafted to trick the model can't use either to send your text out.
 - **Only files you choose are read.** Andai ingests exactly the files you
-  drop or pick with **Upload**, nothing else on your Mac. Files over 100 MB are
+  drop or pick with **Upload**, nothing else on your computer. Files over 100 MB are
   refused.
-- Knowledge-base copies are readable only by your macOS user account.
+- Knowledge-base copies are readable only by your user account (on macOS,
+  owner-only permissions; on Windows, the permissions of your user profile
+  folder, which also let administrators read them).
 - **Documents can't take over the model.** Retrieved passages are sent as
   fenced, untrusted data that the model is told not to follow as
   instructions. The protections above hold even if a document fools the
@@ -168,19 +171,28 @@ executed**; every action says it's simulated.
 - The full picture, including what isn't protected yet, is in
   [security.md](security.md).
 - No telemetry, analytics or accounts.
-- Your data lives in `~/Library/Application Support/dev.andai.agent/`
-  (knowledge-base copies), `~/.ug/andai-*` (knowledge graphs) and the app's
-  own storage (chats, settings, cached models).
+- Your data lives in the app data folder (knowledge-base copies:
+  `~/Library/Application Support/dev.andai.agent/` on macOS,
+  `%APPDATA%\dev.andai.agent\` on Windows), in `.ug/andai-*` in your home
+  folder (knowledge graphs) and in the app's own storage (chats, settings,
+  cached models).
 
 ## Requirements & known limits
 
 - **macOS**, tested on macOS 26 (Apple Silicon). The release pipeline also
   builds for Intel Macs; that build hasn't been tested on Intel hardware yet.
-- Knowledge bases need the **ug** CLI installed (`~/.local/bin/ug` or on your
-  PATH).
-- Builds are currently **unsigned**: on first launch, right-click Andai.app → Open.
+- **Windows 10/11 (x64)**: the release pipeline builds an installer, and the
+  test suite runs on Windows in CI. It hasn't been tested on a Windows PC yet.
+  Needs the Microsoft Edge WebView2 runtime (preinstalled on Windows 11); the
+  installer doesn't download it for you.
+- Knowledge bases need the **ug** CLI installed (on your PATH, or in
+  `.local/bin`, `.cargo/bin` or `.ug/bin` in your home folder).
+- Builds are currently **unsigned**: on first launch on macOS, right-click
+  Andai.app → Open; on Windows, choose *More info* → *Run anyway* if
+  SmartScreen warns.
 - Andai uses local port **14230** internally. If another app holds it, Andai
   shows an error and doesn't start, rather than loading something it doesn't
-  own. Quit the other app (`lsof -i :14230` shows which one) and reopen Andai.
+  own. Quit the other app (`lsof -i :14230` on macOS or
+  `netstat -ano | findstr :14230` on Windows shows which one) and reopen Andai.
 - Small on-device models are fast and private but less capable than large
   cloud models. Grounding answers in a knowledge base helps a lot.

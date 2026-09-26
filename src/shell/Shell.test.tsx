@@ -5,6 +5,7 @@ import { useLayout } from '../state/layout';
 import { initTheme, useTheme } from '../state/theme';
 import { useUi } from '../state/ui';
 import { Sidebar, StatusBar, TopBar } from './Shell';
+import { shortcut } from '../lib/platform';
 
 beforeEach(() => {
   useLayout.setState({ navCollapsed: false, traceOpen: true });
@@ -65,7 +66,7 @@ describe('Sidebar collapse', () => {
     useLayout.setState({ navCollapsed: true });
     render(<Sidebar />);
     const persona = screen.getByRole('button', { name: 'Persona' });
-    expect(persona).toHaveAttribute('title', 'Persona (⌘4)');
+    expect(persona).toHaveAttribute('title', `Persona (${shortcut('4')})`);
     await user.click(persona);
     expect(useUi.getState().route).toBe('persona');
   });

@@ -4,7 +4,8 @@
 // Memory64 and JSPI features wllama's default build needs. wllama detects that
 // itself (`needCompat()`) and switches to the compat build we point it at via
 // `setCompat` — served from public/wllama/, never the CDN. In Chromium (plain
-// `vite` in a browser) the default build runs and `setCompat` is ignored.
+// `vite` in a browser, and WebView2 on Windows) the default build runs and
+// `setCompat` is ignored.
 //
 // Models are cached in OPFS by wllama's ModelManager, so each downloads once.
 // Every download is checked against the catalog's pinned size and sha256

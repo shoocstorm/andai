@@ -6,7 +6,7 @@ on:
 
 jobs:
   check:
-    # WKWebView + Metal-only paths: build and test on macOS
+    # WKWebView paths: build and test on macOS
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +37,30 @@ jobs:
         run: bun run perf bundle --no-build
       # test:ug and test:e2e need the ug CLI, an embedding model and a model
       # download; run them locally or on a self-hosted runner (see AGENTS.md §6).
+
+  # Windows (WebView2) ships too: the same suite on Windows catches Unix-only
+  # paths, env and permissions before a release does. e2e runs locally only.
+  check-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run test:rust
+      - run: bun run lint:rust
 
   # Known vulnerabilities in shipped dependencies fail the build (AGENTS.md §9).
   # Separate job: it needs the network, and a new advisory shouldn't hide test results.

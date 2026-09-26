@@ -31,13 +31,14 @@ import { useLayout } from '../state/layout';
 import { nextMode, useTheme } from '../state/theme';
 import { useUi, type Route } from '../state/ui';
 import { Modal } from '../components/ui';
+import { shortcut } from '../lib/platform';
 
 const NAV: { route: Route; label: string; icon: ReactNode; key: string }[] = [
-  { route: 'command', label: 'Command Center', icon: <SquareTerminal size={19} />, key: '⌘1' },
-  { route: 'workflows', label: 'Workflows', icon: <Workflow size={19} />, key: '⌘2' },
-  { route: 'knowledge', label: 'Knowledge', icon: <Database size={19} />, key: '⌘3' },
-  { route: 'persona', label: 'Persona', icon: <UserRoundCog size={19} />, key: '⌘4' },
-  { route: 'tools', label: 'Tools', icon: <Wrench size={19} />, key: '⌘5' },
+  { route: 'command', label: 'Command Center', icon: <SquareTerminal size={19} />, key: shortcut('1') },
+  { route: 'workflows', label: 'Workflows', icon: <Workflow size={19} />, key: shortcut('2') },
+  { route: 'knowledge', label: 'Knowledge', icon: <Database size={19} />, key: shortcut('3') },
+  { route: 'persona', label: 'Persona', icon: <UserRoundCog size={19} />, key: shortcut('4') },
+  { route: 'tools', label: 'Tools', icon: <Wrench size={19} />, key: shortcut('5') },
 ];
 
 export function useCoreStatus() {
@@ -156,11 +157,11 @@ export function Sidebar() {
           aria-label="Settings"
           aria-current={route === 'settings' ? 'page' : undefined}
           onClick={() => go('settings')}
-          {...tip('Settings', '⌘,')}
+          {...tip('Settings', shortcut(','))}
         >
           <Settings size={19} />
           <span className="nav-label">Settings</span>
-          <span className="kbd">⌘,</span>
+          <span className="kbd">{shortcut(',')}</span>
         </button>
         <button className="nav-item" aria-label="Support" onClick={() => setAbout(true)} {...tip('Support')}>
           <HelpCircle size={19} />
@@ -171,11 +172,11 @@ export function Sidebar() {
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           aria-expanded={!collapsed}
           onClick={toggleNav}
-          {...tip('Expand sidebar', '⌘B')}
+          {...tip('Expand sidebar', shortcut('B'))}
         >
           {collapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}
           <span className="nav-label">Collapse</span>
-          <span className="kbd">⌘B</span>
+          <span className="kbd">{shortcut('B')}</span>
         </button>
       </nav>
     </aside>
@@ -282,11 +283,11 @@ export function AboutModal() {
         Shortcuts
       </div>
       <div className="muted" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px 16px', fontSize: 13 }}>
-        <span className="kbd-hint">⌘K</span> Focus the command input
-        <span className="kbd-hint">⌘1–5</span> Switch screens
-        <span className="kbd-hint">⌘B</span> Collapse / expand the sidebar
-        <span className="kbd-hint">⌘J</span> Show / hide the Execution Trace
-        <span className="kbd-hint">⌘,</span> Settings &amp; models
+        <span className="kbd-hint">{shortcut('K')}</span> Focus the command input
+        <span className="kbd-hint">{shortcut('1–5')}</span> Switch screens
+        <span className="kbd-hint">{shortcut('B')}</span> Collapse / expand the sidebar
+        <span className="kbd-hint">{shortcut('J')}</span> Show / hide the Execution Trace
+        <span className="kbd-hint">{shortcut(',')}</span> Settings &amp; models
         <span className="kbd-hint">Esc</span> Stop generating
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 24, gap: 10 }}>

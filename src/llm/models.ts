@@ -53,7 +53,7 @@ export const MODELS: ModelDef[] = [
     url: HF('unsloth/Qwen3-1.7B-GGUF', 'd7f544eead698dbd1f15126ef60b45a1e1933222', 'Qwen3-1.7B-Q4_K_M.gguf'),
     sha256: 'b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897',
     legacyUrls: [MAIN('unsloth/Qwen3-1.7B-GGUF', 'Qwen3-1.7B-Q4_K_M.gguf')],
-    note: 'Noticeably smarter, about half the speed. Best answers on a fast Mac.',
+    note: 'Noticeably smarter, about half the speed. Best answers on a fast computer.',
     thinking: true,
     n_ctx: 4096,
     decider: true,

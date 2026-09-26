@@ -4,7 +4,7 @@
 > Users: see **[docs/features.md](docs/features.md)** and the product site in **[docs/andai-website/](docs/andai-website/index.html)**.
 
 Andai is a desktop AI agent that answers from **your own knowledge bases**, and the
-model runs on your Mac. It does *agentic* RAG: instead of pasting the top-k
+model runs on your computer (macOS or Windows). It does *agentic* RAG: instead of pasting the top-k
 chunks into a prompt, the agent works its knowledge base with tools. It searches,
 reads the lines around a hit, outlines a file, or follows a code symbol to its
 callers until it has enough evidence. Then it writes an answer that cites every
@@ -69,20 +69,22 @@ Andai (Tauri 2)
 ```bash
 bun install              # also copies the wllama wasm builds into public/wllama/
 bun run tauri dev        # desktop app with hot reload
-bun run tauri build      # → src-tauri/target/release/bundle/macos/Andai.app
+bun run tauri build      # macOS → src-tauri/target/release/bundle/macos/Andai.app
+                         # Windows: bun run tauri build --bundles nsis → bundle/nsis/*-setup.exe
 ```
 
 Requirements:
-- **Rust**, plus Xcode command-line tools.
+- **Rust**, plus Xcode command-line tools (macOS) or the MSVC build tools (Windows).
+- **Windows only:** the Microsoft Edge **WebView2** runtime (preinstalled on Windows 11). The installer doesn't download it, because Andai makes no network requests besides model downloads.
 - **Bun 1.3+**, which is the package manager and script runner. Plain `bun test` is Bun's own runner, so use `bun run test`.
 - **Node 22+**, only for Vitest (jsdom doesn't run on Bun's runtime). Everything else runs on Bun.
-- **`ug`**, on `PATH` or in `~/.local/bin`, `~/.cargo/bin`, `/opt/homebrew/bin` or `/usr/local/bin`. Finder-launched apps don't inherit the shell PATH, so `ug.rs` probes these locations.
+- **`ug`**, on `PATH` or in `~/.local/bin`, `~/.cargo/bin` or `~/.ug/bin` (on Windows: `ug.exe` in the same folders under `%USERPROFILE%`), or on macOS in `/opt/homebrew/bin` or `/usr/local/bin`. Finder-launched apps don't inherit the shell PATH, so `ug.rs` probes these locations.
 
 First launch:
 1. In **Settings → Models**, load **Qwen3 0.6B**. It is a 639 MB one-time download, cached in the webview's OPFS; a cached load takes about 1 s.
 2. In **Knowledge**, create a knowledge base and drop in PDFs, Markdown, TXT, CSV or source files.
 3. Chat in **Command Center**. The knowledge-base chip in the composer picks which KB the agent works from.
-4. Optional: **Tools** (`⌘5`) shows every tool and its policy; **Settings → Decision model** loads a second model (e.g. Qwen3 1.7B) to make the agent's choices.
+4. Optional: **Tools** (`⌘5`, `Ctrl+5` on Windows) shows every tool and its policy; **Settings → Decision model** loads a second model (e.g. Qwen3 1.7B) to make the agent's choices.
 
 ## What's real and what's simulated
 
@@ -115,7 +117,7 @@ before loading, and `bun run audit` (JS + RustSec) gates CI and releases.
 
 gpuix renders with Bun. wllama's default wasm needs **Memory64 + JSPI**, which Bun's JavaScriptCore lacks, and its compat build crashed mid-generation under Bun. So the UI moved to a webview.
 
-On macOS, Tauri uses **WKWebView**, which is the Safari engine:
+On macOS, Tauri uses **WKWebView**, which is the Safari engine. (On Windows it uses **WebView2**, which is Chromium: wllama runs its default build there, and the loopback server below provides isolation the same way.)
 
 - **Compat build.** wllama detects the missing features (`needCompat()`), and `engine.ts` points `setCompat()` at the bundled `@wllama/wllama-compat` files. Measured on an M-series Mac, Qwen3 0.6B runs at about **31 tok/s** on the WebGPU backend with 4 threads.
 - **Cross-origin isolation.** Multi-threading needs `SharedArrayBuffer`, which needs COOP/COEP. WebKit **ignores isolation on custom schemes**: `tauri://` sends the headers, but `crossOriginIsolated` stays false. Release builds therefore serve the UI from `http://localhost:14230` through Andai's own loopback server (`src-tauri/src/ui_server.rs`), which adds the headers. It binds the port before any window exists and refuses to start if another process holds it. Dev gets the same headers from Vite.
@@ -127,7 +129,7 @@ On macOS, Tauri uses **WKWebView**, which is the Safari engine:
 ```bash
 bun run check            # typecheck + Vitest + Rust tests + clippy — run before calling anything done
 bun run test:ug          # Rust ↔ real ug round trip
-bun run test:e2e         # the real app in WKWebView: ingest fixtures → retrieve → grounded answer
+bun run test:e2e         # the real app in WKWebView (macOS only): ingest fixtures → retrieve → grounded answer
 bun run test:e2e:release # the same against the release binary
 bun run audit            # known vulnerabilities in JS + Rust dependencies (CI and releases run it)
 bun run perf             # bundle size + hot-path benchmarks vs. perf/baseline.json (docs/performance.md)
@@ -145,8 +147,8 @@ bun run release                # bump, check, tag, push → GitHub Actions build
 ```
 
 Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which verifies
-the tag, builds `Andai.app` and a `.dmg` for Apple Silicon and Intel, and
-publishes a GitHub Release with checksums. For details, see [AGENTS.md](AGENTS.md) §7.
+the tag, builds `Andai.app` and a `.dmg` for Apple Silicon and Intel plus a
+Windows x64 installer (`Andai_X.Y.Z_x64-setup.exe`), and publishes a GitHub Release with checksums. For details, see [AGENTS.md](AGENTS.md) §7.
 
 ## Appearance
 
@@ -156,5 +158,7 @@ defined once per theme. A guard test fails the build on stray color literals and
 checks WCAG-AA contrast for the light theme.
 
 ## Shortcuts
+
+On Windows, use `Ctrl` wherever this says `⌘`.
 
 `⌘K` focuses the composer · the top-bar sun/moon button cycles the theme · `⌘1–5` switch screens · `⌘B` collapses the sidebar · `⌘J` shows/hides the Execution Trace · `⌘,` opens Settings · `Enter` sends · `Shift+Enter` adds a newline · `Esc` stops generating.

@@ -1,6 +1,7 @@
 # AGENTS.md — Andai engineering guide
 
-Andai is a **local-first agentic RAG agent**, shipped as a desktop app: it
+Andai is a **local-first agentic RAG agent**, shipped as a desktop app for
+macOS and Windows: it
 answers from the user's knowledge bases by using tools (read-only ug commands,
 `agent/tools/`), chosen at each step by the local model. It is a product, not a demo:
 every change ships to users who trust it with their documents. This file is the
@@ -37,7 +38,8 @@ the product.
    Hugging Face. Adding any other outbound request needs an explicit product
    decision recorded in this file.
 5. **User data is sacred.** Never delete, overwrite, or migrate user data
-   (`~/Library/Application Support/dev.andai.agent/`, `~/.ug/andai-*`, webview
+   (`~/Library/Application Support/dev.andai.agent/` or
+   `%APPDATA%\dev.andai.agent\` on Windows, `~/.ug/andai-*`, webview
    storage) without an explicit user action and a confirm step. Tests must
    never touch it: the e2e harness uses `ANDAI_DATA_DIR` and restores webview
    state (see §6).
@@ -79,6 +81,7 @@ Andai/
 │  ├─ state/                 zustand stores: chat, kb, tools, persona, theme, layout, ui (persisted where noted)
 │  ├─ screens/, shell/, components/
 │  ├─ theme/tokens.css       ALL colors, both themes
+│  ├─ lib/platform.ts        macOS vs Windows in the UI: shortcut labels (⌘ / Ctrl), traffic-light room
 │  ├─ mock/workflows.ts      data for the simulated Workflows screens
 │  └─ smoke.ts               in-webview test harness (VITE_SMOKE)
 ├─ src-tauri/
@@ -139,7 +142,28 @@ level defaults to *Ask*.
 - **GUI apps don't inherit the shell PATH.** `ug_path()` probes PATH, then
   `~/.local/bin`, `~/.cargo/bin`, `~/.ug/bin`, `/opt/homebrew/bin` and
   `/usr/local/bin`. The release e2e launches with `PATH=/usr/bin:/bin` to prove
-  this.
+  this. On Windows it looks for `ug.exe`, and home is `USERPROFILE` (Windows
+  usually has no `HOME`); the Homebrew paths are skipped (`ug_candidates`).
+- **Windows (WebView2) is Chromium**, so wllama runs its default build there,
+  and the macOS-only WebKit facts in this list don't apply. It builds and its
+  unit tests run in CI (`check-windows`), but the e2e harness drives
+  WKWebView only, so **the Windows app is untested end to end** until someone
+  runs it on a Windows PC. Say so wherever Windows support is claimed (§8).
+- **Tool calls on Windows need `SystemRoot`.** `tools::scrubbed` clears the
+  environment; on Windows it keeps `SystemRoot`, the profile variables and
+  `TEMP`, and sets `PATH` to `System32`, or child processes may fail to start.
+- **Windows file permissions aren't tightened.** `create_private_dir` /
+  `private_file` set `0700`/`0600` on Unix only. On Windows, app data lives in
+  `%APPDATA%` and inherits the profile ACL (user, SYSTEM, Administrators).
+  Explicit ACLs would need a native-code dependency (§1.10).
+- **The Windows installer doesn't fetch WebView2.** Tauri's default runs
+  Microsoft's bootstrapper, an outbound request (§1.4), so
+  `bundle.windows.webviewInstallMode` is `skip` (`security.test.ts`). Windows
+  11 ships WebView2; the docs list it as a requirement.
+- **Cross-checking Windows from a Mac:** `cargo clippy --target
+  x86_64-pc-windows-msvc` needs `llvm-rc` for the app's resource file. A stub
+  `llvm-rc` on `PATH` that touches its `/fo` output is enough for clippy (it
+  doesn't link); it passed with `-D warnings` on 2026-09-26.
 - **ug's `search` returns a document node and its sections side by side.**
   `dedupeHits` keeps the most specific one, so the prompt doesn't repeat text.
 - **Qwen3 emits `<think></think>` even with thinking off.** `splitThink` treats
@@ -411,9 +435,10 @@ Releases are **tag-driven**. Pushing a `vX.Y.Z` tag runs
 1. **verify:** the tag must equal the version in every manifest, the full
    check suite must pass, and `bun run audit` must find no known
    vulnerability (§9).
-2. **build:** `Andai.app` + `.dmg` for Apple Silicon and Intel, with
-   `.sha256` checksums. It also asserts that the built `Info.plist` reports the
-   tag's version.
+2. **build:** `Andai.app` + `.dmg` for Apple Silicon and Intel, and an NSIS
+   installer (`Andai_X.Y.Z_x64-setup.exe`) for Windows, with `.sha256`
+   checksums. It asserts that the built `Info.plist` and the installer name
+   report the tag's version.
 3. **publish:** a GitHub Release whose notes are the annotated tag's message.
 
 **Always cut releases with the script.** Never hand-edit versions or push tags
@@ -459,11 +484,14 @@ Code signing: builds are **unsigned** until the repository has the secrets
 `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` and `APPLE_SIGNING_IDENTITY`
 (add `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID` for notarization). The
 workflow detects them automatically, and the release notes say whether a
-build is unsigned.
+build is unsigned. Windows builds are always unsigned for now (no certificate
+is configured); the release notes say so.
 
 Before announcing a release, also run `bun run test:e2e:release` locally
 (CI can't run it: it needs ug and a model). Then launch the downloaded `.dmg`
-build, ask a grounded question and switch themes.
+build, ask a grounded question and switch themes. Do the same with the
+Windows installer on a Windows PC when one is available, and record the
+result in §2 and `docs/features.md`.
 
 Known constraints to keep in mind: the release UI needs port **14230** free.
 If another process holds it, Andai refuses to start and shows why, and never
@@ -569,7 +597,8 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Owned loopback server, Host check, hardening headers | `ui_server.rs` | Rust unit tests (squatted port, 403, headers, real sockets) |
 | File grants | `grants.rs`, `ug::add_sources` | Rust unit tests (ungranted, consumed once, symlink); e2e |
 | ug argument hardening, budgets clamped | `ug::search_query`, `ug::search_limits` | Rust unit tests |
-| Private files (0700 dirs / 0600 files), 100 MB cap, absolute PATH only | `ug.rs` | Rust unit tests |
+| Private files (0700 dirs / 0600 files; Unix only, see §2), 100 MB cap, absolute PATH only | `ug.rs` | Rust unit tests |
+| Windows installer makes no network request (WebView2 not bootstrapped) | `tauri.conf.json` | `security.test.ts` |
 | `dev_log` / `dev_exit` need `ANDAI_SMOKE=1` | `lib.rs` | `security.test.ts` |
 | Webview holds no fs/shell/http/opener/dialog permission | `capabilities/default.json` | `security.test.ts` |
 | Model downloads pinned to a commit and verified (size + sha256) before load; mismatch → removed | `llm/models.ts`, `llm/integrity.ts`, `engine.loadModel` | `integrity.test.ts` (FIPS vectors, tamper), `engine.test.ts` (gate), `models.test.ts` (pinning); e2e logs the check |

@@ -1,6 +1,6 @@
 # Performance baselines
 
-Andai runs the model, the retrieval and the UI on your Mac, so performance is
+Andai runs the model, the retrieval and the UI on your computer, so performance is
 part of the product. A slower answer or a bigger bundle is a regression like
 any other bug. This page covers what we measure, the current baseline, how
 much drift is allowed, and how to update the baseline when a change makes

@@ -109,7 +109,7 @@ export function Tools() {
                 write, delete, or reach the network.
               </li>
               <li>
-                <b>Checked on this Mac.</b> The app re-validates every call before ug runs it, stops it after 20 s and caps
+                <b>Checked on this computer.</b> The app re-validates every call before ug runs it, stops it after 20 s and caps
                 its output.
               </li>
               <li>

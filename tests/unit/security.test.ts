@@ -16,7 +16,7 @@ const sources = (d: string) => new Set((csp[d] ?? '').split(/\s+/).filter(Boolea
 /** Every host the webview may talk to. Model downloads only: Hugging Face and its CDN (§2). */
 const CONNECT_ALLOWLIST = ["'self'", 'ipc:', 'http://ipc.localhost', 'https://huggingface.co', 'https://*.hf.co'];
 /** Plugin permissions the webview holds besides app commands (`allow-*`). */
-const PERMISSION_ALLOWLIST = ['core:default', 'core:window:allow-set-theme'];
+const PERMISSION_ALLOWLIST = ['core:default', 'core:window:allow-set-theme', 'core:window:allow-start-dragging'];
 /** The only file outside the harness that may name a remote URL. */
 const URL_ALLOWLIST = ['llm/models.ts'];
 /** The e2e harness names example.com to prove it gets blocked. */
@@ -49,6 +49,13 @@ describe('content security policy', () => {
 
   it('lets Tauri add nonces everywhere except style-src (inline style attributes need it)', () => {
     expect(conf.app.security.dangerousDisableAssetCspModification).toEqual(['style-src']);
+  });
+});
+
+describe('installers', () => {
+  it('never download anything: the Windows installer does not fetch WebView2 (§1.4)', () => {
+    // Tauri's default runs Microsoft's WebView2 bootstrapper, an outbound request.
+    expect(conf.bundle.windows?.webviewInstallMode?.type).toBe('skip');
   });
 });
 

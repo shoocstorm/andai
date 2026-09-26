@@ -66,7 +66,7 @@ jobs:
       # No release ships with a known vulnerability (AGENTS.md §9).
       - run: bun run audit
 
-  # ── 2. build the macOS app for both architectures
+  # ── 2. build the macOS app for both architectures (Windows: build-windows)
   build:
     needs: verify
     strategy:
@@ -157,9 +157,60 @@ jobs:
           name: signed-${{ matrix.arch }}
           path: signed-${{ matrix.arch }}.txt
 
+  # ── 2b. build the Windows installer (x64, NSIS)
+  build-windows:
+    needs: verify
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: release-windows-x64
+
+      - run: bun install --frozen-lockfile
+
+      # Unsigned: no Windows code-signing certificate is configured yet, so
+      # SmartScreen warns on first launch (the release notes say how to proceed).
+      - name: Build the installer
+        run: bun run tauri build --bundles nsis
+
+      - name: Package and checksum
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          # NSIS names the installer after the bundle version: it must be the tag's
+          src="src-tauri/target/release/bundle/nsis/Andai_${VERSION}_x64-setup.exe"
+          [ -f "$src" ] || { echo "missing $src"; ls src-tauri/target/release/bundle/nsis; exit 1; }
+          cp "$src" "out/Andai_${VERSION}_x64-setup.exe"
+          cd out
+          for f in *; do sha256sum "$f" > "$f.sha256"; done
+          ls -la
+          cat *.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: andai-windows-x64
+          path: out/*
+          if-no-files-found: error
+
   # ── 3. publish the GitHub Release
   publish:
-    needs: [verify, build]
+    needs: [verify, build, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -182,17 +233,20 @@ jobs:
             echo
             echo "### Downloads"
             echo
-            echo "| Mac | File |"
+            echo "| Platform | File |"
             echo "|---|---|"
-            echo "| Apple Silicon (M1+) | \`Andai_${{ needs.verify.outputs.version }}_aarch64.dmg\` |"
-            echo "| Intel | \`Andai_${{ needs.verify.outputs.version }}_x86_64.dmg\` |"
+            echo "| macOS, Apple Silicon (M1+) | \`Andai_${{ needs.verify.outputs.version }}_aarch64.dmg\` |"
+            echo "| macOS, Intel | \`Andai_${{ needs.verify.outputs.version }}_x86_64.dmg\` |"
+            echo "| Windows 10/11, x64 | \`Andai_${{ needs.verify.outputs.version }}_x64-setup.exe\` |"
             echo
             if grep -q false artifacts/signed-*/signed-*.txt 2>/dev/null; then
               echo "> **Unsigned build.** On first launch, right-click Andai.app → Open (or run"
               echo "> \`xattr -dr com.apple.quarantine /Applications/Andai.app\`)."
               echo
             fi
-            echo "Tested on macOS 26 (Apple Silicon); older versions are untested. Knowledge bases need the [\`ug\`](https://github.com/shoocstorm/ug) CLI."
+            echo "> **Windows builds are unsigned.** SmartScreen may warn on first launch: choose *More info* → *Run anyway*."
+            echo
+            echo "Tested on macOS 26 (Apple Silicon); older versions are untested. The Windows build is built and unit-tested in CI. Knowledge bases need the [\`ug\`](https://github.com/shoocstorm/ug) CLI."
             echo "Each asset has a \`.sha256\` alongside it (\`shasum -a 256 -c <file>.sha256\`)."
           } > notes.md
           cat notes.md

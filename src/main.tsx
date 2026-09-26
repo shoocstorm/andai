@@ -16,8 +16,11 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { runE2E, runSmoke } from './smoke';
+import { isMac } from './lib/platform';
 import { initTheme } from './state/theme';
 
+// app.css keeps the top bar clear of the macOS traffic lights.
+document.documentElement.dataset.platform = isMac ? 'mac' : 'other';
 initTheme();
 
 const smoke = import.meta.env.VITE_SMOKE as string | undefined;

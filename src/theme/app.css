@@ -135,7 +135,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 0 18px 0 88px; /* traffic lights live in the first 80px */
+  padding: 0 18px;
   border-bottom: 1px solid var(--border);
   background: var(--topbar-bg);
   backdrop-filter: blur(14px);
@@ -161,6 +161,10 @@ button:disabled {
   font: 500 12px/1 var(--font-mono);
   letter-spacing: 0.18em;
   margin-left: 8px;
+}
+/* the macOS traffic lights live in the first 80px */
+:root[data-platform='mac'] .topbar {
+  padding-left: 88px;
 }
 .topbar .divider {
   width: 1px;
@@ -306,6 +310,17 @@ button:disabled {
   font: 500 10px/1 var(--font-mono);
   color: var(--text-4);
   letter-spacing: 0.08em;
+  flex-shrink: 0;
+}
+/* "Ctrl+1" is three characters wider than "⌘1": keep the row on one line */
+:root:not([data-platform='mac']) .nav-item {
+  gap: 11px;
+}
+:root:not([data-platform='mac']) .nav-item .kbd {
+  letter-spacing: 0;
+}
+.nav-item > svg {
+  flex-shrink: 0;
 }
 .nav-section {
   padding: 18px 18px 8px;

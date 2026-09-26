@@ -7,7 +7,7 @@
 //!
 //! Every ug call shells out to the CLI with `--json` where it exists. GUI apps
 //! on macOS don't inherit the login shell's PATH, so `ug_path()` also probes
-//! the usual install locations.
+//! the usual install locations (per platform: `ug_candidates`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -125,16 +125,37 @@ fn absolute_dirs(dirs: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
     dirs.into_iter().filter(|d| d.is_absolute()).collect()
 }
 
-pub(crate) fn ug_path() -> Option<PathBuf> {
-    let from_path = std::env::var_os("PATH")
-        .map(|p| absolute_dirs(std::env::split_paths(&p)).into_iter().map(|d| d.join("ug")).collect::<Vec<_>>())
+#[cfg(windows)]
+const UG_EXE: &str = "ug.exe";
+#[cfg(not(windows))]
+const UG_EXE: &str = "ug";
+
+/// Where the user's home is: `HOME` on macOS, `USERPROFILE` on Windows (which
+/// usually has no `HOME`).
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let var = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+    #[cfg(not(windows))]
+    let var = std::env::var_os("HOME");
+    var.map(PathBuf::from).filter(|h| h.is_absolute())
+}
+
+/// Every place `ug` may live, in order: the absolute PATH entries, then the
+/// per-user install dirs, then (macOS) Homebrew and /usr/local.
+fn ug_candidates(path_var: Option<&std::ffi::OsStr>, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = path_var
+        .map(|p| absolute_dirs(std::env::split_paths(p)).into_iter().map(|d| d.join(UG_EXE)).collect())
         .unwrap_or_default();
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let fallbacks = [".local/bin/ug", ".cargo/bin/ug", ".ug/bin/ug"]
-        .iter()
-        .filter_map(|rel| home.as_ref().map(|h| h.join(rel)));
-    let system = ["/opt/homebrew/bin/ug", "/usr/local/bin/ug"].map(PathBuf::from);
-    from_path.into_iter().chain(fallbacks).chain(system).find(|p| p.is_file())
+    if let Some(h) = home {
+        out.extend([".local", ".cargo", ".ug"].map(|d| h.join(d).join("bin").join(UG_EXE)));
+    }
+    #[cfg(not(windows))]
+    out.extend(["/opt/homebrew/bin/ug", "/usr/local/bin/ug"].map(PathBuf::from));
+    out
+}
+
+pub(crate) fn ug_path() -> Option<PathBuf> {
+    ug_candidates(std::env::var_os("PATH").as_deref(), home_dir().as_deref()).into_iter().find(|p| p.is_file())
 }
 
 fn ug() -> Result<Command, String> {
@@ -707,8 +728,23 @@ mod tests {
 
     #[test]
     fn relative_path_entries_are_not_trusted_for_ug() {
-        let dirs = [PathBuf::from("."), PathBuf::from("bin"), PathBuf::from("/usr/bin")];
-        assert_eq!(absolute_dirs(dirs), vec![PathBuf::from("/usr/bin")]);
+        let abs = std::env::temp_dir();
+        let dirs = [PathBuf::from("."), PathBuf::from("bin"), abs.clone()];
+        assert_eq!(absolute_dirs(dirs), vec![abs]);
+    }
+
+    #[test]
+    fn ug_is_looked_up_on_path_then_in_the_home_install_dirs() {
+        let a = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let path = std::env::join_paths([PathBuf::from("rel"), a.path().to_path_buf()]).unwrap();
+        let c = ug_candidates(Some(&path), Some(home.path()));
+        assert_eq!(c[0], a.path().join(UG_EXE), "PATH first, relative entries skipped");
+        assert_eq!(c[1], home.path().join(".local").join("bin").join(UG_EXE));
+        assert!(c.contains(&home.path().join(".cargo").join("bin").join(UG_EXE)));
+        assert!(c.iter().all(|p| p.is_absolute()));
+        #[cfg(windows)]
+        assert!(c.iter().all(|p| p.extension().is_some_and(|e| e == "exe")));
     }
 
     #[test]

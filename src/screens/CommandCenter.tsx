@@ -38,6 +38,7 @@ import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
 import { AgentStepCard, ApprovalCard, CopyTraceButton, ToolChips } from './AgentTrace';
 import { pickFiles } from './Knowledge';
+import { shortcut } from '../lib/platform';
 
 export const composerRef: { current: HTMLTextAreaElement | null } = { current: null };
 
@@ -110,7 +111,7 @@ function HubHeader({ latest }: { latest?: Message }) {
         className={`icon-btn cc-trace-toggle${traceOpen ? ' on' : ''}`}
         aria-label={traceOpen ? 'Hide execution trace' : 'Show execution trace'}
         aria-pressed={traceOpen}
-        title={`${traceOpen ? 'Hide' : 'Show'} execution trace (⌘J)`}
+        title={`${traceOpen ? 'Hide' : 'Show'} execution trace (${shortcut('J')})`}
         onClick={toggleTrace}
       >
         {traceOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
@@ -360,7 +361,7 @@ function EmptyHub() {
                 {loading
                   ? progress?.phase
                   : cached[def.url]
-                    ? 'Cached on this Mac — loads in about a second.'
+                    ? 'Cached on this computer — loads in about a second.'
                     : `${def.size} one-time download from Hugging Face, then fully offline.`}
               </div>
             </div>
