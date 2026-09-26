@@ -196,7 +196,7 @@ fn run_json(mut cmd: Command) -> Result<Value, String> {
 
 /// Knowledge-base folders hold the user's documents: owner-only (0700).
 /// Existing folders keep their permissions; only new ones are created private.
-fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -205,7 +205,7 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 /// Opens `path` for writing, creating it owner-only (0600) if it is new.
-fn private_file(path: &Path) -> std::io::Result<fs::File> {
+pub(crate) fn private_file(path: &Path) -> std::io::Result<fs::File> {
     let mut opts = fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -217,16 +217,21 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     private_file(path)?.write_all(bytes)
 }
 
-/// `ANDAI_DATA_DIR` relocates all knowledge-base files — the e2e runner points
-/// it at a temp dir so tests never touch a user's real knowledge bases.
-fn kb_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let base = match std::env::var_os("ANDAI_DATA_DIR") {
+/// A private folder under app data. `ANDAI_DATA_DIR` relocates all of it
+/// (knowledge bases, Laya checkpoints): the e2e runner points it at a temp dir
+/// so tests never touch a user's real data.
+pub(crate) fn data_dir(app: &AppHandle, parts: &[&str]) -> Result<PathBuf, String> {
+    let mut dir = match std::env::var_os("ANDAI_DATA_DIR") {
         Some(dir) => PathBuf::from(dir),
         None => app.path().app_data_dir().map_err(|e| e.to_string())?,
     };
-    let dir = base.join("kb");
+    dir.extend(parts);
     create_private_dir(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
+}
+
+fn kb_root(app: &AppHandle) -> Result<PathBuf, String> {
+    data_dir(app, &["kb"])
 }
 
 /// Slugs become directory and ug project names, so only `[a-z0-9-]` gets through

@@ -8,7 +8,10 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = join(__dirname, '../..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
-const rustFiles = readdirSync(join(ROOT, 'src-tauri/src')).map((f) => read(`src-tauri/src/${f}`));
+const rustFiles = readdirSync(join(ROOT, 'src-tauri/src'), { recursive: true })
+  .map(String)
+  .filter((f) => f.endsWith('.rs'))
+  .map((f) => read(`src-tauri/src/${f}`));
 
 const defined = new Set(
   rustFiles.flatMap((src) => [...src.matchAll(/#\[tauri::command\]\s*pub(?:\(crate\))?\s*(?:async\s+)?fn\s+(\w+)|#\[tauri::command\]\s*(?:async\s+)?fn\s+(\w+)/g)].map((m) => m[1] ?? m[2])),

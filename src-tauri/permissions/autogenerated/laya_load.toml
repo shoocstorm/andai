@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-laya-load"
+description = "Enables the laya_load command without any pre-configured scope."
+commands.allow = ["laya_load"]
+
+[[permission]]
+identifier = "deny-laya-load"
+description = "Denies the laya_load command without any pre-configured scope."
+commands.deny = ["laya_load"]

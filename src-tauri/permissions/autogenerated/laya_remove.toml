@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-laya-remove"
+description = "Enables the laya_remove command without any pre-configured scope."
+commands.allow = ["laya_remove"]
+
+[[permission]]
+identifier = "deny-laya-remove"
+description = "Denies the laya_remove command without any pre-configured scope."
+commands.deny = ["laya_remove"]

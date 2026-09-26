@@ -23,6 +23,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      # MLX (the Laya decision model, Apple Silicon only) compiles Metal
+      # kernels from source. Newer Xcode ships the Metal compiler separately.
+      - name: Metal toolchain
+        run: xcrun metal --version >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
       - name: Versions agree across manifests
         run: bun scripts/version.mjs check
       - run: bun install --frozen-lockfile

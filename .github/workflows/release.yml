@@ -56,6 +56,8 @@ jobs:
           workspaces: src-tauri
 
       - run: bun install --frozen-lockfile
+      - name: Metal toolchain (MLX kernels for the Laya decision model)
+        run: xcrun metal --version >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
       - run: bun run typecheck
       - run: bun run test
       - run: bun run test:rust
@@ -73,10 +75,14 @@ jobs:
       fail-fast: true
       matrix:
         include:
+          # Apple Silicon bundles MLX's kernel library for the Laya decision
+          # model (src-tauri/tauri.laya.conf.json); Intel builds have no Laya.
           - os: macos-15
             arch: aarch64
+            build: build:mac-arm64
           - os: macos-15-intel
             arch: x86_64
+            build: tauri build
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.verify.outputs.version }}
@@ -98,6 +104,9 @@ jobs:
           key: release-${{ matrix.arch }}
 
       - run: bun install --frozen-lockfile
+      - name: Metal toolchain (MLX kernels, Apple Silicon)
+        if: matrix.arch == 'aarch64'
+        run: xcrun metal --version >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
 
       # Signing/notarization activates only when these repository secrets exist:
       #   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
@@ -126,7 +135,7 @@ jobs:
           fi
 
       - name: Build Andai.app + dmg
-        run: bun run tauri build --bundles app,dmg
+        run: bun run ${{ matrix.build }} --bundles app,dmg
 
       - name: Package and checksum
         run: |
@@ -139,6 +148,10 @@ jobs:
           # the binary must report the version we are publishing
           plist_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$bundle/macos/Andai.app/Contents/Info.plist")
           [ "$plist_version" = "$VERSION" ] || { echo "Info.plist says $plist_version, expected $VERSION"; exit 1; }
+          # Without its kernel library, MLX falls back to compiling kernels at runtime (slower first decisions).
+          if [ "${{ matrix.arch }}" = aarch64 ]; then
+            [ -f "$bundle/macos/Andai.app/Contents/Resources/mlx.metallib" ] || { echo "Andai.app is missing Contents/Resources/mlx.metallib"; exit 1; }
+          fi
           cd out
           for f in *; do shasum -a 256 "$f" > "$f.sha256"; done
           ls -la

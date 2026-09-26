@@ -21,7 +21,14 @@
     "allow-kb-index",
     "allow-kb-search",
     "allow-kb-set-kind",
-    "allow-kb-tool"
+    "allow-kb-tool",
+    "allow-laya-status",
+    "allow-laya-write-chunk",
+    "allow-laya-finish",
+    "allow-laya-remove",
+    "allow-laya-load",
+    "allow-laya-unload",
+    "allow-laya-decide"
   ],
   "remote": {
     "urls": [

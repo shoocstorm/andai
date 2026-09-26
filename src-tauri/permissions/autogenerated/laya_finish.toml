@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-laya-finish"
+description = "Enables the laya_finish command without any pre-configured scope."
+commands.allow = ["laya_finish"]
+
+[[permission]]
+identifier = "deny-laya-finish"
+description = "Denies the laya_finish command without any pre-configured scope."
+commands.deny = ["laya_finish"]

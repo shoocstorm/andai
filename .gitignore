@@ -7,3 +7,4 @@ src-tauri/gen
 coverage
 .vitest
 /eval/
+src-tauri/resources/mlx.metallib

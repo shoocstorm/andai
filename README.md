@@ -76,6 +76,7 @@ bun run tauri build      # macOS → src-tauri/target/release/bundle/macos/Andai
 
 Requirements:
 - **Rust**, plus Xcode command-line tools (macOS) or the MSVC build tools (Windows).
+- **Apple Silicon only:** CMake and the Xcode **Metal Toolchain** component (`xcodebuild -downloadComponent MetalToolchain`). The Laya decision model runs on MLX, whose Metal kernels are compiled from source during the build.
 - **Windows only:** the Microsoft Edge **WebView2** runtime (preinstalled on Windows 11). The installer doesn't download it, because Andai makes no network requests besides model downloads.
 - **Bun 1.3+**, which is the package manager and script runner. Plain `bun test` is Bun's own runner, so use `bun run test`.
 - **Node 22+**, only for Vitest (jsdom doesn't run on Bun's runtime). Everything else runs on Bun.
