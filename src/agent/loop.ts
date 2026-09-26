@@ -23,7 +23,7 @@ import {
 import { recordSearch } from '../state/kb';
 import { recordToolRun, requestApproval, useTools } from '../state/tools';
 import { addEvidence, mergeEvidence, type Found } from './evidence';
-import { agentState, isSmallTalk, type Observation } from './prompt';
+import { agentState, needsLookup, type Observation } from './prompt';
 import { fillArgs, parseObject } from './tools/argfill';
 import { available, policyOf } from './tools/registry';
 import { needsSymbol, SYMBOL_TYPES } from './tools/ug';
@@ -219,9 +219,10 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     const fallbackAction = () => (calls === 0 && searchTool ? searchTool.id : ANSWER);
     // With a knowledge base selected, the first decision picked search on 23 of
     // 24 lookup questions, and the miss was a follow-up that needed one, so
-    // it's skipped (about 0.7 s). Small talk still goes to the model, which
-    // answered it 3 of 3 times (docs/agentic-rag-improvements.md, item 7).
-    if (settings.searchFirst && index === 0 && searchTool && !isSmallTalk(prompt)) {
+    // it's skipped (about 0.7 s) when the request plainly asks about content.
+    // Anything else, small talk or a question to the assistant, still goes to
+    // the model (docs/agentic-rag-improvements.md, item 7).
+    if (settings.searchFirst && index === 0 && searchTool && needsLookup(prompt)) {
       action = searchTool.id;
       note = 'Searched first, without a decision: with a knowledge base selected, a question almost always needs a search.';
     } else {

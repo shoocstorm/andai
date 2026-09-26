@@ -397,6 +397,14 @@ describe('runTurn (agent mode)', () => {
     expect(agent.tool).toHaveLength(0);
   });
 
+  it('lets the model decide on a question to the assistant, instead of searching for it', async () => {
+    useTools.setState({ searchFirst: true });
+    agent.decisions = [{ chosen: 'answer_now' }];
+    await runTurn('who are u?');
+    expect(steps()[0]).toMatchObject({ action: 'answer_now' });
+    expect(agent.tool).toHaveLength(0);
+  });
+
   it('does not search first when search is switched off', async () => {
     useTools.setState({ searchFirst: true });
     setPolicy('kb_search', 'off');

@@ -45,6 +45,19 @@ export function isSmallTalk(text: string): boolean {
   return !t.includes('?') && t.split(/\s+/).filter(Boolean).length <= 8 && SMALL_TALK.test(t);
 }
 
+/**
+ * Whether a request plainly asks about the knowledge base's content, so the
+ * agent can search without first deciding to (loop.ts `searchFirst`). It
+ * must be conservative: a request it wrongly calls a lookup is searched for
+ * nothing ("who are u?" found ten unrelated passages), while one it wrongly
+ * lets through only costs a decision, which picks search when it should.
+ * So: not small talk, at least one content word (`keywords`), and not
+ * addressed to the assistant.
+ */
+export function needsLookup(text: string): boolean {
+  return !isSmallTalk(text) && keywords(text).length > 0 && !/\b(you|your|yours|yourself|u|ur)\b/i.test(text);
+}
+
 export type PersonaInput = { systemPrompt: string; tone: Tone };
 
 /**

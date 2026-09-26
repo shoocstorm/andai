@@ -127,8 +127,10 @@ and line numbers were the commonest failed or aimless calls. A tool picked
 before anything has shown such a value looks it up or searches first; its
 option is never hidden, since removing options moves a small model's other
 choices (§2). The first step of a turn is a search without a decision
-unless the request is small talk (`searchFirst`, `isSmallTalk`): the
-decision picked search 23 of 24 times, so it cost 0.7 s for nothing. Read-only
+when the request plainly asks about content (`searchFirst`, `needsLookup`):
+the decision picked search 23 of 24 times, so it cost 0.7 s for nothing.
+Keep that check conservative: a false "lookup" searches for "who are u?",
+a false "not a lookup" only costs the decision. Read-only
 tools default to *Auto* (a product decision, 2026-09-26: they only read the
 KB the user selected, and every call is traced); anything with another risk
 level defaults to *Ask*.

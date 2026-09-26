@@ -15,6 +15,8 @@
     { "id": "doc-quote-checkin", "kb": "docs", "prompt": "Quote the check-in rules from the operations handbook word for word.", "first": ["kb_search", "kb_read_lines", "kb_file_context"], "facts": ["20 minutes", "45 minutes"] },
     { "id": "doc-smalltalk-hi", "kb": "docs", "prompt": "Hi there!", "first": ["answer_now"], "facts": [] },
     { "id": "doc-smalltalk-thanks", "kb": "docs", "prompt": "Thanks, that's all I needed.", "first": ["answer_now"], "facts": [] },
+    { "id": "doc-about-assistant", "kb": "docs", "prompt": "who are u?", "first": ["answer_now"], "facts": [] },
+    { "id": "doc-assistant-abilities", "kb": "docs", "prompt": "What can you do?", "first": ["answer_now"], "facts": [] },
     { "id": "doc-unanswerable", "kb": "docs", "prompt": "Who is the CEO of Tidewater Ferries?", "first": ["kb_search"], "facts": ["$notFound"] },
     {
       "id": "doc-followup-osprey",

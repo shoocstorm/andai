@@ -311,10 +311,19 @@ in the trace as a decision with a note, so it stays visible.
 `answer_now`.
 
 **Done (2026-09-26).** On step 1, if `kb_search` is offered and the request
-isn't small talk (`isSmallTalk` in `prompt.ts`: short, no question mark,
-starts like a greeting, thanks or sign-off), the loop searches without a
-decision and says so on the trace. Small talk still goes to the model. The
-switch is `searchFirst` in the tools settings (on by default, no UI yet).
+plainly asks about content, the loop searches without a decision and says
+so on the trace; everything else goes to the model. The switch is
+`searchFirst` in the tools settings (on by default, no UI yet).
+
+**Fixed the same day:** the first version skipped the decision for anything
+that wasn't a greeting or thanks, so "who are u?" was searched for and found
+ten unrelated passages (reported from the app). `needsLookup` in
+`prompt.ts` is conservative now: not small talk, at least one content word,
+and not addressed to the assistant ("you", "your", "u"). A request it lets
+through only costs a decision, which picks search when it should. Two eval
+questions cover it (`doc-about-assistant`, `doc-assistant-abilities`, 34 in
+all): both answered without a search on 0.6B and on 1.7B + 0.6B, and no
+other question changed (`eval/item7fix-*`).
 
 | Setup | First action | Decisions / question | Seconds / question |
 |---|---|---|---|

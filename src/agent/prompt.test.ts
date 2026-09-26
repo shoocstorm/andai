@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SearchHit } from '../kb/api';
 import type { Message } from '../state/chat';
 import { TONES } from '../state/persona';
-import { agentState, budgets, buildHistory, buildSystem, isSmallTalk, keywords, MIN_PASSAGE_CHARS } from './prompt';
+import { agentState, budgets, buildHistory, buildSystem, isSmallTalk, keywords, MIN_PASSAGE_CHARS, needsLookup } from './prompt';
 
 const hit = (file: string, text: string, start = 1, end = 10): SearchHit => ({
   id: `${file}:${start}`,
@@ -158,6 +158,18 @@ describe('isSmallTalk', () => {
   it('treats questions and requests as needing a lookup', () => {
     for (const t of ['Hi, what is the refund policy?', 'How long is the crossing?', 'And the Osprey?', 'Show me the full source of withRetry.', 'what does it add for a vehicle', 'Okay so how do refunds work when a sailing is cancelled for weather and I booked a car'])
       expect(isSmallTalk(t), t).toBe(false);
+  });
+});
+
+describe('needsLookup', () => {
+  it('is true for requests about the content, including terse follow-ups', () => {
+    for (const t of ['How long is the crossing?', 'And the Osprey?', 'What does it add for a vehicle?', 'Show me the full source code of withRetry.', 'refund policy'])
+      expect(needsLookup(t), t).toBe(true);
+  });
+  it('is false for small talk, questions to the assistant, and requests with no content word', () => {
+    // Reported: "who are u?" was searched for, and found ten unrelated passages.
+    for (const t of ['who are u?', 'Who are you?', 'what can you do?', "What's your name?", 'how are you', 'Can you help me?', 'Hi there!', 'ok', '???'])
+      expect(needsLookup(t), t).toBe(false);
   });
 });
 
