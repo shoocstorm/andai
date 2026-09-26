@@ -31,8 +31,9 @@ export function seedLaya(appDataDir, id) {
 
 /** After a run: keep the checkpoint the app downloaded and verified. */
 export function keepLaya(appDataDir, id) {
+  if (!isLaya(id)) return;
   const dir = join(appDataDir, 'models/laya', id);
-  if (!isLaya(id) || !existsSync(join(dir, '.verified')) || existsSync(join(CACHE, id, '.verified'))) return;
+  if (!existsSync(join(dir, '.verified')) || existsSync(join(CACHE, id, '.verified'))) return;
   rmSync(join(CACHE, id), { recursive: true, force: true });
   copyTree(dir, join(CACHE, id));
   console.log(`[laya-cache] ${id} kept in ${CACHE}`);
