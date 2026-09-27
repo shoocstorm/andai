@@ -28,7 +28,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | done 2026-09-26 · 1.7B decides worse; recommend 1.7B answers + 0.6B decisions |
 | 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | measured 2026-09-26 · worse, not shipped |
 | 10 | [Robust to the search scope](#10-robust-to-the-search-scope) | done 2026-09-27 with Laya · facts 75.9% → 89.7% (Multilingual), 82.8% → 89.7% (English); Qwen deciders unchanged |
-| 11 | [Rerank kept passages by relevance](#11-rerank-kept-passages-by-relevance) | todo |
+| 11 | [Rerank kept passages by relevance](#11-rerank-kept-passages-by-relevance) | measured 2026-09-27 · one fact lost per checkpoint, none gained; not shipped |
 | 12 | [Intent gate with Laya](#12-intent-gate-with-laya) | todo · probe first |
 | 13 | [Answer claim check](#13-answer-claim-check) | todo |
 
@@ -469,6 +469,22 @@ aligned. The trace shows each passage's rank.
 
 **Done when.** Facts and grounding hold or improve on both Laya setups with
 no question losing a fact; prompt tokens and first-token time are reported.
+
+**Measured (2026-09-27), not shipped.** `keptOrder` put the top two in place
+and the other kept passages by score, with `[n]` renumbered to match.
+Against item 10's final runs (`eval/laya11-after-*` vs `laya10-after-*`):
+
+| Decider | Facts | Grounded | s / question |
+|---|---|---|---|
+| Laya Multilingual | 89.7% → 86.2% | 84.8% → 81.8% | 0.83 → 0.84 |
+| Laya English | 89.7% → 86.2% | 80.0% → 80.0% | 0.89 → 0.91 |
+
+Lost `mixed-refund-match` (Multilingual) and `mixed-context-createbooking`
+(English); nothing else changed and nothing was gained. A likely reason,
+not checked: the eval's knowledge bases are small, so the context budget
+may rarely cut a passage, and then the reorder only changes what the answer
+leads with, not what it sees. Reverted. Worth a
+re-measure on a knowledge base big enough for the budget to bite.
 
 ## 12. Intent gate with Laya
 
