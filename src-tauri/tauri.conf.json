@@ -63,6 +63,10 @@
       "icons/icon.png"
     ],
     "category": "Productivity",
+    "resources": {
+      "../tests/fixtures/eval/docs/": "samples/docs/",
+      "../tests/fixtures/eval/code/": "samples/code/"
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "skip"

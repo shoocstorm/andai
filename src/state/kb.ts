@@ -4,6 +4,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import {
   inTauri,
   kbAddFiles,
+  kbAddSample,
   kbCreate,
   kbDelete,
   kbIndex,
@@ -124,6 +125,23 @@ export async function addFiles(slug: string, paths: string[]) {
     if (kb.sources.some((s) => s.status === 'pending')) await indexKb(slug);
   } catch (e) {
     toast({ tone: 'error', title: 'Could not add files', body: errText(e) });
+  }
+}
+
+/**
+ * Adds a sample knowledge base (kb/samples.ts), selects it, grounds chat in
+ * it, and indexes it if it isn't yet. Adding one twice reuses the first.
+ */
+export async function addSample(id: string): Promise<KbInfo | null> {
+  try {
+    const kb = await kbAddSample(id);
+    upsert(kb);
+    useKb.setState({ selected: kb.slug, grounding: kb.slug });
+    if (kb.status === 'pending' || kb.status === 'failed') await indexKb(kb.slug);
+    return useKb.getState().kbs.find((k) => k.slug === kb.slug) ?? kb;
+  } catch (e) {
+    toast({ tone: 'error', title: 'Could not add the sample', body: errText(e) });
+    return null;
   }
 }
 

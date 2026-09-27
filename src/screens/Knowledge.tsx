@@ -18,7 +18,8 @@ import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { Bar, Modal, Segmented, Slider, fmtAgo, fmtBytes } from '../components/ui';
 import { inTauri, kbPickFiles, type KbInfo, type KbKind, type Source } from '../kb/api';
-import { addFiles, createKb, deleteKb, indexKb, removeSource, setKind, useKb } from '../state/kb';
+import { SAMPLES, type SampleDef } from '../kb/samples';
+import { addFiles, addSample, createKb, deleteKb, indexKb, removeSource, setKind, useKb } from '../state/kb';
 import { toast, useUi } from '../state/ui';
 
 export async function pickFiles(title: string): Promise<string[]> {
@@ -70,6 +71,7 @@ export function Knowledge() {
                 <button className="btn primary" onClick={() => setCreating(true)}>
                   <Plus size={14} /> New knowledge base
                 </button>
+                {inTauri && <Samples title="Or try a sample, ready in a few seconds" />}
               </div>
             )
           )}
@@ -437,6 +439,50 @@ function Storage({ kb }: { kb: KbInfo | null }) {
   );
 }
 
+const SAMPLE_ICON: Record<KbKind, typeof FileText> = { document: FileText, code: Code2, mixed: Database };
+
+/**
+ * The bundled sample knowledge bases (kb/samples.ts): one click adds, indexes
+ * and grounds chat in one. A sample already added shows as added.
+ */
+export function Samples({ title, onAdded }: { title: string; onAdded?: () => void }) {
+  const kbs = useKb((s) => s.kbs);
+  const [busy, setBusy] = useState<string | null>(null);
+  const add = async (sample: SampleDef) => {
+    setBusy(sample.id);
+    const kb = await addSample(sample.id);
+    setBusy(null);
+    if (kb) onAdded?.();
+  };
+  return (
+    <section className="kn-samples" aria-label="Sample knowledge bases">
+      <div className="label">{title}</div>
+      <div className="kn-sample-grid">
+        {SAMPLES.map((sample) => {
+          const Icon = SAMPLE_ICON[sample.kind];
+          const added = kbs.some((k) => k.name === sample.name);
+          return (
+            <div key={sample.id} className="kn-sample">
+              <Icon size={17} />
+              <div className="kn-sample-name">{sample.name}</div>
+              <div className="kn-sample-blurb">{sample.blurb}</div>
+              <button
+                className="btn secondary sm"
+                disabled={added || busy !== null}
+                aria-label={`Add sample ${sample.name}`}
+                onClick={() => void add(sample)}
+              >
+                {busy === sample.id ? <Loader2 size={13} className="spin" /> : <Plus size={13} />}
+                {added ? 'Added' : busy === sample.id ? 'Indexing…' : 'Add sample'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function CreateKbModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -477,6 +523,7 @@ export function CreateKbModal({ open, onClose }: { open: boolean; onClose: () =>
           {busy ? <Loader2 size={14} className="spin" /> : <Plus size={14} />} Create
         </button>
       </div>
+      {inTauri && <Samples title="Or start from a sample" onAdded={onClose} />}
     </Modal>
   );
 }

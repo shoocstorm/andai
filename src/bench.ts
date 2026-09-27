@@ -1,11 +1,14 @@
 // Engine benchmark (VITE_SMOKE=bench, via scripts/bench-engine.mjs): loads one
 // catalog model under several wllama settings inside the real webview and
 // reports what llama.cpp says about the GPU and threads, plus prompt and
-// generation speed. The runner passes the settings in VITE_BENCH.
+// generation speed. An MLX model runs once, natively in Rust (llm/native.ts),
+// on the same prompt. The runner passes the settings in VITE_BENCH.
 // Loaded only when VITE_SMOKE=bench (main.tsx), so none of it ships in the app.
 import { invoke } from '@tauri-apps/api/core';
 import { ModelManager, Wllama } from '@wllama/wllama';
-import { modelById } from './llm/models';
+import { downloadCheckpoint } from './llm/laya';
+import { isMlx, modelById, type MlxDef } from './llm/models';
+import { genTokPerSec, nativeGenerate, nativeLoad, nativeStatus, nativeUnload, promptTokPerSec } from './llm/native';
 
 export type BenchConfig = { name: string; n_threads?: number; n_gpu_layers?: number; n_batch?: number; n_ubatch?: number };
 /** `contextWords`: pad the prompt with a passage this long, like a grounded answer's context. */
@@ -23,10 +26,52 @@ const prompt = (words: number) => [
   { role: 'user' as const, content: 'Explain in about 150 words how a ferry company might price tickets for cars and foot passengers.' },
 ];
 
+/** The MLX path: download into Rust if needed, load, warm up, then one measured answer. */
+async function benchNative(def: MlxDef, input: BenchInput) {
+  const c = (await nativeStatus()).checkpoints.find((x) => x.id === def.native);
+  if (!c) throw new Error(`${def.name} needs an Apple Silicon Mac`);
+  if (!c.downloaded) {
+    let last = 0;
+    await downloadCheckpoint('llm', c, (p) => {
+      if (p.loaded - last > 100e6 || p.phase.startsWith('Verifying')) void log(`download ${p.phase} ${Math.round(p.loaded / 1e6)} / ${Math.round(p.total / 1e6)} MB`);
+      last = p.loaded;
+    });
+  }
+  const loaded = await nativeLoad('chat', def.native, 4096);
+  const params = (max: number) => ({ maxTokens: max, temperature: 0, thinking: false, cachePrompt: false });
+  await nativeGenerate('chat', prompt(input.contextWords ?? 0), params(8), () => {}); // warm-up: kernels, first allocations
+  const t1 = performance.now();
+  const r = await nativeGenerate('chat', prompt(input.contextWords ?? 0), params(input.maxTokens), () => {});
+  const wall = performance.now() - t1;
+  await log(
+    `BENCH ${JSON.stringify({
+      name: 'MLX · Metal (native)',
+      params: {},
+      threads: 0,
+      compat: false,
+      loadMs: Math.round(loaded.ms),
+      promptTokens: r.promptTokens,
+      promptTokPerSec: promptTokPerSec(r),
+      genTokPerSec: genTokPerSec(r),
+      genTokens: r.completionTokens,
+      firstTokenMs: Math.round(r.promptMs),
+      wallMs: Math.round(wall),
+      log: [`${loaded.layers} layers, ${loaded.bits}-bit weights, MLX in Rust`],
+    })}`,
+  );
+  await nativeUnload('chat');
+}
+
 export async function runBench(input: BenchInput) {
   try {
     const def = modelById(input.model);
     if (!def) throw new Error(`unknown model ${input.model}`);
+    if (isMlx(def)) {
+      await benchNative(def, input);
+      await log('OK');
+      await invoke('dev_exit', { code: 0 });
+      return;
+    }
     await log(`CAPS ${JSON.stringify({ cores: navigator.hardwareConcurrency, gpu: 'gpu' in navigator, isolated: crossOriginIsolated, ua: navigator.userAgent })}`);
     const adapter = await (navigator as unknown as { gpu?: { requestAdapter: () => Promise<{ info?: Record<string, string>; features?: Set<string> } | null> } }).gpu
       ?.requestAdapter()

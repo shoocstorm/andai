@@ -1,11 +1,12 @@
 // The Laya decision model, run by Rust on MLX (src-tauri/src/laya/, Apple
-// Silicon only). Typed wrappers over its commands, and the download: the
-// Rust side has no HTTP client (AGENTS.md §9), so the webview fetches each
-// file from its pinned Hugging Face commit and streams it to Rust in chunks.
-// Rust keeps nothing it can't verify: sizes and sha256 are in its catalog.
+// Silicon only). Typed wrappers over its commands, and the checkpoint
+// download it shares with the native chat models (llm/native.ts): the Rust
+// side has no HTTP client (AGENTS.md §9), so the webview fetches each file
+// from its pinned Hugging Face commit and streams it to Rust in chunks. Rust
+// keeps nothing it can't verify: sizes and sha256 are in its catalogs.
 
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { layaFileUrl } from './models';
+import { pinnedFileUrl } from './models';
 
 export type LayaCheckpoint = {
   id: string;
@@ -59,17 +60,26 @@ export const layaRelevance = (request: string, passages: { source: string; text:
 /** Bytes per IPC call; Rust accepts up to 16 MiB. */
 export const CHUNK = 8 * 1024 * 1024;
 
+/** A checkpoint in one of Rust's catalogs: Laya's, or the native chat models' (`llm`). */
+export type Checkpoint = Omit<LayaCheckpoint, 'downloaded'>;
+
 /**
- * Downloads every file of `c` and has Rust verify it. Rust discards the
- * whole download if any file's size or sha256 is off, and says which.
+ * Downloads every file of `c` and has Rust verify it (`<kind>_write_chunk`,
+ * `<kind>_finish`). Rust discards the whole download if any file's size or
+ * sha256 is off, and says which.
  */
-export async function downloadLaya(c: LayaCheckpoint, onProgress: (p: Progress) => void, signal?: AbortSignal): Promise<void> {
+export async function downloadCheckpoint(
+  kind: 'laya' | 'llm',
+  c: Checkpoint,
+  onProgress: (p: Progress) => void,
+  signal?: AbortSignal,
+): Promise<void> {
   const started = performance.now();
   let loaded = 0;
   const report = (phase: string) => onProgress({ loaded, total: c.bytes, speed: loaded / Math.max(0.001, (performance.now() - started) / 1000), phase });
   for (const f of c.files) {
     report(`Downloading ${f.path}…`);
-    const res = await fetch(layaFileUrl(c.repo, c.commit, f.path), { signal });
+    const res = await fetch(pinnedFileUrl(c.repo, c.commit, f.path), { signal });
     if (!res.ok || !res.body) throw new Error(`Couldn't download ${f.path} (HTTP ${res.status}).`);
     const reader = res.body.getReader();
     let offset = 0;
@@ -77,8 +87,8 @@ export async function downloadLaya(c: LayaCheckpoint, onProgress: (p: Progress) 
     let fill = 0;
     const flush = async () => {
       if (!fill) return;
-      offset = await invoke<number>('laya_write_chunk', buf.subarray(0, fill), {
-        headers: { 'x-laya-checkpoint': c.id, 'x-laya-file': f.path, 'x-laya-offset': String(offset) },
+      offset = await invoke<number>(`${kind}_write_chunk`, buf.subarray(0, fill), {
+        headers: { 'x-checkpoint': c.id, 'x-file': f.path, 'x-offset': String(offset) },
       });
       fill = 0;
     };
@@ -102,5 +112,8 @@ export async function downloadLaya(c: LayaCheckpoint, onProgress: (p: Progress) 
     await flush();
   }
   report('Verifying checksums…');
-  await invoke('laya_finish', { checkpoint: c.id });
+  await invoke(`${kind}_finish`, { checkpoint: c.id });
 }
+
+export const downloadLaya = (c: LayaCheckpoint, onProgress: (p: Progress) => void, signal?: AbortSignal) =>
+  downloadCheckpoint('laya', c, onProgress, signal);

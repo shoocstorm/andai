@@ -69,11 +69,12 @@ the product.
 ```
 Andai/
 ├─ src/                      React 19 + Vite UI (runs in the Tauri webview)
-│  ├─ llm/engine.ts          wllama: load / cache / stream. Compat build on WKWebView
-│  ├─ llm/models.ts          model catalog (single-file GGUF, < 2 GB each, pinned commit + sha256)
+│  ├─ llm/engine.ts          load / cache / stream on either engine: wllama (compat build on WKWebView) or native MLX
+│  ├─ llm/native.ts          native MLX chat models: command wrappers, streaming channel, wllama-shaped completions
+│  ├─ llm/models.ts          model catalog: GGUF for wllama (< 2 GB, pinned commit + sha256), MLX checkpoints (pinned in Rust)
 │  ├─ llm/integrity.ts       incremental SHA-256 + download verification
 │  ├─ llm/decide.ts          choice-based decisions (SemIf): lettered options → one-pass logprob readout, or Laya in Rust
-│  ├─ llm/laya.ts            Laya decision model: command wrappers + checkpoint download (streamed to Rust)
+│  ├─ llm/laya.ts            Laya decision model: command wrappers + the checkpoint download (streamed to Rust; Laya and MLX models)
 │  ├─ agent/prompt.ts        PURE prompt assembly: keywords, system prompt, history, budgets, agent state
 │  ├─ agent/turn.ts          one turn: plan (agent loop) or analyze → retrieve (fixed) → build → generate
 │  ├─ agent/loop.ts          agent loop: decide → fill args → policy gate → run tool → observe; writes Message.agent
@@ -81,6 +82,7 @@ Andai/
 │  ├─ agent/evidence.ts      PURE: merges what the tools found into the answer's passages (same node, covered ranges, order)
 │  ├─ agent/tools/           tool registry (code only), ug tools, argument filling, schema validation + GBNF
 │  ├─ kb/api.ts              typed wrappers over the Rust ug bridge + hit dedupe
+│  ├─ kb/samples.ts          the bundled sample knowledge bases (Tidewater Ferries) and their suggested questions
 │  ├─ state/                 zustand stores: chat, kb, tools, persona, theme, layout, ui (persisted where noted)
 │  ├─ screens/, shell/, components/
 │  ├─ theme/tokens.css       ALL colors, both themes
@@ -95,7 +97,10 @@ Andai/
 │  ├─ src/grants.rs          which files the webview may ingest (drop / Rust dialog only)
 │  ├─ src/ug.rs              knowledge bases → `ug gen/search/list/remove` CLI; KB kind
 │  ├─ src/tools.rs           agent tool calls: closed enum → validated argv → ug (scrubbed env, 20 s, 256 KB)
-│  ├─ src/laya/              Laya decision model on MLX (Apple Silicon): catalog, verified store, prompt, model, worker thread
+│  ├─ src/samples.rs         sample knowledge bases: closed list → bundled files (tests/fixtures/eval/) copied in, then indexed
+│  ├─ src/mlx.rs             the one MLX thread (Apple Silicon): owns every model on MLX, runs jobs from commands
+│  ├─ src/laya/              Laya decision model on MLX: catalog, verified store (shared with llm/), prompt, model
+│  ├─ src/llm/               native chat models on MLX: catalog, Qwen3 port, KV cache + prefix reuse, generation, template
 │  ├─ tauri.laya.conf.json   Apple Silicon build overlay: bundles mlx.metallib (bun run build:mac-arm64)
 │  ├─ build.rs               app command manifest (ACL)
 │  └─ capabilities/default.json
@@ -103,7 +108,7 @@ Andai/
 │  └─ andai-website/         static product site: index.html, agent-loop.html (how the agent works) + img/
 ├─ tests/                    setup, guard tests, e2e fixtures, perf/ micro-benchmarks
 ├─ perf/baseline.json        performance baselines (docs/performance.md)
-└─ scripts/                  copy-wllama (postinstall), e2e runner, perf runner, agent eval runner, mlx-metallib, laya-cache
+└─ scripts/                  copy-wllama (postinstall), e2e runner, perf runner, agent eval runner, mlx-metallib, checkpoint-cache
 ```
 
 **Data flow of a turn (agent mode, a KB selected):** `runTurn` → `runAgent`:
@@ -112,7 +117,8 @@ model, GBNF from the tool schema) → `validate` → policy gate (Auto / Ask →
 approval card) → `kbTool` (Rust `kb_tool` → `ug <cmd> --json`) →
 `tool.observe` → `addEvidence`] × up to `maxSteps` → `mergeEvidence` →
 relevance check (with Laya: `checkRelevance` drops passages scored < 0.10
-past the top 2) → `buildSystem` (tool results fenced as passages) + `buildHistory` → `engine.chat` → answer. Every decision and call
+past the top 2) → `buildSystem` (tool results fenced as passages) + `buildHistory` → `engine.chat` (native
+MLX `llm_generate`, streamed over a channel, or wllama) → answer. Every decision and call
 is written to `Message.agent`, which drives the tool chips, approval cards and
 the Execution Trace. **Agent mode off, or no KB:** `runTurn` → `kbSearch` (one
 `ug search` with the question) → `buildSystem` → `engine.chat`.
@@ -235,13 +241,13 @@ level defaults to *Ask*.
   threads made GPU generation 2–4× *slower*, 2 threads was no different.
   Flash attention isn't supported on WebGPU and is switched off by
   llama.cpp. Measured 2026-09-26 on an M5 Max with `bun run bench:engine`.
-- **Prompt reading, not generation, is the wait.** Qwen3 1.7B reads about
-  185 prompt tok/s and generates 30–65 tok/s (0.6B: about 520 and 65), so a
-  550-token grounded prompt costs 3 s before the first word. Generation
-  speed is timed from the first token (`StreamEvent`); it used to include
-  the prompt, which made 60 tok/s read as 15–20. The ceiling is the
-  WebAssembly build: native llama.cpp on Metal would be several times
-  faster, but it's a native-code dependency (§1.10).
+- **In wllama, prompt reading, not generation, is the wait.** Qwen3 1.7B
+  reads about 185 prompt tok/s and generates 30–65 tok/s (0.6B: about 520
+  and 65), so a 550-token grounded prompt costs 3 s before the first word.
+  Generation speed is timed from the first token (`StreamEvent`); it used to
+  include the prompt, which made 60 tok/s read as 15–20. The ceiling is the
+  WebAssembly build, which is why Apple Silicon gets the native MLX engine
+  (below).
 - **wllama loads single GGUF files up to 2 GB.** Larger models need gguf-split
   shards; `models.test.ts` enforces the limit.
 - **wllama's chat logprobs are the raw next-token distribution** (wllama
@@ -273,9 +279,9 @@ level defaults to *Ask*.
   Only 56% of answers with sources cited them. Two seeded runs agreed on
   every question.
 - **Laya runs on MLX through mlx-rs (pinned `=0.32.0`), Apple Silicon only.**
-  `build.rs` sets `cfg(laya)` for `aarch64-apple-darwin`; elsewhere MLX and
-  tokenizers aren't in the dependency graph and the commands say "needs an
-  Apple Silicon Mac". mlx-rs compiles MLX from source: it needs CMake and,
+  `build.rs` sets `cfg(mlx)` for `aarch64-apple-darwin`; elsewhere MLX and
+  tokenizers aren't in the dependency graph and the commands (Laya's and the
+  native chat models') say "needs an Apple Silicon Mac". mlx-rs compiles MLX from source: it needs CMake and,
   on Xcode 27, the separate Metal Toolchain component
   (`xcodebuild -downloadComponent MetalToolchain`; CI installs it). A clean
   build of MLX took about 2 minutes on an M5 Max.
@@ -284,9 +290,65 @@ level defaults to *Ask*.
   not the app bundle's `Contents/Resources`, so the
   release bundle ships it there (`tauri.laya.conf.json` + `beforeBundleCommand`,
   since `bundle.resources` is copied at build.rs time, before mlx-sys may have
-  built it) and `laya/worker.rs` points MLX at it with `set_metallib_path`.
+  built it) and `mlx.rs` points MLX at it with `set_metallib_path`.
   Without it MLX compiles kernels at runtime: the first run measured 42 ms
   P50 instead of 9 ms. The release job fails if the arm64 app lacks it.
+- **One thread owns MLX** (`mlx.rs`): the Laya checkpoint and both native
+  LLM slots live on it, and commands send it closures. Decisions queue behind
+  a streaming answer, which the agent never overlaps anyway.
+- **Native chat models run Qwen3 on MLX in Rust** (`src-tauri/src/llm/`,
+  2026-09-27). Picked over a `llama-server` sidecar (a second binary to
+  sign, plus a loopback socket) and llama.cpp through a crate (a second
+  Metal runtime) because MLX was already a dependency, and it measured
+  fastest. Qwen3 1.7B on an M5 Max, 550-token prompt: mlx-lm 4-bit 347 tok/s
+  generation and 12,200 tok/s prompt; llama.cpp (b11205, Metal, flash
+  attention) Q4_K_M 285 and 8,770; wllama on WebGPU 30–65 and 185. In the
+  app (`bun run bench:engine`, dev build): **343 tok/s generation, 9,900
+  tok/s prompt, first token 55 ms** against about 3 s in wllama.
+- **The Qwen3 port matches mlx-lm** (`bun run test:llm`): the chat template
+  matches transformers on every golden case, token ids match, greedy output
+  is identical, and the decision letters' log-probabilities match mlx-lm's
+  float32 values exactly (Δ 0.000). The speed comes from mlx-lm's decode
+  pipelining (queue step n+1 with `async_eval` before reading token n back);
+  the model isn't compiled.
+- **A 4-bit model's logprobs move with how the prompt is split.** Qwen3
+  1.7B 4-bit on one decision prompt, all in mlx-lm: C scored −5.75 in one
+  pass, −3.05 after a 3-token cached prefix, −1.50 when the last token ran
+  alone (what a generation does). The chosen letter held, but confidences
+  aren't comparable across cache states, so parity tests start from a clean
+  cache, and decisions on the chat slot keep `cache_prompt: false` as with
+  wllama.
+- **Native generation reuses the KV cache's shared prefix** (`cache_prompt`,
+  on by default): the cache keeps the token ids it holds, trims to the common
+  prefix, and runs only the rest. The first-token distribution then matches a
+  cold run within bf16 noise (tested: drift 0.08–0.46, as in mlx-lm, where a
+  greedy tie can flip a reply either way).
+- **Native grammars** (`llm/grammar.rs`): a choice (`root ::= "A" | "B"`)
+  restricts the reply to those strings; any other GBNF without recursion
+  (every `schemaGrammar`, fixture-checked) is compiled to a regex and a lazy
+  DFA (`regex-automata`, already in the tree through Tauri), and each step
+  picks among the tokens whose raw bytes keep it alive (80–90 ms for a
+  17-token argument fill). Tokens are spelled from the byte-level BPE
+  alphabet, not `decode`, which turns partial UTF-8 into U+FFFD.
+- **Native agent eval (2026-09-27, 34 questions, M5 Max):**
+
+  | Setup (answers + decisions) | First action | Facts | Grounded | ms / decision | s / q |
+  |---|---|---|---|---|---|
+  | MLX 1.7B + MLX 0.6B | 100% | 82.8% | 86.2% | 23 | 0.58 |
+  | MLX 1.7B alone | 85.3% | 79.3% | 93.1% | 38 | 0.58 |
+  | MLX 0.6B alone | 100% | 82.8% | 55.2% | 24 | 0.46 |
+  | wllama 1.7B + 0.6B (`eval/item7fix-1.7b+0.6b.json`) | 100% | 96.6% | 86.2% | 899 | 7.65 |
+
+  10–13× faster per question, but fewer facts than wllama's 1.7B. The gap is
+  mostly one argument: for "Which function implements the group discount…"
+  the search `scope` came out `broad` with MLX 4-bit, 8-bit **and bf16**, and
+  `focused` only with GGUF Q4_K_M; broad search returns one-line fragments
+  and the answer misses the function. MLX 5-bit scored 89.7% at 302 tok/s
+  and DWQ 4-bit 82.8%; 4-bit ships (349 tok/s, a human decision,
+  2026-09-27). Making the agent robust to `scope` is the next tracker item.
+- **A Tauri channel can deliver its last messages after the command
+  resolves.** `chatNative` (engine.ts) therefore takes any text that hadn't
+  streamed yet from the command's result and drops later pieces.
 - **The Laya port matches laya-mlx** (`bun run test:laya`, 2026-09-26, M5
   Max): identical token ids and markers, max |Δp| 0.0002 (multilingual) and
   0.0007 (English) against laya-mlx FP32, P50 8.0 ms and 18.5 ms per decision
@@ -358,10 +420,12 @@ level defaults to *Ask*.
 | Chat, streaming, stop, think folding | Real | `llm/engine.ts`, `agent/turn.ts` |
 | Reasoning chips, Execution Trace, stats | Real (actual step timings, tokens, tok/s; every decision and tool call) | `agent/turn.ts`, `agent/loop.ts`, `screens/AgentTrace.tsx` |
 | Knowledge bases: create, ingest, index, search, delete | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts` |
+| Sample knowledge bases (Tidewater Ferries: documents, code, both), suggested questions | Real (bundled files, indexed by the user's ug) | `src-tauri/src/samples.rs`, `kb/samples.ts`, `screens/Knowledge.tsx` |
 | Laya decision model (download, verify, load, decide, stop question, relevance check; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
 | Agent tool loop: decisions, 8 ug tools, per-tool policy, approvals, decision model, Tools screen | Real | `agent/loop.ts`, `agent/tools/`, `llm/decide.ts`, `state/tools.ts`, `screens/Tools.tsx`, `src-tauri/src/tools.rs` |
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |
+| Native MLX chat models (download, verify, load, stream, stop, decide; Apple Silicon) | Real | `src-tauri/src/llm/`, `src-tauri/src/mlx.rs`, `llm/native.ts` |
 | Appearance (system / light / dark) | Real | `state/theme.ts` |
 | Layout: collapsible nav (⌘B), Execution Trace on/off (⌘J) | Real, persisted | `state/layout.ts` |
 | Workflows, approvals, tool library, node editor, run | **Simulated** | `mock/workflows.ts`, `screens/Workflow*.tsx` |
@@ -468,12 +532,13 @@ bun run test:coverage    # same, with a coverage report in coverage/
 bun run test:rust        # Rust unit tests
 bun run test:ug          # Rust ↔ real ug integration (needs ug)
 bun run test:laya        # Laya port vs laya-mlx goldens + < 100 ms per decision (needs the checkpoints in the HF cache)
+bun run test:llm         # native Qwen3 port vs transformers/mlx-lm goldens + tok/s (needs the MLX checkpoints in the HF cache)
 bun run build:mac-arm64  # Apple Silicon release bundle with mlx.metallib (release.yml uses it)
 bun run test:e2e         # full app in WKWebView: ingest → retrieve → generate (needs ug; downloads model once)
 bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and releases run it
 bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
 bun run perf             # bundle size (CI too) + micro-benchmarks vs. perf/baseline.json
-bun run bench:engine     # engine probe: GPU layers, threads, prompt and generation tok/s per wllama setting (needs a downloaded model)
+bun run bench:engine     # engine probe: GPU layers, threads, prompt and generation tok/s per wllama setting (needs a downloaded model); BENCH_MODEL=qwen3-1.7b-mlx for native MLX
 bun run eval:agent       # agent eval: 27 questions through the real agent → scorecard vs. perf/baseline.json (needs ug + model); read and compare reports with bun run eval:view
 ```
 
@@ -617,8 +682,9 @@ Rules for agents:
   CI).
 
 The Apple Silicon build uses `bun run build:mac-arm64`, which bundles MLX's
-`mlx.metallib` for the Laya decision model (about 58 MB more in the DMG;
-the workflow checks it's there). Intel and Windows builds have no Laya.
+`mlx.metallib` for the models that run on MLX, Laya and the native chat
+models (about 58 MB more in the DMG; the workflow checks it's there). Intel
+and Windows builds have no MLX: no Laya and no MLX models, only wllama.
 
 Code signing: builds are **unsigned** until the repository has the secrets
 `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` and `APPLE_SIGNING_IDENTITY`
@@ -720,8 +786,8 @@ access (rely on FileVault). Encryption at rest is planned (below).
    `tests/unit/security.test.ts`, and growing one is a product decision (§1.10).
 3. **Egress is deny-by-default.** CSP `connect-src` is `self`, IPC and Hugging
    Face. Nothing in `src/` besides `llm/models.ts` names a remote URL, only
-   `llm/laya.ts` calls `fetch` (a Laya checkpoint, from pinned commit URLs),
-   and the Rust side has no HTTP client.
+   `llm/laya.ts` calls `fetch` (a Laya or MLX checkpoint, from pinned commit
+   URLs), and the Rust side has no HTTP client.
 4. **Users choose files, never the webview.** `kb_add_files` only accepts a
    path the user granted by drag-and-drop or the dialog opened by Rust
    (`grants.rs`). Each grant is one file, canonicalized and consumed once.
@@ -749,7 +815,9 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Model downloads pinned to a commit and verified (size + sha256) before load; mismatch → removed | `llm/models.ts`, `llm/integrity.ts`, `engine.loadModel` | `integrity.test.ts` (FIPS vectors, tamper), `engine.test.ts` (gate), `models.test.ts` (pinning); e2e logs the check |
 | Laya checkpoints: closed catalog in Rust (commit, sizes, sha256); chunks land in `.part` files and only `laya_finish` moves them into place, after every size and hash matches, else all are deleted; `load` reads only a verified folder | `laya/catalog.rs`, `laya/store.rs` | Rust unit tests (mismatch, order, oversize, tampering, 0600/0700); e2e downloads and verifies once |
 | Laya decisions: state ≤ 64 KB, question ≤ 2 KB, 2–16 options with `[a-z0-9_]` ids, text ≤ 1 KB; mask tokens stripped from all input | `laya/mod.rs` `validate`, `laya/prompt.rs` | Rust unit tests |
-| Only `llm/laya.ts` may `fetch`, and only `layaFileUrl(...)` (pinned HF commits); tokenizers built without its `http` feature | `llm/laya.ts`, `llm/models.ts`, `Cargo.toml` | `security.test.ts`, `models.test.ts` |
+| MLX chat models: closed catalog in Rust (commit, sizes, sha256), the same verified store as Laya; generation bounded (1–512 messages ≤ 512 KB, no NUL, max_tokens ≤ 8192, sampling ranges, grammar ≤ 8 KB, context 512–32768); roles are system/user/assistant only | `llm/catalog.rs`, `laya/store.rs`, `llm/mod.rs` `validate` | Rust unit tests; `test:llm` |
+| Sample knowledge bases: a closed list of ids; files only from the app's resource folder, copied like a user's | `samples.rs` | Rust unit tests |
+| Only `llm/laya.ts` may `fetch`, and only `pinnedFileUrl(...)` (pinned HF commits); tokenizers built without its `http` feature | `llm/laya.ts`, `llm/models.ts`, `Cargo.toml` | `security.test.ts`, `models.test.ts` |
 | Pre-pinning model copies removed only after the user confirms | `engine.removeLegacyCopies`, Settings | `Settings.test.tsx` |
 | Retrieved passages fenced as untrusted data; a passage can't close its fence | `agent/prompt.ts` | `prompt.test.ts` |
 | Agent tools: closed enum, no unknown fields, flag-like and KB-escaping args rejected (incl. symlinks), scrubbed env, 20 s kill, 256 KB cap, one KB's project only | `tools.rs` | Rust unit tests; `test:ug` runs every tool against real ug; e2e |

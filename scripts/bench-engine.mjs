@@ -8,18 +8,24 @@
 //   BENCH_MODEL=qwen3-0.6b bun run bench:engine
 //   BENCH_CONTEXT_WORDS=0 …                  # prompt size: words of context (default 400, about a grounded answer)
 //   BENCH_CONFIGS='[{"name":"cpu8","n_gpu_layers":0,"n_threads":8}]' bun run bench:engine
+//   BENCH_MODEL=qwen3-1.7b-mlx bun run bench:engine   # an MLX model, natively in Rust (Apple Silicon)
 //
-// The model must already be downloaded in the dev webview (load it once in
-// `bun run tauri dev`). Uses a throwaway data dir; touches no knowledge base.
+// A wllama model must already be downloaded in the dev webview (load it once
+// in `bun run tauri dev`); an MLX model downloads once into the test cache
+// (scripts/checkpoint-cache.mjs). Uses a throwaway data dir; touches no
+// knowledge base.
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { keepCheckpoint, seedCheckpoint } from './checkpoint-cache.mjs';
 import { byLine } from './perf-lib.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const model = process.env.BENCH_MODEL ?? 'qwen3-1.7b';
-const configs = JSON.parse(
+// wllama settings don't apply to MLX: one native run.
+const mlx = model.endsWith('-mlx');
+const configs = mlx ? [{ name: 'MLX · Metal (native)' }] : JSON.parse(
   process.env.BENCH_CONFIGS ??
     JSON.stringify([
       { name: 'app default (GPU, wllama threads)' },
@@ -38,6 +44,7 @@ const env = {
   ANDAI_DATA_DIR: dataDir,
   ANDAI_SMOKE: '1',
 };
+seedCheckpoint(dataDir, model);
 const child = spawn('bun', ['run', 'tauri', 'dev'], { cwd: root, env, detached: true });
 const results = [];
 await new Promise((done) => {
@@ -48,7 +55,7 @@ await new Promise((done) => {
       if (text.startsWith('BENCH ')) {
         const r = JSON.parse(text.slice(6));
         results.push(r);
-        console.log(`\n[bench] ${r.name}${r.error ? `: ERROR ${r.error}` : `: ${r.genTokPerSec?.toFixed(1)} tok/s generation, ${r.promptTokPerSec?.toFixed(0)} tok/s prompt (${r.promptTokens} tokens), ${r.threads} threads, load ${r.loadMs} ms`}`);
+        console.log(`\n[bench] ${r.name}${r.error ? `: ERROR ${r.error}` : `: ${r.genTokPerSec?.toFixed(1)} tok/s generation, ${r.promptTokPerSec?.toFixed(0)} tok/s prompt (${r.promptTokens} tokens), ${r.threads} threads, load ${r.loadMs} ms${r.firstTokenMs != null ? `, first token ${r.firstTokenMs} ms` : ''}`}`);
         for (const l of r.log ?? []) console.log(`    ${l}`);
       } else console.log(`[bench] ${text.slice(0, 400)}`);
       if (text.startsWith('OK') || text.startsWith('FAIL')) done();
@@ -62,6 +69,7 @@ await new Promise((done) => {
 try {
   process.kill(-child.pid, 'SIGTERM');
 } catch {}
+keepCheckpoint(dataDir, model);
 rmSync(dataDir, { recursive: true, force: true });
 console.log(`\n── engine bench · ${model} ──`);
 for (const r of results) console.log(`${(r.genTokPerSec ?? 0).toFixed(1).padStart(7)} tok/s gen  ${String(Math.round(r.promptTokPerSec ?? 0)).padStart(6)} tok/s prompt  ${r.name}${r.error ? `  (${r.error})` : ''}`);

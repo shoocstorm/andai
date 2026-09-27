@@ -10,8 +10,11 @@ reads the lines around a hit, outlines a file, or follows a code symbol to its
 callers until it has enough evidence. Then it writes an answer that cites every
 passage it used.
 
-- **wllama** (llama.cpp compiled to WebAssembly) is the on-device LLM. It
-  writes the answers and makes the agent's decisions.
+- **The on-device LLM** writes the answers and makes the agent's decisions.
+  On Apple Silicon Macs it runs natively on the GPU with **MLX**, in Rust
+  (Qwen3 1.7B: about 350 tokens/s on an M5 Max); everywhere else, and for the
+  GGUF models, with **wllama** (llama.cpp compiled to WebAssembly, 30–65
+  tokens/s for the same model).
 - **[ug](https://github.com/shoocstorm/ug)** is the knowledge engine and the agent's toolbox. It turns documents
   and code into a local knowledge graph, and its commands (`search`,
   `get_code`, `file_context`, `context`, `find_usages`, …) are the tools the
@@ -52,7 +55,8 @@ knowledge base, time-boxed and output-capped (see [AGENTS.md §9](AGENTS.md#9-se
 ```
 Andai (Tauri 2)
 ├─ src/                 React 19 + Vite UI
-│  ├─ llm/engine.ts     wllama in the webview: load / cache / stream (compat build on WKWebView)
+│  ├─ llm/engine.ts     load / cache / stream: native MLX (Apple Silicon) or wllama in the webview
+│  ├─ llm/native.ts     the native MLX models: Rust commands, streaming channel
 │  ├─ llm/decide.ts     choice-based decisions: lettered options → one-pass probability readout
 │  ├─ agent/turn.ts     one turn: agent loop (or the fixed search) → prompt assembly → generate
 │  ├─ agent/loop.ts     decide → fill arguments → gate → run tool → observe
@@ -62,6 +66,9 @@ Andai (Tauri 2)
 └─ src-tauri/
    ├─ src/ug.rs         knowledge bases: shells out to `ug gen / search / list / remove`
    ├─ src/tools.rs      agent tool calls: validated, read-only ug commands, time-boxed and capped
+   ├─ src/llm/          native chat models on MLX: Qwen3 port, KV cache, grammar-held generation
+   ├─ src/laya/         Laya decision models on MLX
+   ├─ src/samples.rs    the bundled sample knowledge bases
    └─ src/lib.rs        app setup; release builds serve the UI from http://localhost:14230
 ```
 
@@ -78,15 +85,15 @@ bun run tauri build      # macOS → src-tauri/target/release/bundle/macos/Andai
 
 Requirements:
 - **Rust**, plus Xcode command-line tools (macOS) or the MSVC build tools (Windows).
-- **Apple Silicon only:** CMake and the Xcode **Metal Toolchain** component (`xcodebuild -downloadComponent MetalToolchain`). The Laya decision model runs on MLX, whose Metal kernels are compiled from source during the build.
+- **Apple Silicon only:** CMake and the Xcode **Metal Toolchain** component (`xcodebuild -downloadComponent MetalToolchain`). The MLX models (native chat models and Laya) run on MLX, whose Metal kernels are compiled from source during the build.
 - **Windows only:** the Microsoft Edge **WebView2** runtime (preinstalled on Windows 11). The installer doesn't download it, because Andai makes no network requests besides model downloads.
 - **Bun 1.3+**, which is the package manager and script runner. Plain `bun test` is Bun's own runner, so use `bun run test`.
 - **Node 22+**, only for Vitest (jsdom doesn't run on Bun's runtime). Everything else runs on Bun.
 - **`ug`**, on `PATH` or in `~/.local/bin`, `~/.cargo/bin` or `~/.ug/bin` (on Windows: `ug.exe` in the same folders under `%USERPROFILE%`), or on macOS in `/opt/homebrew/bin` or `/usr/local/bin`. Finder-launched apps don't inherit the shell PATH, so `ug.rs` probes these locations.
 
 First launch:
-1. In **Settings → Models**, load **Qwen3 0.6B**. It is a 639 MB one-time download, cached in the webview's OPFS; a cached load takes about 1 s.
-2. In **Knowledge**, create a knowledge base and drop in PDFs, Markdown, TXT, CSV or source files.
+1. In **Settings → Models**, load a model. On an Apple Silicon Mac, pick **Qwen3 1.7B · MLX** (980 MB, runs natively, about 350 tokens/s); elsewhere **Qwen3 0.6B** (639 MB, cached in the webview's OPFS). A downloaded model loads in about a second.
+2. In **Knowledge**, create a knowledge base and drop in PDFs, Markdown, TXT, CSV or source files, or click **Try a sample** for a ready-made one (a fictional ferry operator's documents and code) with suggested questions.
 3. Chat in **Command Center**. The knowledge-base chip in the composer picks which KB the agent works from.
 4. Optional: **Tools** (`⌘5`, `Ctrl+5` on Windows) shows every tool and its policy; **Settings → Decision model** loads a second model to make the agent's choices: with Qwen3 1.7B as the chat model, pick Qwen3 0.6B here (best in the agent eval).
 
@@ -94,13 +101,14 @@ First launch:
 
 | Area | Status |
 |---|---|
-| Chat, streaming, `<think>` folding, stop | **Real**: wllama `createChatCompletion` |
+| Chat, streaming, `<think>` folding, stop | **Real**: native MLX in Rust (`src-tauri/src/llm/`) or wllama `createChatCompletion` |
 | Reasoning chips and Execution Trace | **Real**: each step of the turn, every decision and tool call, with timings, hits and tok/s |
 | Knowledge bases (create, ingest, re-index, remove, delete) | **Real**: `ug gen --with-embed`, with progress streamed from ug |
+| Sample knowledge bases (documents, code, both) | **Real**: bundled files, indexed by your ug like your own |
 | RAG retrieval (K, context budget) | **Real**: `ug search --snippets --json`; hits are cited as `[n]` |
 | Agentic tool loop (model-chosen ug tools, per-tool policy, approvals) | **Real**: `agent/loop.ts`, `llm/decide.ts`, `src-tauri/src/tools.rs` |
 | Persona (prompt, tone, temperature, max tokens, reasoning) | **Real**, persisted. *Auto-optimize* rewrites the prompt with the local model |
-| Model registry (download, load, unload, evict) | **Real**: wllama `ModelManager` |
+| Model registry (download, load, unload, evict) | **Real**: Rust's verified store (MLX) or wllama `ModelManager` |
 | Workflows, approvals, tool library, node editor, run simulation | **Simulated**: mock data in `src/mock/workflows.ts` |
 
 ## Security
@@ -123,7 +131,7 @@ gpuix renders with Bun. wllama's default wasm needs **Memory64 + JSPI**, which B
 
 On macOS, Tauri uses **WKWebView**, which is the Safari engine. (On Windows it uses **WebView2**, which is Chromium: wllama runs its default build there, and the loopback server below provides isolation the same way.)
 
-- **Compat build.** wllama detects the missing features (`needCompat()`), and `engine.ts` points `setCompat()` at the bundled `@wllama/wllama-compat` files. The compat build still runs on the GPU: llama.cpp offloads every layer through WebGPU. Measured on an Apple M5 Max, Qwen3 0.6B generates about **65 tok/s** and reads its prompt at about **520 tok/s** (`bun run bench:engine` shows the load log and speeds).
+- **Compat build.** wllama detects the missing features (`needCompat()`), and `engine.ts` points `setCompat()` at the bundled `@wllama/wllama-compat` files. The compat build still runs on the GPU: llama.cpp offloads every layer through WebGPU. Measured on an Apple M5 Max, Qwen3 0.6B generates about **65 tok/s** and reads its prompt at about **520 tok/s** (`bun run bench:engine` shows the load log and speeds). On Apple Silicon the MLX models skip the webview entirely and run in Rust, about 5–10× faster (docs/performance.md, *Engine*).
 - **Cross-origin isolation.** Multi-threading needs `SharedArrayBuffer`, which needs COOP/COEP. WebKit **ignores isolation on custom schemes**: `tauri://` sends the headers, but `crossOriginIsolated` stays false. Release builds therefore serve the UI from `http://localhost:14230` through Andai's own loopback server (`src-tauri/src/ui_server.rs`), which adds the headers. It binds the port before any window exists and refuses to start if another process holds it. Dev gets the same headers from Vite.
 - **ACL.** That loopback origin counts as "remote", so every app command is declared in `build.rs` and granted in `capabilities/default.json`. When you add a command, add it in both places.
 - Fonts are bundled with `@fontsource`, because COEP blocks cross-origin font CSS.

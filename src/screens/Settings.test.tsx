@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { loadDecider, removeLaya, removeLegacyCopies, useEngine } from '../llm/engine';
-import { MODELS } from '../llm/models';
+import { DEFAULT_MODEL, isMlx, MODELS } from '../llm/models';
 import { useTheme } from '../state/theme';
 import { Settings } from './Settings';
 
@@ -12,22 +12,41 @@ vi.mock('../llm/engine', async (original) => ({
   removeLegacyCopies: vi.fn().mockResolvedValue(undefined),
   loadDecider: vi.fn().mockResolvedValue(undefined),
   refreshLaya: vi.fn().mockResolvedValue(undefined),
+  refreshNative: vi.fn().mockResolvedValue(undefined),
   removeLaya: vi.fn().mockResolvedValue(undefined),
 }));
 
+const gguf = MODELS.filter((m) => !isMlx(m));
+const setMlx = (supported: boolean) => act(() => useEngine.setState({ native: { supported, chat: null, decider: null, checkpoints: [] } }));
+
 describe('Settings', () => {
-  it('lists every catalog model with a download action', () => {
+  it('lists every portable model with a download action, and no MLX model where MLX can’t run', () => {
     render(<Settings />);
     const registry = within(screen.getByRole('region', { name: 'Model registry' }));
-    for (const m of MODELS) expect(registry.getByText(m.name)).toBeInTheDocument();
+    for (const m of gguf) expect(registry.getByText(m.name)).toBeInTheDocument();
+    expect(registry.getAllByRole('button', { name: /download & load/i })).toHaveLength(gguf.length);
+    expect(registry.queryByText(/MLX/)).toBeNull();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('on Apple Silicon, lists the MLX models first and says they are faster here', () => {
+    setMlx(true);
+    render(<Settings />);
+    const registry = within(screen.getByRole('region', { name: 'Model registry' }));
+    const names = registry.getAllByText(/^Qwen3|^TinyStories/).map((n) => n.textContent);
+    expect(names.slice(0, 2)).toEqual(['Qwen3 1.7B · MLX', 'Qwen3 0.6B · MLX']);
+    expect(registry.getAllByText(/fastest on this Mac/)).toHaveLength(2);
+    expect(registry.getAllByText(/wllama · WebGPU/)).toHaveLength(gguf.length);
     expect(registry.getAllByRole('button', { name: /download & load/i })).toHaveLength(MODELS.length);
+    expect(screen.getByRole('note')).toHaveTextContent(/MLX models are much faster on this Mac/);
+    setMlx(false);
   });
 
   it('offers only decision-capable models as the decision model, and loads the one picked', async () => {
     const user = userEvent.setup();
     render(<Settings />);
     const panel = within(screen.getByRole('region', { name: 'Decision model' }));
-    const deciders = MODELS.filter((m) => m.decider);
+    const deciders = gguf.filter((m) => m.decider);
     expect(panel.getAllByRole('button', { name: /use for decisions/i })).toHaveLength(deciders.length);
     expect(panel.queryByText(MODELS.find((m) => !m.decider)!.name)).toBeNull();
     expect(panel.getByText(/using chat model/i)).toBeInTheDocument();
@@ -74,7 +93,7 @@ describe('Settings', () => {
   // old ones are user data, so removing them needs a confirm step (§1.5).
   it('offers to remove a pre-pinning copy only after the user confirms', async () => {
     const user = userEvent.setup();
-    act(() => useEngine.setState({ legacy: { [MODELS[0].id]: 639_446_688 } }));
+    act(() => useEngine.setState({ legacy: { [DEFAULT_MODEL]: 639_446_688 } }));
     render(<Settings />);
     expect(screen.getByText(/older copy/i)).toBeInTheDocument();
 
@@ -85,7 +104,7 @@ describe('Settings', () => {
 
     await user.click(screen.getByRole('button', { name: /remove old copy/i }));
     await user.click(screen.getByRole('button', { name: /^remove$/i }));
-    expect(removeLegacyCopies).toHaveBeenCalledWith(MODELS[0].id);
+    expect(removeLegacyCopies).toHaveBeenCalledWith(DEFAULT_MODEL);
     act(() => useEngine.setState({ legacy: {} }));
   });
 });

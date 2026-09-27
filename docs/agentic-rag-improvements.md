@@ -27,6 +27,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 7 | [Skip the obvious first decision](#7-skip-the-obvious-first-decision) | done 2026-09-26 · first action 100%, 45% fewer decisions |
 | 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | done 2026-09-26 · 1.7B decides worse; recommend 1.7B answers + 0.6B decisions |
 | 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | measured 2026-09-26 · worse, not shipped |
+| 10 | [Robust to the search scope](#10-robust-to-the-search-scope) | todo |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
 not shipped: 4, 9; 8 changed the recommendation (a small decision model with
@@ -37,8 +38,8 @@ same set before items 3–7). Qwen3 1.7B answering with 0.6B deciding reaches
 96.6% facts at about 7 s per question. The remaining misses are in the
 answer text, not the retrieval.
 
-**Deferred decision:** [a native llama.cpp engine](#deferred-a-native-llamacpp-engine)
-(bundled `llama-server` on Metal), to decide once items 3–9 are done.
+**Engine (decided 2026-09-27):** a native engine on Apple Silicon, MLX in
+Rust rather than llama.cpp ([below](#decided-a-native-engine-mlx)).
 
 ---
 
@@ -408,33 +409,32 @@ fixed separately.
 
 ---
 
-## Deferred: a native llama.cpp engine
+## 10. Robust to the search scope
 
-**Status:** to decide after the RAG items above are done (a human decision:
-it adds a native-code dependency, AGENTS.md §1.10).
+**Why.** Measuring the native MLX engine (below) showed the agent's answers
+hinge on one argument. For "Which function implements the group discount
+from the release notes?", Qwen3 1.7B filled `kb_search` with `"scope":
+"broad"` in MLX 4-bit, 8-bit and bf16, and `"focused"` only in GGUF Q4_K_M.
+A broad search returned one-line fragments (`fares.ts:19-19`) instead of the
+function, and the answer missed it. Three of the MLX 1.7B + 0.6B misses
+(82.8% facts, against 96.6% on wllama) are this; the full-precision model
+does it too, so it's the agent's fragility, not the engine's.
 
-**Why.** WKWebView can only run wllama's compat (WebAssembly, Asyncify)
-build. It does use the GPU (every layer on WebGPU), but measured on an Apple
-M5 Max, Qwen3 1.7B reads prompts at about 185 tok/s and writes 30–65 tok/s,
-so a grounded answer waits about 3 s before its first word. Flash attention
-is unavailable on that path, and no wllama setting (threads, batch size)
-moved the numbers (docs/performance.md, *Engine*). Native llama.cpp on Metal
-would likely be several times faster at both; measure before deciding.
+**What.** Options to measure: word the `scope` guidance in the argument
+prompt differently; pick the scope by rule (a name-like query → focused);
+or run a broad search's fragments through the evidence merge so they carry
+their surrounding lines.
 
-**What it would take.**
-- Ship `llama-server` (or link llama.cpp through a Rust crate) for macOS and
-  Windows, pinned and checksummed like the models; sign it with the app.
-- Rust starts it bound to loopback on a random port with a per-launch token,
-  or talks to it over a pipe; the webview never gets a raw socket (§9: the
-  webview is untrusted, and a local server is a new attack surface).
-- Reuse the same GGUF files and the pinned catalog; keep the choice-based
-  decisions (`decide` needs raw next-token logprobs and GBNF, which
-  `llama-server` has).
-- Keep wllama as the fallback, and let `bun run eval:agent` and
-  `bun run bench:engine` compare the two engines on the same questions.
+**Done when.** MLX 1.7B + 0.6B reaches wllama's fact rate, and wllama
+doesn't lose any.
 
-**Open questions.** Binary size per platform (Metal and CPU builds), code
-signing and notarization, how models move between the two engines, and
-whether the speed-up survives the eval (answer quality should not change
-with the same weights).
+## Decided: a native engine (MLX)
 
+**Decided 2026-09-27; what ships is described in AGENTS.md §2** (the native
+chat model facts) and docs/performance.md (*Engine*). In short: on Apple
+Silicon, Qwen3 runs natively on MLX in Rust (`src-tauri/src/llm/`), in the
+MLX thread Laya already used; wllama stays everywhere else. Measured on an
+M5 Max for Qwen3 1.7B: llama.cpp on Metal 285 tok/s, mlx-lm 347, Andai's
+port 349 (wllama: 30–65), prompts read 50× faster. MLX 4-bit ships over
+5-bit (302 tok/s, 89.7% facts) by a human decision; its quality gap is
+item 10.

@@ -68,6 +68,8 @@ export const kbDelete = (slug: string) => call<void>('kb_delete', { slug });
 export const kbIndex = (slug: string) => call<KbInfo>('kb_index', { slug });
 
 export const kbSetKind = (slug: string, kind: KbKind | null) => call<KbInfo>('kb_set_kind', { slug, kind });
+/** Adds a bundled sample (kb/samples.ts) as a knowledge base, or returns the one already added. Index it next. */
+export const kbAddSample = (sample: string) => call<KbInfo>('kb_add_sample', { sample });
 
 /** One read-only ug tool call; mirrors `ToolCall` in src-tauri/src/tools.rs, which re-validates it. */
 export type KbToolCall =

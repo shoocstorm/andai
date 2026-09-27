@@ -1,18 +1,17 @@
-// Model catalog — ported from wllama-chat/app.js. wllama loads single GGUF
-// files up to 2 GB, so larger models need gguf-split shards.
+// Model catalog. Two engines:
+// - `wllama`: a GGUF file run by llama.cpp compiled to WebAssembly, inside the
+//   webview, on every platform. wllama loads single files up to 2 GB, so
+//   larger models need gguf-split shards.
+// - `mlx`: an MLX checkpoint run natively by Rust on the Mac's GPU
+//   (src-tauri/src/llm/, Apple Silicon only). Its files, sizes and sha256
+//   live in the Rust catalog, which verifies every download.
 
-export type ModelDef = {
+type Common = {
   id: string;
   name: string;
   family: string;
   size: string;
   bytes: number;
-  /** Pinned to an immutable commit: `resolve/<40-hex sha>/…` (AGENTS.md §9). */
-  url: string;
-  /** The file's sha256 (Hugging Face's LFS oid); checked after every download. */
-  sha256: string;
-  /** URLs earlier versions downloaded from; copies cached under them can be removed. */
-  legacyUrls: string[];
   note: string;
   /** Qwen3-style `<think>` support, toggled by `enable_thinking`. */
   thinking: boolean;
@@ -25,13 +24,67 @@ export type ModelDef = {
   decider?: boolean;
 };
 
+export type WllamaDef = Common & {
+  engine: 'wllama';
+  /** Pinned to an immutable commit: `resolve/<40-hex sha>/…` (AGENTS.md §9). */
+  url: string;
+  /** The file's sha256 (Hugging Face's LFS oid); checked after every download. */
+  sha256: string;
+  /** URLs earlier versions downloaded from; copies cached under them can be removed. */
+  legacyUrls: string[];
+};
+
+export type MlxDef = Common & {
+  engine: 'mlx';
+  /** The checkpoint id in the Rust catalog (src-tauri/src/llm/catalog.rs). */
+  native: string;
+  /** The repository at its pinned commit: the cache key for `downloaded`, and shown to the user. */
+  url: string;
+};
+
+export type ModelDef = WllamaDef | MlxDef;
+
 // A commit URL always serves the same bytes; `main` can be moved under us.
 const HF = (repo: string, commit: string, file: string) => `https://huggingface.co/${repo}/resolve/${commit}/${file}`;
 const MAIN = (repo: string, file: string) => `https://huggingface.co/${repo}/resolve/main/${file}`;
 
+/**
+ * Measured on an Apple M5 Max (2026-09-27): Qwen3 1.7B generates about 350
+ * tok/s natively on MLX against 30–65 tok/s in wllama on WebGPU, and reads a
+ * prompt 50× faster (docs/performance.md, *Engine*).
+ */
 export const MODELS: ModelDef[] = [
   {
+    id: 'qwen3-1.7b-mlx',
+    engine: 'mlx',
+    native: 'qwen3-1.7b-mlx',
+    name: 'Qwen3 1.7B · MLX',
+    family: '4-bit · 1.7B params',
+    size: '980 MB',
+    bytes: 979_513_507,
+    url: 'https://huggingface.co/mlx-community/Qwen3-1.7B-4bit/tree/3b1b1768f8f8cf8351c712464f906e86c2b8269e',
+    note: 'Smarter than 0.6B and fast on a Mac: runs natively on the GPU with MLX, about 350 tok/s on an M5 Max.',
+    thinking: true,
+    n_ctx: 4096,
+    decider: true,
+  },
+  {
+    id: 'qwen3-0.6b-mlx',
+    engine: 'mlx',
+    native: 'qwen3-0.6b-mlx',
+    name: 'Qwen3 0.6B · MLX',
+    family: '8-bit · 596M params',
+    size: '645 MB',
+    bytes: 644_876_804,
+    url: 'https://huggingface.co/mlx-community/Qwen3-0.6B-8bit/tree/11de96878523501bcaa86104e3c186de07ff9068',
+    note: 'Fastest: runs natively on the GPU with MLX, about 445 tok/s on an M5 Max. A good decision model.',
+    thinking: true,
+    n_ctx: 4096,
+    decider: true,
+  },
+  {
     id: 'qwen3-0.6b',
+    engine: 'wllama',
     name: 'Qwen3 0.6B',
     family: 'Q8_0 · 596M params',
     size: '639 MB',
@@ -46,6 +99,7 @@ export const MODELS: ModelDef[] = [
   },
   {
     id: 'qwen3-1.7b',
+    engine: 'wllama',
     name: 'Qwen3 1.7B',
     family: 'Q4_K_M · 1.7B params',
     size: '1.1 GB',
@@ -60,6 +114,7 @@ export const MODELS: ModelDef[] = [
   },
   {
     id: 'stories-260k',
+    engine: 'wllama',
     name: 'TinyStories 260K',
     family: 'F32 · 260K params',
     size: '1.2 MB',
@@ -74,8 +129,14 @@ export const MODELS: ModelDef[] = [
   },
 ];
 
-export const DEFAULT_MODEL = MODELS[0].id;
+/** The portable default (every platform, and the e2e runs, AGENTS.md §5). */
+export const DEFAULT_MODEL = 'qwen3-0.6b';
 export const modelById = (id: string | null | undefined) => MODELS.find((m) => m.id === id);
+export const isMlx = (def: ModelDef | undefined): def is MlxDef => def?.engine === 'mlx';
+/** The models this computer can run: MLX ones only where Rust reports MLX (Apple Silicon). */
+export const availableModels = (mlx: boolean) => MODELS.filter((m) => mlx || m.engine !== 'mlx');
+/** What to suggest first: natively on MLX where it runs (much faster), else the portable default. */
+export const recommendedModel = (mlx: boolean): ModelDef => modelById(mlx ? 'qwen3-1.7b-mlx' : DEFAULT_MODEL)!;
 
 /**
  * Laya decision models (src-tauri/src/laya/): encoders that score a choice in
@@ -102,10 +163,10 @@ export const LAYA_MODELS: LayaDef[] = [
 
 export const layaById = (id: string | null | undefined) => LAYA_MODELS.find((m) => m.id === id);
 
-/** A Laya checkpoint file at its pinned commit: the only URLs a Laya download fetches. */
-export function layaFileUrl(repo: string, commit: string, path: string): string {
+/** A checkpoint file at its pinned commit: the only URLs a Laya or MLX download fetches. */
+export function pinnedFileUrl(repo: string, commit: string, path: string): string {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !/^[0-9a-f]{40}$/.test(commit) || !/^[\w.-]+(\/[\w.-]+)*$/.test(path) || path.split('/').includes('..')) {
-    throw new Error(`Not a pinned Laya file: ${repo}@${commit}/${path}`);
+    throw new Error(`Not a pinned checkpoint file: ${repo}@${commit}/${path}`);
   }
   return HF(repo, commit, path);
 }

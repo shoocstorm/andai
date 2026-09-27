@@ -24,6 +24,15 @@ describe('Command Center', () => {
     }
   });
 
+  it('suggests the sample’s own questions when chat is grounded in a sample knowledge base', () => {
+    const kb = { slug: 'tidewater-ferries-code', name: 'Tidewater Ferries · Code', kind: 'code', status: 'ready', sources: [] };
+    useKb.setState({ kbs: [kb as never], grounding: kb.slug });
+    render(<CommandCenter />);
+    expect(screen.getByText(/Try asking Tidewater Ferries · Code/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Which functions call computeFare?' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /brief me/i })).toBeNull();
+  });
+
   it('only enables send once there is text', async () => {
     const user = userEvent.setup();
     render(<CommandCenter />);

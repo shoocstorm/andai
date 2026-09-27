@@ -8,6 +8,7 @@
 //   bun run test:e2e --release    # release binary: http://localhost origin + ACL
 //   E2E_MODEL=stories-260k ...    # engine plumbing only (answer not checked)
 //   bun run test:e2e --update-perf  # record this run as the perf baseline
+//   E2E_MLX=none ...              # skip the native MLX chat model probe (Apple Silicon)
 //   E2E_LAYA=none ...             # skip the Laya decision probe (Apple Silicon; default laya-multilingual)
 //
 // Needs: ug on PATH (or ~/.local/bin), network on first run for the model.
@@ -17,7 +18,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { devOnPort } from './dev-port.mjs';
-import { keepLaya, seedLaya } from './laya-cache.mjs';
+import { keepCheckpoint, seedCheckpoint } from './checkpoint-cache.mjs';
 import { byLine, compare } from './perf-lib.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -42,12 +43,16 @@ const canaryUrl = `http://127.0.0.1:${canary.address().port}/exfil`;
 // Knowledge-base files go to a throwaway dir, never the user's real ones.
 const dataDir = mkdtempSync(join(tmpdir(), 'andai-e2e-'));
 // One real Laya decision on Apple Silicon (laya/, AGENTS.md §2). The checkpoint
-// downloads once into a test cache (scripts/laya-cache.mjs), never user data.
-const laya = process.platform === 'darwin' && process.arch === 'arm64' && process.env.E2E_LAYA !== 'none' ? (process.env.E2E_LAYA ?? 'laya-multilingual') : '';
+// downloads once into a test cache (scripts/checkpoint-cache.mjs), never user data.
+const appleSilicon = process.platform === 'darwin' && process.arch === 'arm64';
+const laya = appleSilicon && process.env.E2E_LAYA !== 'none' ? (process.env.E2E_LAYA ?? 'laya-multilingual') : '';
+// And one answer on a native MLX chat model (llm/, AGENTS.md §2), cached the same way.
+const mlx = appleSilicon && process.env.E2E_MLX !== 'none' ? (process.env.E2E_MLX ?? 'qwen3-0.6b-mlx') : '';
 const env = {
   ...process.env,
   VITE_SMOKE: 'e2e',
   VITE_SMOKE_LAYA: laya,
+  VITE_SMOKE_MLX: mlx,
   VITE_SMOKE_FILES: fixtures.join(','),
   VITE_SMOKE_MODEL: model,
   VITE_SMOKE_CANARY: canaryUrl,
@@ -58,7 +63,7 @@ const env = {
   ANDAI_E2E_FILES: fixtures.join(','),
 };
 
-if (laya) seedLaya(dataDir, laya);
+for (const id of [laya, mlx]) if (id) seedCheckpoint(dataDir, id);
 
 function launch() {
   if (!release) {
@@ -112,7 +117,7 @@ await done;
 try {
   process.kill(-child.pid, 'SIGTERM');
 } catch {}
-if (laya) keepLaya(dataDir, laya);
+for (const id of [laya, mlx]) if (id) keepCheckpoint(dataDir, id);
 rmSync(dataDir, { recursive: true, force: true });
 canary.close();
 
@@ -165,6 +170,14 @@ if (failure || !result) {
     check('Laya decides in Rust on the GPU, under 100 ms', !l.error && l.slot === 'decider' && l.sum > 0.999 && l.sum < 1.001 && l.ms < 100, JSON.stringify(l));
     console.log(`[e2e] laya: ${l.model} chose ${l.chosen} @${Math.round((l.confidence ?? 0) * 100)}% in ${l.ms?.toFixed(1)} ms (model ${l.modelMs?.toFixed(1)} ms, ${l.inputTokens} tokens${l.truncated ? ', cut to fit' : ''})`);
   }
+  if (mlx) {
+    const n = result.mlx ?? {};
+    check('MLX model answers natively, grounded, over 100 tok/s', !n.error && /MLX/.test(n.backend ?? '') && n.stats?.tokPerSec > 100 && /cross-origin|coop|coep/i.test(n.answer ?? ''), JSON.stringify(n).slice(0, 600));
+    check('MLX argument fill is held to its grammar', n.fill?.ok === true && /^\{/.test(n.fill.raw ?? ''), JSON.stringify(n.fill));
+    console.log(`[e2e] mlx: ${n.backend} ${n.stats?.tokPerSec?.toFixed(0)} tok/s, first token ${n.stats?.firstTokenMs?.toFixed(0)} ms, load ${n.loadMs?.toFixed(0)} ms, fill ${n.fill?.ms?.toFixed(0)} ms`);
+  }
+  const sm = result.sample ?? {};
+  check('a sample knowledge base arrives with its bundled files', !sm.error && sm.kind === 'mixed' && sm.sources?.length === 7 && sm.sources.every(([, , st]) => st === 'pending'), JSON.stringify(sm));
   if (a.turn?.agent) {
     console.log(`[e2e] agent actions: ${a.turn.agent.map((s) => `${s.action}${s.confidence != null ? `@${Math.round(s.confidence * 100)}%` : ''}${s.note ? ' (fallback)' : ''}`).join(' → ')}`);
   }

@@ -271,7 +271,7 @@
           <div class="actor c-decide">
             <span class="label">Decision model</span>
             <h3>Picks the next step</h3>
-            <p>Qwen3 through wllama, or a <b>Laya</b> encoder on the Mac’s GPU (Apple Silicon).</p>
+            <p>Qwen3 (natively on MLX on Apple Silicon, else through wllama), or a <b>Laya</b> encoder on the Mac’s GPU.</p>
             <ul>
               <li>Scores lettered options in one pass</li>
               <li>Laya: “do the results suffice?” (yes/no)</li>
@@ -282,7 +282,7 @@
           <div class="actor c-chat">
             <span class="label">Chat model</span>
             <h3>Writes</h3>
-            <p>Qwen3 (0.6B or 1.7B) through wllama, on WebGPU.</p>
+            <p>Qwen3 (0.6B or 1.7B): natively on the GPU with MLX on Apple Silicon, through wllama on WebGPU elsewhere.</p>
             <ul>
               <li>Tool arguments, held to a grammar made from the tool’s schema</li>
               <li>The final answer, citing passages as <code>[n]</code></li>

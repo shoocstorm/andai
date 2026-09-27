@@ -14,6 +14,7 @@ const COMMANDS: &[&str] = &[
     "kb_index",
     "kb_search",
     "kb_set_kind",
+    "kb_add_sample",
     "kb_tool",
     "laya_status",
     "laya_write_chunk",
@@ -23,15 +24,24 @@ const COMMANDS: &[&str] = &[
     "laya_unload",
     "laya_decide",
     "laya_relevance",
+    "llm_status",
+    "llm_write_chunk",
+    "llm_finish",
+    "llm_remove",
+    "llm_load",
+    "llm_unload",
+    "llm_generate",
+    "llm_cancel",
 ];
 
 fn main() {
-    // `cfg(laya)`: the Laya decision model (MLX) is built in. MLX exists only
-    // for Apple Silicon; everywhere else src/laya/ reports "not supported".
-    println!("cargo::rustc-check-cfg=cfg(laya)");
+    // `cfg(mlx)`: MLX is built in, with the models that run on it (the Laya
+    // decision model, src/laya/, and the native chat models, src/llm/). MLX
+    // exists only for Apple Silicon; everywhere else those report "not supported".
+    println!("cargo::rustc-check-cfg=cfg(mlx)");
     let target = |k: &str| std::env::var(k).unwrap_or_default();
     if target("CARGO_CFG_TARGET_OS") == "macos" && target("CARGO_CFG_TARGET_ARCH") == "aarch64" {
-        println!("cargo::rustc-cfg=laya");
+        println!("cargo::rustc-cfg=mlx");
     }
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),

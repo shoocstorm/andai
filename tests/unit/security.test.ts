@@ -21,9 +21,10 @@ const PERMISSION_ALLOWLIST = ['core:default', 'core:window:allow-set-theme', 'co
 const URL_ALLOWLIST = ['llm/models.ts'];
 /**
  * Files that may call a network API. GGUF models download through wllama's
- * ModelManager; Laya checkpoints can't, so llm/laya.ts fetches them itself,
- * only from pinned Hugging Face commit URLs (models.ts `layaFileUrl`), and
- * Rust verifies every file's sha256 before keeping it (laya/store.rs).
+ * ModelManager; Laya and MLX chat checkpoints can't, so llm/laya.ts fetches
+ * them itself, only from pinned Hugging Face commit URLs (models.ts
+ * `pinnedFileUrl`), and Rust verifies every file's sha256 before keeping it
+ * (laya/store.rs).
  */
 const NETWORK_ALLOWLIST = ['llm/laya.ts'];
 /** The e2e harness names example.com to prove it gets blocked. */
@@ -97,10 +98,10 @@ describe('egress (AGENTS.md §1.4)', () => {
     expect(hits).toEqual([]);
   });
 
-  it('the Laya download fetches only pinned catalog URLs', () => {
+  it('checkpoint downloads fetch only pinned catalog URLs', () => {
     const src = read('src/llm/laya.ts');
     const calls = [...src.matchAll(/\bfetch\(([^,)]*)/g)].map((m) => m[1].trim());
-    expect(calls).toEqual(['layaFileUrl(c.repo']);
+    expect(calls).toEqual(['pinnedFileUrl(c.repo']);
     expect(src).not.toMatch(/XMLHttpRequest|WebSocket|sendBeacon|EventSource/);
   });
 

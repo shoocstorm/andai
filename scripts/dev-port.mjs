@@ -4,7 +4,8 @@
 // harness on the same port sometimes loaded that app (no harness in it) and
 // waited until its timeout (seen 2026-09-26). Harness runs therefore use their
 // own port, and with it their own webview storage (models download once more).
-export const HARNESS_PORT = 1431;
+// ANDAI_HARNESS_PORT moves it, e.g. when a leftover dev server holds 1431.
+export const HARNESS_PORT = Number(process.env.ANDAI_HARNESS_PORT) || 1431;
 
 /** Env and `tauri dev` args that serve and load the UI on `port`. */
 export function devOnPort(port = HARNESS_PORT) {

@@ -81,7 +81,9 @@ pasting in whatever one search returns:
   1.7B as the chat model with Qwen3 0.6B deciding**: 96.6% of answers had the
   expected facts, against 86.2% with 0.6B alone, at about 7 s per question
   instead of 3.6 s. A 1.7B decision model did worse: it often asked a
-  clarifying question instead of answering.
+  clarifying question instead of answering. The MLX models can decide too
+  (Apple Silicon): with Qwen3 1.7B · MLX answering, Qwen3 0.6B · MLX deciding
+  takes about 25 ms per decision.
 - **Laya decision models (Apple Silicon Macs).** *Settings → Decision model*
   also offers **Laya Multilingual** (322M parameters, 614 MB) and **Laya
   English** (421M, 804 MB): small encoders built for exactly this kind of
@@ -134,6 +136,14 @@ pasting in whatever one search returns:
   shown as it runs.
 - **Multiple knowledge bases.** Keep separate collections (e.g. *Specs*,
   *Research*) and choose which one grounds the chat from the composer.
+- **Sample knowledge bases** to try the agent before adding your own files:
+  *Tidewater Ferries*, a made-up ferry operator, as **documents** (a
+  handbook, a refund policy, release notes), as **code** (its booking service
+  in TypeScript), or **both**. One click adds a sample, indexes it on your
+  computer in a few seconds and grounds the chat in it, and the Command
+  Center then suggests questions the sample can answer. Offered on the
+  Knowledge screen, in *New knowledge base*, and as *Try a sample* when you
+  have none. A sample is an ordinary knowledge base: delete it any time.
 - **Kind: documents, code or mixed**, set automatically from your files and
   changeable next to the source list. It decides which agent tools apply:
   the code tools (symbols, callers) are offered only for code.
@@ -154,17 +164,33 @@ pasting in whatever one search returns:
 ## Models — on-device inference · Available
 
 - Built-in catalog: **Qwen3 0.6B** (default, 639 MB), **Qwen3 1.7B**
-  (1.1 GB, smarter and slower) and a tiny test model.
+  (1.1 GB, smarter and slower) and a tiny test model, on every computer; and
+  on Apple Silicon Macs, **Qwen3 1.7B · MLX** (980 MB) and **Qwen3 0.6B ·
+  MLX** (645 MB), listed first there.
+- **MLX models are much faster on a Mac.** They run natively on the Mac's
+  GPU with Apple's MLX, instead of inside the app's web view. Measured on an
+  Apple M5 Max with a grounded-size prompt: Qwen3 1.7B · MLX writes about
+  **350 tokens/second** and starts answering after about **60 ms**, where
+  Qwen3 1.7B in the web view writes 30–65 tokens/second and starts after
+  about 3 s; Qwen3 0.6B · MLX writes about 450 tokens/second. A whole agent
+  question (search, decide, answer) took 0.6 s instead of 7.7 s. They're
+  4-bit and 8-bit versions of the same models, so answers can differ: in our
+  agent eval, Qwen3 1.7B · MLX with Qwen3 0.6B · MLX deciding found the
+  expected facts in 82.8% of answers, against 96.6% for the web-view Qwen3
+  1.7B with 0.6B deciding (we're working on the gap; it's mostly one search
+  setting). Not available on Intel Macs or Windows. Settings marks which
+  engine runs each model.
 - One-time download from Hugging Face with progress. After that the model loads
   from the local cache: about 1.3 s for Qwen3 0.6B in our tests on an Apple Silicon Mac.
 - **Verified downloads.** Each model comes from a fixed Hugging Face commit and
-  must match its recorded sha256 before it loads. This takes about 7 s for
+  must match its recorded sha256 before it loads (for MLX models, every file
+  of it). This takes about 7 s for
   Qwen3 0.6B, once per download, shown as *Verifying…*. After upgrading, models
   download once more; **Settings → Models** offers to remove the older copy,
   after asking you to confirm.
-- Runs with [wllama](https://github.com/ngxson/wllama) (llama.cpp compiled to
-  WebAssembly) on the GPU through WebGPU: every layer of the model runs on
-  the GPU. On an Apple M5 Max we measured Qwen3 0.6B writing about 65
+- The other models run with [wllama](https://github.com/ngxson/wllama)
+  (llama.cpp compiled to WebAssembly) on the GPU through WebGPU: every layer
+  of the model runs on the GPU. On an Apple M5 Max we measured Qwen3 0.6B writing about 65
   tokens/second after reading its prompt at about 520 tokens/second; Qwen3
   1.7B writes 30–65 tokens/second (it varies with how busy the Mac is) and
   reads about 185 tokens/second, so a grounded answer starts after about

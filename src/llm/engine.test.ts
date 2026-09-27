@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
 vi.mock('./models', () => {
   const def = {
     id: 'tiny',
+    engine: 'wllama',
     name: 'Tiny',
     bytes: 8,
     url: 'https://huggingface.co/o/r/resolve/0000000000000000000000000000000000000000/t.gguf',
@@ -25,7 +26,12 @@ vi.mock('./models', () => {
     n_ctx: 1024,
     thinking: false,
   };
-  return { MODELS: [def], modelById: (id: string) => (id === 'tiny' ? def : undefined), layaById: () => undefined };
+  return {
+    MODELS: [def],
+    modelById: (id: string) => (id === 'tiny' ? def : undefined),
+    layaById: () => undefined,
+    isMlx: (d?: { engine?: string }) => d?.engine === 'mlx',
+  };
 });
 
 vi.mock('@wllama/wllama', () => {

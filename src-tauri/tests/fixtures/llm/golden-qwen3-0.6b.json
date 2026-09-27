@@ -1,0 +1,458 @@
+{
+ "source": "transformers + mlx-lm (models--mlx-community--Qwen3-0.6B-8bit)",
+ "cases": {
+  "system_user_nothink": {
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are Andai, a local assistant. Answer from the knowledge base when it helps."
+    },
+    {
+     "role": "user",
+     "content": "How long are refunds valid for a cancelled ferry?"
+    }
+   ],
+   "enable_thinking": false,
+   "text": "<|im_start|>system\nYou are Andai, a local assistant. Answer from the knowledge base when it helps.<|im_end|>\n<|im_start|>user\nHow long are refunds valid for a cancelled ferry?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+   "ids": [
+    151644,
+    8948,
+    198,
+    2610,
+    525,
+    1597,
+    2143,
+    11,
+    264,
+    2205,
+    17847,
+    13,
+    21806,
+    504,
+    279,
+    6540,
+    2331,
+    979,
+    432,
+    8609,
+    13,
+    151645,
+    198,
+    151644,
+    872,
+    198,
+    4340,
+    1293,
+    525,
+    72518,
+    2697,
+    369,
+    264,
+    25681,
+    51550,
+    30,
+    151645,
+    198,
+    151644,
+    77091,
+    198,
+    151667,
+    271,
+    151668,
+    271
+   ],
+   "greedy": [
+    785,
+    31839,
+    315,
+    264,
+    20965,
+    369,
+    264,
+    25681,
+    51550,
+    13798,
+    389,
+    279,
+    3151,
+    3793,
+    323,
+    4682,
+    315,
+    279,
+    11727,
+    476,
+    2473,
+    9128,
+    13,
+    1416
+   ],
+   "greedy_text": "The validity of a refund for a cancelled ferry depends on the specific terms and conditions of the ticket or service agreement. If",
+   "letter_ids": {
+    "A": 32,
+    "B": 33,
+    "C": 34
+   },
+   "first_logprobs": {
+    "A": -4.607183456420898,
+    "B": -12.357183456420898,
+    "C": -8.607183456420898
+   },
+   "first_top5": [
+    [
+     785,
+     -0.35718345642089844
+    ],
+    [
+     3945,
+     -2.1071834564208984
+    ],
+    [
+     11190,
+     -3.7321834564208984
+    ],
+    [
+     2121,
+     -3.8571834564208984
+    ],
+    [
+     37,
+     -4.107183456420898
+    ]
+   ]
+  },
+  "system_user_think": {
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are Andai, a local assistant. Answer from the knowledge base when it helps."
+    },
+    {
+     "role": "user",
+     "content": "Hi!"
+    }
+   ],
+   "enable_thinking": true,
+   "text": "<|im_start|>system\nYou are Andai, a local assistant. Answer from the knowledge base when it helps.<|im_end|>\n<|im_start|>user\nHi!<|im_end|>\n<|im_start|>assistant\n",
+   "ids": [
+    151644,
+    8948,
+    198,
+    2610,
+    525,
+    1597,
+    2143,
+    11,
+    264,
+    2205,
+    17847,
+    13,
+    21806,
+    504,
+    279,
+    6540,
+    2331,
+    979,
+    432,
+    8609,
+    13,
+    151645,
+    198,
+    151644,
+    872,
+    198,
+    13048,
+    0,
+    151645,
+    198,
+    151644,
+    77091,
+    198
+   ]
+  },
+  "history": {
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are Andai, a local assistant. Answer from the knowledge base when it helps."
+    },
+    {
+     "role": "user",
+     "content": "What is Andai?"
+    },
+    {
+     "role": "assistant",
+     "content": "<think>\nThe user asks about the app.\n</think>\n\nAndai is a local-first agent."
+    },
+    {
+     "role": "user",
+     "content": "And what does it add for a vehicle? Ünïcödé ✓ 日本"
+    }
+   ],
+   "enable_thinking": false,
+   "text": "<|im_start|>system\nYou are Andai, a local assistant. Answer from the knowledge base when it helps.<|im_end|>\n<|im_start|>user\nWhat is Andai?<|im_end|>\n<|im_start|>assistant\nAndai is a local-first agent.<|im_end|>\n<|im_start|>user\nAnd what does it add for a vehicle? Ünïcödé ✓ 日本<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+   "ids": [
+    151644,
+    8948,
+    198,
+    2610,
+    525,
+    1597,
+    2143,
+    11,
+    264,
+    2205,
+    17847,
+    13,
+    21806,
+    504,
+    279,
+    6540,
+    2331,
+    979,
+    432,
+    8609,
+    13,
+    151645,
+    198,
+    151644,
+    872,
+    198,
+    3838,
+    374,
+    1597,
+    2143,
+    30,
+    151645,
+    198,
+    151644,
+    77091,
+    198,
+    3036,
+    2143,
+    374,
+    264,
+    2205,
+    36943,
+    8315,
+    13,
+    151645,
+    198,
+    151644,
+    872,
+    198,
+    3036,
+    1128,
+    1558,
+    432,
+    912,
+    369,
+    264,
+    7310,
+    30,
+    30512,
+    77,
+    37572,
+    66,
+    2956,
+    128505,
+    52375,
+    75402,
+    21894,
+    151645,
+    198,
+    151644,
+    77091,
+    198,
+    151667,
+    271,
+    151668,
+    271
+   ]
+  },
+  "user_only": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "  leading and trailing spaces  "
+    }
+   ],
+   "enable_thinking": false,
+   "text": "<|im_start|>user\n  leading and trailing spaces  <|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+   "ids": [
+    151644,
+    872,
+    198,
+    220,
+    6388,
+    323,
+    27748,
+    12621,
+    256,
+    151645,
+    198,
+    151644,
+    77091,
+    198,
+    151667,
+    271,
+    151668,
+    271
+   ]
+  },
+  "decision": {
+   "messages": [
+    {
+     "role": "system",
+     "content": "Make the requested decision from the supplied state. Follow the output format exactly."
+    },
+    {
+     "role": "user",
+     "content": "State:\nUser request: What is the refund window for weather cancellations?\nKnowledge base: documents.\n\nQuestion:\nWhat should the agent do next?\n\nAllowed options:\nA. Answer now\nB. Search the knowledge base\nC. Ask a clarifying question\n\nReply with exactly one option letter from: A, B, C."
+    }
+   ],
+   "enable_thinking": false,
+   "text": "<|im_start|>system\nMake the requested decision from the supplied state. Follow the output format exactly.<|im_end|>\n<|im_start|>user\nState:\nUser request: What is the refund window for weather cancellations?\nKnowledge base: documents.\n\nQuestion:\nWhat should the agent do next?\n\nAllowed options:\nA. Answer now\nB. Search the knowledge base\nC. Ask a clarifying question\n\nReply with exactly one option letter from: A, B, C.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+   "ids": [
+    151644,
+    8948,
+    198,
+    8078,
+    279,
+    11223,
+    5480,
+    504,
+    279,
+    17221,
+    1584,
+    13,
+    11112,
+    279,
+    2550,
+    3561,
+    6896,
+    13,
+    151645,
+    198,
+    151644,
+    872,
+    198,
+    1397,
+    510,
+    1474,
+    1681,
+    25,
+    3555,
+    374,
+    279,
+    20965,
+    3241,
+    369,
+    9104,
+    18467,
+    804,
+    5267,
+    80334,
+    2331,
+    25,
+    9293,
+    382,
+    14582,
+    510,
+    3838,
+    1265,
+    279,
+    8315,
+    653,
+    1790,
+    1939,
+    35382,
+    2606,
+    510,
+    32,
+    13,
+    21806,
+    1431,
+    198,
+    33,
+    13,
+    7542,
+    279,
+    6540,
+    2331,
+    198,
+    34,
+    13,
+    20437,
+    264,
+    19497,
+    7766,
+    3405,
+    271,
+    20841,
+    448,
+    6896,
+    825,
+    2999,
+    6524,
+    504,
+    25,
+    362,
+    11,
+    425,
+    11,
+    356,
+    13,
+    151645,
+    198,
+    151644,
+    77091,
+    198,
+    151667,
+    271,
+    151668,
+    271
+   ],
+   "greedy": [
+    32,
+    13,
+    21806,
+    1431,
+    151645
+   ],
+   "greedy_text": "A. Answer now<|im_end|>",
+   "letter_ids": {
+    "A": 32,
+    "B": 33,
+    "C": 34
+   },
+   "first_logprobs": {
+    "A": -0.17093658447265625,
+    "B": -1.9209365844726562,
+    "C": -4.545936584472656
+   },
+   "first_top5": [
+    [
+     32,
+     -0.17093658447265625
+    ],
+    [
+     33,
+     -1.9209365844726562
+    ],
+    [
+     34,
+     -4.545936584472656
+    ],
+    [
+     16141,
+     -10.170936584472656
+    ],
+    [
+     7771,
+     -13.045936584472656
+    ]
+   ]
+  }
+ }
+}

@@ -133,6 +133,14 @@ first action, 95.8% facts, 91.3% grounded at 6.47 s per question; 1.7B for
 both scored 77.8%, 87.5% and 90.5% at 7.88 s (details in
 [agentic-rag-improvements.md](agentic-rag-improvements.md#1-agent-eval-set)).
 
+The native MLX models have their own sections too (2026-09-27, 34 questions,
+`agent-eval:qwen3-1.7b-mlx+qwen3-0.6b-mlx` and the single-model ones): MLX
+1.7B answering with MLX 0.6B deciding scored 100% first action, 82.8% facts,
+86.2% grounded at **0.58 s per question** (decisions 23 ms); MLX 1.7B alone
+85.3%, 79.3%, 93.1% at 0.58 s; MLX 0.6B alone 100%, 82.8%, 55.2% at 0.46 s.
+Why they find fewer facts than wllama's 1.7B (96.6% at 7.65 s on the same
+34 questions) is in AGENTS.md §2 and tracker item 10.
+
 Decisions run on the chat model unless `EVAL_DECIDER` names a decision
 model: the harness sets it explicitly, because the app otherwise restores the
 decision model saved in Settings, which would leak into the run. Three runs
@@ -150,6 +158,8 @@ bun run eval:agent --only doc-wind,code-peak      # a subset (not compared)
 bun run eval:agent --update                       # re-record the baseline
 EVAL_MODEL=qwen3-1.7b bun run eval:agent          # another answer model (not compared with the baseline)
 EVAL_DECIDER=qwen3-1.7b bun run eval:agent        # a separate decision model
+EVAL_MODEL=qwen3-1.7b-mlx EVAL_DECIDER=qwen3-0.6b-mlx bun run eval:agent  # native MLX (Apple Silicon)
+ANDAI_HARNESS_PORT=1432 bun run eval:agent        # when something else holds the harness port (1431)
 ```
 
 ### Engine: `bun run bench:engine`
@@ -181,6 +191,23 @@ Also measured, and not worth changing:
 
 Settings in one launch affect each other (the first is always fastest), so
 compare settings in separate launches: `BENCH_CONFIGS='[{"name":"x","n_threads":2}]'`.
+
+**Native MLX** (`BENCH_MODEL=qwen3-1.7b-mlx`, Apple Silicon): the same
+prompt, natively in Rust (`src-tauri/src/llm/`). Measured 2026-09-27, Apple
+M5 Max, dev build, two launches each:
+
+| Model | Generation | Prompt | First token | Load |
+|---|---|---|---|---|
+| Qwen3 1.7B · MLX 4-bit | 348–352 tok/s | 9,850 tok/s | 56 ms | 0.49 s |
+| Qwen3 0.6B · MLX 8-bit | 448–449 tok/s | 17,400–17,850 tok/s | 31–32 ms | 0.47 s |
+| Qwen3 1.7B · MLX 5-bit (not shipped) | 298–303 tok/s | 9,350 tok/s | 58 ms | 0.51 s |
+| Qwen3 1.7B · wllama Q4_K_M (above) | 29–64 tok/s | 185 tok/s | ~3 s | — |
+
+For reference, outside the app on the same Mac: mlx-lm 0.31 (Python) 347
+tok/s generation and 12,200 prompt for the 4-bit 1.7B; llama.cpp b11205 on
+Metal with flash attention, the GGUF Q4_K_M wllama loads, 285 and 8,770.
+`bun run test:llm` prints the same numbers from Rust directly. A reply held
+to a grammar (argument filling) isn't pipelined: 80–90 ms for 17 tokens.
 
 ## Workflow
 

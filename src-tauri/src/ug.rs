@@ -230,7 +230,7 @@ pub(crate) fn data_dir(app: &AppHandle, parts: &[&str]) -> Result<PathBuf, Strin
     Ok(dir)
 }
 
-fn kb_root(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn kb_root(app: &AppHandle) -> Result<PathBuf, String> {
     data_dir(app, &["kb"])
 }
 
@@ -247,12 +247,12 @@ pub(crate) fn kb_dir(app: &AppHandle, slug: &str) -> Result<PathBuf, String> {
     Ok(kb_root(app)?.join(slug))
 }
 
-fn read_meta(dir: &Path) -> Result<KbMeta, String> {
+pub(crate) fn read_meta(dir: &Path) -> Result<KbMeta, String> {
     let raw = fs::read_to_string(dir.join("kb.json")).map_err(|e| e.to_string())?;
     serde_json::from_str(&raw).map_err(|e| e.to_string())
 }
 
-fn write_meta(dir: &Path, meta: &KbMeta) -> Result<(), String> {
+pub(crate) fn write_meta(dir: &Path, meta: &KbMeta) -> Result<(), String> {
     let raw = serde_json::to_string_pretty(meta).map_err(|e| e.to_string())?;
     write_private(&dir.join("kb.json"), raw.as_bytes()).map_err(|e| e.to_string())
 }
@@ -307,7 +307,7 @@ fn info(dir: &Path, meta: KbMeta, projects: &[Value], indexing: &HashSet<String>
     }
 }
 
-fn load_info(app: &AppHandle, slug: &str, indexing: &Indexing) -> Result<KbInfo, String> {
+pub(crate) fn load_info(app: &AppHandle, slug: &str, indexing: &Indexing) -> Result<KbInfo, String> {
     let dir = kb_dir(app, slug)?;
     let meta = read_meta(&dir)?;
     let busy = indexing.0.lock().unwrap().clone();
@@ -426,6 +426,11 @@ pub async fn kb_list(app: AppHandle, indexing: State<'_, Indexing>) -> Result<Ve
 
 #[tauri::command]
 pub fn kb_create(app: AppHandle, name: String, indexing: State<'_, Indexing>) -> Result<KbInfo, String> {
+    create_kb(&app, &name, &indexing)
+}
+
+/// A new, empty knowledge base named `name`, under a slug no other KB uses.
+pub(crate) fn create_kb(app: &AppHandle, name: &str, indexing: &Indexing) -> Result<KbInfo, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("Give the knowledge base a name.".into());
@@ -433,11 +438,11 @@ pub fn kb_create(app: AppHandle, name: String, indexing: State<'_, Indexing>) ->
     let base = slugify(name);
     let mut slug = base.clone();
     let mut n = 2;
-    while kb_dir(&app, &slug)?.exists() {
+    while kb_dir(app, &slug)?.exists() {
         slug = format!("{base}-{n}");
         n += 1;
     }
-    let dir = kb_dir(&app, &slug)?;
+    let dir = kb_dir(app, &slug)?;
     create_private_dir(&dir.join("docs")).map_err(|e| e.to_string())?;
     let meta = KbMeta {
         slug: slug.clone(),
@@ -449,7 +454,7 @@ pub fn kb_create(app: AppHandle, name: String, indexing: State<'_, Indexing>) ->
         kind_override: None,
     };
     write_meta(&dir, &meta)?;
-    load_info(&app, &slug, &indexing)
+    load_info(app, &slug, indexing)
 }
 
 /// Ingests each path the user granted (see grants.rs) into `docs/`; returns

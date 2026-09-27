@@ -1,8 +1,8 @@
-import { Check, Cpu, Download, GitFork, HardDrive, Loader2, Monitor, Moon, Palette, Power, Radio, Sun, Trash2, X } from 'lucide-react';
+import { Check, Cpu, Download, GitFork, HardDrive, Loader2, Monitor, Moon, Palette, Power, Radio, Sun, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, Modal, fmtBytes } from '../components/ui';
-import { evictModel, loadDecider, loadModel, refreshLaya, removeLaya, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
-import { LAYA_MODELS, layaById, MODELS, modelById, type LayaDef, type ModelDef } from '../llm/models';
+import { evictModel, loadDecider, loadModel, refreshLaya, refreshNative, removeLaya, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
+import { availableModels, isMlx, LAYA_MODELS, layaById, modelById, type LayaDef, type ModelDef } from '../llm/models';
 import { clearChat } from '../state/chat';
 import { useKb } from '../state/kb';
 import { useTheme, type ThemeMode } from '../state/theme';
@@ -20,7 +20,7 @@ function DecisionModel() {
   const e = useEngine();
   const d = e.decider;
   const chat = modelById(e.loadedId);
-  const candidates = MODELS.filter((m) => m.decider);
+  const candidates = availableModels(e.native.supported).filter((m) => m.decider);
   const [removing, setRemoving] = useState<LayaDef | null>(null);
   useEffect(() => {
     void refreshLaya();
@@ -127,11 +127,28 @@ function DecisionModel() {
   );
 }
 
+/** Which engine runs a model, on its card: MLX is the fast one on a Mac. */
+function EngineChip({ def }: { def: ModelDef }) {
+  return isMlx(def) ? (
+    <span className="pill green" title="Runs natively on your Mac’s GPU with MLX">
+      <Zap size={11} /> MLX · Metal · fastest on this Mac
+    </span>
+  ) : (
+    <span className="pill" title="llama.cpp compiled to WebAssembly, in the app’s webview, on WebGPU">
+      wllama · WebGPU
+    </span>
+  );
+}
+
 export function Settings() {
   const e = useEngine();
   const ug = useKb((s) => s.ug);
   const kbs = useKb((s) => s.kbs);
   const [legacyFor, setLegacyFor] = useState<ModelDef | null>(null);
+  const mlx = e.native.supported;
+  useEffect(() => {
+    void refreshNative();
+  }, []);
 
   return (
     <div className="screen">
@@ -140,7 +157,10 @@ export function Settings() {
           <h1>
             Neural <span className="grad-text">Core</span>
           </h1>
-          <p>Models run inside Andai with wllama — llama.cpp compiled to WebAssembly. Each downloads once, then works offline.</p>
+          <p>
+            Models run inside Andai: natively on your Mac’s GPU with MLX on Apple Silicon, or with wllama (llama.cpp compiled
+            to WebAssembly) anywhere. Each downloads once, then works offline.
+          </p>
         </div>
 
         <div className="section-title">
@@ -148,8 +168,18 @@ export function Settings() {
             Model Registry
           </span>
         </div>
+        {mlx && (
+          <div className="st-mlx-note" role="note">
+            <Zap size={16} />
+            <span>
+              <b>MLX models are much faster on this Mac.</b> They run natively on the GPU instead of in the webview: Qwen3 1.7B
+              writes about 350 tokens/s with MLX against 30–65 with wllama, and reads a prompt about 50× faster (measured on
+              an M5 Max).
+            </span>
+          </div>
+        )}
         <section className="st-models" aria-label="Model registry">
-          {MODELS.map((m) => {
+          {availableModels(mlx).map((m) => {
             const cached = e.cached[m.url];
             const loaded = e.loadedId === m.id;
             const loading = e.loadingId === m.id;
@@ -172,6 +202,9 @@ export function Settings() {
                   )}
                 </div>
                 <div className="st-model-name display">{m.name}</div>
+                <div className="st-model-engine">
+                  <EngineChip def={m} />
+                </div>
                 <div className="mono faint" style={{ fontSize: 11.5, letterSpacing: '0.04em' }}>
                   {m.family} · ctx {m.n_ctx.toLocaleString()}
                   {m.thinking ? ' · reasoning' : ''}
@@ -218,7 +251,7 @@ export function Settings() {
                   {cached && !loading && (
                     <button
                       className="btn ghost sm"
-                      title="Delete the cached model file"
+                      title={isMlx(m) ? 'Delete the downloaded model files' : 'Delete the cached model file'}
                       onClick={() => {
                         void evictModel(m.id).then(() => toast({ tone: 'info', title: `${m.name} removed from cache` }));
                       }}
@@ -267,7 +300,9 @@ export function Settings() {
             <div className="panel-head">
               <Cpu size={20} color="var(--blue)" />
               <h3>Inference engine</h3>
-              <span className="right pill">{e.info ? (e.info.compat ? 'compat build' : 'standard build') : 'idle'}</span>
+              <span className="right pill">
+                {e.info ? (e.info.backend.startsWith('MLX') ? 'native' : e.info.compat ? 'compat build' : 'standard build') : 'idle'}
+              </span>
             </div>
             <dl className="st-dl">
               <Row k="Backend" v={e.info?.backend ?? '—'} />
@@ -275,7 +310,7 @@ export function Settings() {
               <Row k="Context" v={e.info?.context ?? '—'} />
               <Row k="Layers" v={e.info?.layers ?? '—'} />
               <Row k="Architecture" v={e.info?.arch ?? '—'} />
-              <Row k="libllama" v={e.info?.libllama ?? '—'} />
+              <Row k="Runtime" v={e.info?.libllama ?? '—'} />
               <Row k="Last load" v={e.lastLoadMs ? `${(e.lastLoadMs / 1000).toFixed(1)} s` : '—'} />
             </dl>
             <div className="st-caps">
@@ -283,6 +318,7 @@ export function Settings() {
               <Cap on={e.caps.sharedArrayBuffer} label="SharedArrayBuffer" />
               <Cap on={e.caps.opfs} label="OPFS cache" />
               <Cap on={e.caps.webgpu} label="WebGPU" />
+              <Cap on={mlx} label="MLX (native)" />
             </div>
           </div>
 
@@ -309,8 +345,9 @@ export function Settings() {
               <h3>Data</h3>
             </div>
             <p className="muted" style={{ marginTop: 0, fontSize: 13.5 }}>
-              Conversations, persona and settings live in this app's local storage. Models are cached in the webview's
-              private file system; knowledge graphs in <span className="mono">~/.ug/andai-*</span>.
+              Conversations, persona and settings live in this app's local storage. wllama models are cached in the webview's
+              private file system, MLX models in the app's data folder; knowledge graphs in{' '}
+              <span className="mono">~/.ug/andai-*</span>.
             </p>
             <button
               className="btn danger sm"

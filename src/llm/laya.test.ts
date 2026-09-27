@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
   invoke: vi.fn(async (cmd: string, args: unknown, opts?: { headers: Record<string, string> }) => {
     calls.push({ cmd, args: args instanceof Uint8Array ? Array.from(args) : args, headers: opts?.headers });
-    if (cmd === 'laya_write_chunk') return Number(opts!.headers['x-laya-offset']) + (args as Uint8Array).length;
+    if (cmd.endsWith('_write_chunk')) return Number(opts!.headers['x-offset']) + (args as Uint8Array).length;
     return undefined;
   }),
 }));
@@ -56,8 +56,8 @@ describe('downloadLaya', () => {
     ]);
     // small files fit one chunk each; headers name checkpoint, file and offset
     expect(calls.map((c) => [c.cmd, c.args, c.headers])).toEqual([
-      ['laya_write_chunk', [1, 2, 3, 4, 5], { 'x-laya-checkpoint': ckpt.id, 'x-laya-file': 'model.safetensors', 'x-laya-offset': '0' }],
-      ['laya_write_chunk', [7, 8, 9], { 'x-laya-checkpoint': ckpt.id, 'x-laya-file': 'tokenizer/tokenizer.json', 'x-laya-offset': '0' }],
+      ['laya_write_chunk', [1, 2, 3, 4, 5], { 'x-checkpoint': ckpt.id, 'x-file': 'model.safetensors', 'x-offset': '0' }],
+      ['laya_write_chunk', [7, 8, 9], { 'x-checkpoint': ckpt.id, 'x-file': 'tokenizer/tokenizer.json', 'x-offset': '0' }],
       ['laya_finish', { checkpoint: ckpt.id }, undefined],
     ]);
     expect(phases.at(-1)).toBe('Verifying checksums… 8/8');
@@ -68,7 +68,7 @@ describe('downloadLaya', () => {
     vi.stubGlobal('fetch', async () => body(Array(CHUNK - 1).fill(1), Array(11).fill(2)));
     await downloadLaya(big, () => {});
     const writes = calls.filter((c) => c.cmd === 'laya_write_chunk');
-    expect(writes.map((w) => [w.headers!['x-laya-offset'], (w.args as number[]).length])).toEqual([
+    expect(writes.map((w) => [w.headers!['x-offset'], (w.args as number[]).length])).toEqual([
       ['0', CHUNK],
       [String(CHUNK), 10],
     ]);

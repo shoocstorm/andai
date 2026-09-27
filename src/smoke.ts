@@ -9,9 +9,9 @@ import { fillArgs } from './agent/tools/argfill';
 import { available, toolById } from './agent/tools/registry';
 import { runTurn } from './agent/turn';
 import { decide } from './llm/decide';
-import { chat, loadDecider, loadModel, unloadDecider, useEngine } from './llm/engine';
+import { chat, loadDecider, loadModel, unloadDecider, unloadModel, useEngine } from './llm/engine';
 import { clearChat, useChat } from './state/chat';
-import { kbAddFiles, kbTool } from './kb/api';
+import { kbAddFiles, kbAddSample, kbTool } from './kb/api';
 import { modelById } from './llm/models';
 import { addFiles, createKb, deleteKb, useKb } from './state/kb';
 import { TOOL_DEFAULTS, useTools } from './state/tools';
@@ -198,6 +198,62 @@ async function layaProbe(id: string, slug: string, question: string) {
 }
 
 /**
+ * A native MLX chat model (Rust, Apple Silicon): the runner seeds a verified
+ * copy into ANDAI_DATA_DIR, so this loads without downloading. One grounded
+ * answer through the same turn as above, and one grammar-held argument fill.
+ * Restores the saved model choice, which release runs share with the app.
+ */
+async function nativeProbe(id: string, question: string) {
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem('andai.lastModel');
+  } catch {}
+  try {
+    const t = performance.now();
+    await loadModel(id);
+    const e = useEngine.getState();
+    if (e.loadedId !== id) throw new Error(`MLX load failed: ${e.error}`);
+    const loadMs = performance.now() - t;
+    clearChat();
+    await runTurn(question);
+    const msg = useChat.getState().messages.find((m) => m.role === 'assistant');
+    const f = performance.now();
+    const fill = await fillArgs(toolById('kb_search')!, { state: `User request: ${question}`, kind: 'document' });
+    return {
+      backend: e.info?.backend,
+      loadMs,
+      stats: msg?.stats,
+      sources: msg?.sources?.map((h) => h.file),
+      answer: msg?.content,
+      fill: { ok: fill.ok, raw: fill.raw, ms: performance.now() - f },
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    await unloadModel();
+    try {
+      if (saved) localStorage.setItem('andai.lastModel', saved);
+    } catch {}
+  }
+}
+
+/**
+ * A bundled sample knowledge base arrives with its files (samples.rs; the
+ * release binary reads them from its resource folder). Not indexed: ug's
+ * graphs are shared with the user's app, where the same sample may exist, so
+ * the harness leaves no graph to remove. The KB folder is in ANDAI_DATA_DIR,
+ * which the runner deletes.
+ */
+async function sampleProbe() {
+  try {
+    const kb = await kbAddSample('tidewater-mixed');
+    return { name: kb.name, kind: kb.kind, status: kb.status, sources: kb.sources.map((s) => [s.file, s.kind, s.status]) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
  * Full pipeline inside the real app: create KB → ingest via ug → load model →
  * one RAG turn through the same orchestrator the UI uses. The App is rendered
  * alongside, so UI code runs in WKWebView too.
@@ -252,6 +308,11 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
     const laya = layaId ? await layaProbe(layaId, kb.slug, question) : null;
     if (laya) await log(`laya ${JSON.stringify(laya)}`);
     const info = useEngine.getState().info;
+    const mlxId = import.meta.env.VITE_SMOKE_MLX as string | undefined;
+    const mlx = mlxId ? await nativeProbe(mlxId, question) : null;
+    if (mlx) await log(`mlx ${JSON.stringify(mlx).slice(0, 2000)}`);
+    const sample = await sampleProbe();
+    await log(`sample ${JSON.stringify(sample)}`);
     const result = {
       caps: useEngine.getState().caps,
       engine: info,
@@ -264,6 +325,8 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
       answer: msg?.content,
       agent,
       laya,
+      mlx,
+      sample,
       // Compared with perf/baseline.json by the runner (docs/performance.md).
       perf: {
         ingestMs,

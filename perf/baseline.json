@@ -361,5 +361,179 @@
         "tolerance": 1.25
       }
     }
+  },
+  "agent-eval:qwen3-1.7b-mlx+qwen3-0.6b-mlx": {
+    "machine": "Apple M5 Max · 18 cores · 128 GB",
+    "recorded": "2026-09-27",
+    "metrics": {
+      "first-action-accuracy": {
+        "value": 100,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "fact-hit-rate": {
+        "value": 82.759,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "grounded-rate": {
+        "value": 86.207,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "wasted-calls-per-question": {
+        "value": 0,
+        "unit": "calls",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 0.2
+      },
+      "decisions-per-question": {
+        "value": 1,
+        "unit": "decisions",
+        "better": "lower",
+        "tolerance": 1.25,
+        "slack": 0.1
+      },
+      "seconds-per-question": {
+        "value": 0.585,
+        "unit": "s",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1
+      },
+      "ms-per-decision": {
+        "value": 22.941,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 100
+      },
+      "prompt-tokens-per-decision": {
+        "value": 344,
+        "unit": "tokens",
+        "better": "lower",
+        "tolerance": 1.25
+      }
+    }
+  },
+  "agent-eval:qwen3-1.7b-mlx": {
+    "machine": "Apple M5 Max · 18 cores · 128 GB",
+    "recorded": "2026-09-27",
+    "metrics": {
+      "first-action-accuracy": {
+        "value": 85.294,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "fact-hit-rate": {
+        "value": 79.31,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "grounded-rate": {
+        "value": 93.103,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "wasted-calls-per-question": {
+        "value": 0,
+        "unit": "calls",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 0.2
+      },
+      "decisions-per-question": {
+        "value": 1,
+        "unit": "decisions",
+        "better": "lower",
+        "tolerance": 1.25,
+        "slack": 0.1
+      },
+      "seconds-per-question": {
+        "value": 0.576,
+        "unit": "s",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1
+      },
+      "ms-per-decision": {
+        "value": 38.294,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 100
+      },
+      "prompt-tokens-per-decision": {
+        "value": 344,
+        "unit": "tokens",
+        "better": "lower",
+        "tolerance": 1.25
+      }
+    }
+  },
+  "agent-eval:qwen3-0.6b-mlx": {
+    "machine": "Apple M5 Max · 18 cores · 128 GB",
+    "recorded": "2026-09-27",
+    "metrics": {
+      "first-action-accuracy": {
+        "value": 100,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "fact-hit-rate": {
+        "value": 82.759,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "grounded-rate": {
+        "value": 55.172,
+        "unit": "%",
+        "better": "higher",
+        "tolerance": 1.1
+      },
+      "wasted-calls-per-question": {
+        "value": 0,
+        "unit": "calls",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 0.2
+      },
+      "decisions-per-question": {
+        "value": 1.118,
+        "unit": "decisions",
+        "better": "lower",
+        "tolerance": 1.25,
+        "slack": 0.1
+      },
+      "seconds-per-question": {
+        "value": 0.456,
+        "unit": "s",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 1
+      },
+      "ms-per-decision": {
+        "value": 23.579,
+        "unit": "ms",
+        "better": "lower",
+        "tolerance": 1.5,
+        "slack": 100
+      },
+      "prompt-tokens-per-decision": {
+        "value": 337,
+        "unit": "tokens",
+        "better": "lower",
+        "tolerance": 1.25
+      }
+    }
   }
 }

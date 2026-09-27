@@ -12,6 +12,7 @@
 //   EVAL_MODEL=qwen3-1.7b EVAL_SEED=7 …         # chat (answer + argument) model, option-shuffle seed
 //   EVAL_DECIDER=qwen3-1.7b …                   # a separate decision model (default: decisions on the chat model)
 //   EVAL_DECIDER=laya-multilingual …            # a Laya checkpoint (Apple Silicon; cached in ~/.cache/andai-test/laya)
+//   EVAL_MODEL=qwen3-1.7b-mlx EVAL_DECIDER=qwen3-0.6b-mlx …  # native MLX models (Apple Silicon; cached in ~/.cache/andai-test/llm)
 //
 // Needs ug and the model (downloaded once), like the e2e run. Machine- and
 // model-bound, and not part of `bun run check`.
@@ -21,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { diffCases, loadCases, scoreCase, scorecard } from './eval-lib.mjs';
 import { devOnPort } from './dev-port.mjs';
-import { keepLaya, seedLaya } from './laya-cache.mjs';
+import { keepCheckpoint, seedCheckpoint } from './checkpoint-cache.mjs';
 import { byLine, compare } from './perf-lib.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -72,8 +73,8 @@ const env = {
   ANDAI_SMOKE: '1',
   ANDAI_E2E_FILES: files.join(','),
 };
-// A Laya decider downloads once, into a test cache, not on every run.
-seedLaya(env.ANDAI_DATA_DIR, decider);
+// Laya deciders and MLX models download once, into a test cache, not on every run.
+for (const id of [model, decider]) seedCheckpoint(env.ANDAI_DATA_DIR, id);
 
 console.log(`[eval] ${cases.length} question(s), model ${model}, decisions on ${decider ?? 'the chat model'}, seed ${seed}`);
 const dev = devOnPort();
@@ -115,7 +116,7 @@ await new Promise((resolveDone) => {
 try {
   process.kill(-child.pid, 'SIGTERM');
 } catch {}
-keepLaya(env.ANDAI_DATA_DIR, decider);
+for (const id of [model, decider]) keepCheckpoint(env.ANDAI_DATA_DIR, id);
 rmSync(dataDir, { recursive: true, force: true });
 
 if (failure || records.length !== cases.length) {

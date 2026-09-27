@@ -1,61 +1,35 @@
 //! The Laya decision model: a small bidirectional encoder that scores a
 //! choice between options in one forward pass (~10–20 ms, versus ~0.7 s for a
 //! letter readout on the chat model). It runs on MLX, so only on Apple Silicon
-//! (`cfg(laya)`, set by build.rs); elsewhere these commands say so and the
-//! webview keeps deciding with wllama (llm/decide.ts).
+//! (`cfg(mlx)`, set by build.rs); elsewhere these commands say so and the
+//! webview keeps deciding with wllama (llm/decide.ts). It shares the MLX
+//! thread (mlx.rs) with the native chat models (llm/).
 //!
 //! The webview is untrusted (AGENTS.md §9): checkpoints and files are named
 //! from the closed catalog, downloads only land after their sha256 matches
 //! (store.rs), and decision inputs are bounded here.
 
-#[cfg_attr(not(laya), allow(dead_code))]
-mod catalog;
-#[cfg_attr(not(laya), allow(dead_code))]
-mod store;
+// The catalog and store are shared with the native chat models (llm/).
+#[cfg_attr(not(mlx), allow(dead_code))]
+pub(crate) mod catalog;
+#[cfg_attr(not(mlx), allow(dead_code))]
+pub(crate) mod store;
 
-#[cfg(laya)]
-mod engine;
-#[cfg(laya)]
+#[cfg(mlx)]
+pub(crate) mod engine;
+#[cfg(mlx)]
 mod model;
-#[cfg(laya)]
+#[cfg(mlx)]
 mod prompt;
-#[cfg(laya)]
-mod worker;
 
+use crate::mlx::Mlx;
 use serde::{Deserialize, Serialize};
-#[cfg(laya)]
-use std::sync::{Arc, Mutex};
-use tauri::AppHandle;
-#[cfg(laya)]
-use tauri::Manager;
+use tauri::{AppHandle, State};
 
-#[cfg_attr(laya, allow(dead_code))]
+#[cfg_attr(mlx, allow(dead_code))]
 const UNSUPPORTED: &str = "The Laya decision model needs an Apple Silicon Mac.";
 
-/// Loaded-model state; the MLX thread starts on first use.
-#[derive(Default)]
-pub struct Laya {
-    #[cfg(laya)]
-    worker: Mutex<Option<Arc<worker::Worker>>>,
-}
-
-#[cfg(laya)]
-impl Laya {
-    fn worker(&self, app: &AppHandle) -> Arc<worker::Worker> {
-        let mut w = self.worker.lock().unwrap();
-        w.get_or_insert_with(|| {
-            // Release bundles ship mlx.metallib as a resource (tauri.conf.json).
-            let metallib = app.path().resource_dir().ok().map(|d| d.join("mlx.metallib"));
-            Arc::new(worker::Worker::spawn(metallib))
-        })
-        .clone()
-    }
-
-    fn loaded(&self) -> Option<String> {
-        self.worker.lock().unwrap().as_ref().and_then(|w| w.loaded())
-    }
-}
-
+/// A catalog checkpoint and whether it's downloaded (Laya and llm/ share it).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckpointStatus {
@@ -71,6 +45,20 @@ pub struct CheckpointStatus {
 pub struct FileInfo {
     path: &'static str,
     bytes: u64,
+}
+
+impl CheckpointStatus {
+    #[cfg_attr(not(mlx), allow(dead_code))]
+    pub(crate) fn of(root: &std::path::Path, c: &catalog::Checkpoint) -> Self {
+        CheckpointStatus {
+            id: c.id,
+            repo: c.repo,
+            commit: c.commit,
+            bytes: c.bytes(),
+            files: c.files.iter().map(|f| FileInfo { path: f.path, bytes: f.bytes }).collect(),
+            downloaded: store::is_downloaded(root, c),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -138,7 +126,7 @@ pub const MAX_REQUEST: usize = 4 * 1024;
 /// phrasings probed on the eval fixtures (47 passages × 29 questions), this
 /// separated passages holding the expected fact best: AUC 0.76 multilingual,
 /// 0.85 English (AGENTS.md §2).
-#[cfg_attr(not(laya), allow(dead_code))]
+#[cfg_attr(not(mlx), allow(dead_code))]
 pub const RELEVANT: &str = "This passage contains information that helps answer the user's request.";
 /// Questions per call: each is its own row in the batch.
 pub const MAX_QUESTIONS: usize = 4;
@@ -182,7 +170,7 @@ pub fn validate_passages(request: &str, passages: &[LayaPassage]) -> Result<(), 
 }
 
 /// The state one passage is judged in: the request, then the passage.
-#[cfg_attr(not(laya), allow(dead_code))]
+#[cfg_attr(not(mlx), allow(dead_code))]
 pub fn passage_state(request: &str, p: &LayaPassage) -> String {
     format!("User request:\n{}\n\nPassage from {}:\n{}", request.trim(), p.source, p.text.trim())
 }
@@ -228,64 +216,67 @@ pub fn validate(state: &str, questions: &[LayaQuestion]) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(laya)]
+#[cfg(mlx)]
 fn root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     crate::ug::data_dir(app, &["models", "laya"])
 }
 
-#[cfg(laya)]
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+#[cfg(mlx)]
+const NOT_LOADED: &str = "No Laya model is loaded.";
+
+#[cfg(mlx)]
+fn loaded(m: &mut crate::mlx::Models) -> Result<&mut engine::Engine, String> {
+    m.laya.as_mut().map(|(_, e)| e).ok_or_else(|| NOT_LOADED.to_string())
+}
+
+#[cfg(mlx)]
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn laya_status(app: AppHandle, laya: tauri::State<'_, Laya>) -> Result<LayaStatus, String> {
-    #[cfg(laya)]
+pub async fn laya_status(app: AppHandle, mlx: State<'_, Mlx>) -> Result<LayaStatus, String> {
+    #[cfg(mlx)]
     {
         let root = root(&app)?;
-        let checkpoints = catalog::CHECKPOINTS
-            .iter()
-            .map(|c| CheckpointStatus {
-                id: c.id,
-                repo: c.repo,
-                commit: c.commit,
-                bytes: c.bytes(),
-                files: c.files.iter().map(|f| FileInfo { path: f.path, bytes: f.bytes }).collect(),
-                downloaded: store::is_downloaded(&root, c),
-            })
-            .collect();
-        Ok(LayaStatus { supported: true, loaded: laya.loaded(), checkpoints })
+        let checkpoints = catalog::CHECKPOINTS.iter().map(|c| CheckpointStatus::of(&root, c)).collect();
+        Ok(LayaStatus { supported: true, loaded: mlx.loaded().laya, checkpoints })
     }
-    #[cfg(not(laya))]
+    #[cfg(not(mlx))]
     {
-        let _ = (app, laya);
+        let _ = (app, mlx);
         Ok(LayaStatus { supported: false, loaded: None, checkpoints: vec![] })
     }
 }
 
-/// One chunk of a download, as a raw IPC body. Headers name it:
-/// `x-laya-checkpoint`, `x-laya-file` (catalog path) and `x-laya-offset`.
-#[tauri::command]
-pub async fn laya_write_chunk(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<u64, String> {
+/// One chunk of a checkpoint download, as a raw IPC body. Headers name it:
+/// `x-checkpoint`, `x-file` (catalog path) and `x-offset`. Shared by the Laya
+/// and native chat model downloads.
+pub(crate) fn chunk_request(request: &tauri::ipc::Request<'_>) -> Result<(String, String, u64, Vec<u8>), String> {
     let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(str::to_string).ok_or_else(|| format!("missing {k} header"));
-    let (id, file, offset) = (header("x-laya-checkpoint")?, header("x-laya-file")?, header("x-laya-offset")?);
-    let offset: u64 = offset.parse().map_err(|_| "x-laya-offset must be a byte offset".to_string())?;
+    let (id, file, offset) = (header("x-checkpoint")?, header("x-file")?, header("x-offset")?);
+    let offset: u64 = offset.parse().map_err(|_| "x-offset must be a byte offset".to_string())?;
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("a chunk must be sent as raw bytes".into());
     };
     if bytes.len() > MAX_CHUNK {
         return Err(format!("a chunk is at most {MAX_CHUNK} bytes"));
     }
-    #[cfg(laya)]
+    Ok((id, file, offset, bytes.clone()))
+}
+
+#[tauri::command]
+pub async fn laya_write_chunk(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<u64, String> {
+    let (id, file, offset, bytes) = chunk_request(&request)?;
+    #[cfg(mlx)]
     {
         let c = catalog::checkpoint(&id)?;
         let root = root(&app)?;
-        let bytes = bytes.clone();
         blocking(move || store::write_chunk(&root, c, &file, offset, &bytes)).await
     }
-    #[cfg(not(laya))]
+    #[cfg(not(mlx))]
     {
-        let _ = (app, id, file, offset);
+        let _ = (app, id, file, offset, bytes);
         Err(UNSUPPORTED.into())
     }
 }
@@ -293,13 +284,13 @@ pub async fn laya_write_chunk(app: AppHandle, request: tauri::ipc::Request<'_>) 
 /// Verifies a finished download and moves it into place (store.rs).
 #[tauri::command]
 pub async fn laya_finish(app: AppHandle, checkpoint: String) -> Result<(), String> {
-    #[cfg(laya)]
+    #[cfg(mlx)]
     {
         let c = catalog::checkpoint(&checkpoint)?;
         let root = root(&app)?;
         blocking(move || store::finish(&root, c)).await
     }
-    #[cfg(not(laya))]
+    #[cfg(not(mlx))]
     {
         let _ = (app, checkpoint);
         Err(UNSUPPORTED.into())
@@ -308,65 +299,85 @@ pub async fn laya_finish(app: AppHandle, checkpoint: String) -> Result<(), Strin
 
 /// Deletes a downloaded checkpoint (the UI confirms first), unloading it if loaded.
 #[tauri::command]
-pub async fn laya_remove(app: AppHandle, laya: tauri::State<'_, Laya>, checkpoint: String) -> Result<(), String> {
-    #[cfg(laya)]
+pub async fn laya_remove(app: AppHandle, mlx: State<'_, Mlx>, checkpoint: String) -> Result<(), String> {
+    #[cfg(mlx)]
     {
         let c = catalog::checkpoint(&checkpoint)?;
-        if laya.loaded().as_deref() == Some(c.id) {
-            let w = laya.worker(&app);
-            blocking(move || w.unload()).await?;
+        if mlx.loaded().laya.as_deref() == Some(c.id) {
+            let t = mlx.thread(&app);
+            blocking(move || {
+                t.run(|m| {
+                    m.laya = None;
+                    Ok(())
+                })
+            })
+            .await?;
         }
         let root = root(&app)?;
         blocking(move || store::remove(&root, c)).await
     }
-    #[cfg(not(laya))]
+    #[cfg(not(mlx))]
     {
-        let _ = (app, laya, checkpoint);
+        let _ = (app, mlx, checkpoint);
         Err(UNSUPPORTED.into())
     }
 }
 
 /// Loads a downloaded checkpoint; returns how long it took, in ms.
 #[tauri::command]
-pub async fn laya_load(app: AppHandle, laya: tauri::State<'_, Laya>, checkpoint: String) -> Result<f64, String> {
-    #[cfg(laya)]
+pub async fn laya_load(app: AppHandle, mlx: State<'_, Mlx>, checkpoint: String) -> Result<f64, String> {
+    #[cfg(mlx)]
     {
         let c = catalog::checkpoint(&checkpoint)?;
         let dir = store::resolve(&root(&app)?, c)?;
-        let w = laya.worker(&app);
-        blocking(move || w.load(c.id, dir)).await
+        let t = mlx.thread(&app);
+        blocking(move || {
+            t.run(move |m| {
+                let started = std::time::Instant::now();
+                m.laya = None;
+                m.laya = Some((c.id.to_string(), engine::Engine::load(&dir)?));
+                Ok(started.elapsed().as_secs_f64() * 1e3)
+            })
+        })
+        .await
     }
-    #[cfg(not(laya))]
+    #[cfg(not(mlx))]
     {
-        let _ = (app, laya, checkpoint);
+        let _ = (app, mlx, checkpoint);
         Err(UNSUPPORTED.into())
     }
 }
 
 #[tauri::command]
-pub async fn laya_unload(app: AppHandle, laya: tauri::State<'_, Laya>) -> Result<(), String> {
-    #[cfg(laya)]
+pub async fn laya_unload(app: AppHandle, mlx: State<'_, Mlx>) -> Result<(), String> {
+    #[cfg(mlx)]
     {
-        let w = laya.worker(&app);
-        blocking(move || w.unload()).await
+        let t = mlx.thread(&app);
+        blocking(move || {
+            t.run(|m| {
+                m.laya = None;
+                Ok(())
+            })
+        })
+        .await
     }
-    #[cfg(not(laya))]
+    #[cfg(not(mlx))]
     {
-        let _ = (app, laya);
+        let _ = (app, mlx);
         Err(UNSUPPORTED.into())
     }
 }
 
 /// Scores every question about `state` on the loaded checkpoint, in one batch.
 #[tauri::command]
-pub async fn laya_decide(app: AppHandle, laya: tauri::State<'_, Laya>, state: String, questions: Vec<LayaQuestion>) -> Result<LayaAnswers, String> {
+pub async fn laya_decide(app: AppHandle, mlx: State<'_, Mlx>, state: String, questions: Vec<LayaQuestion>) -> Result<LayaAnswers, String> {
     validate(&state, &questions)?;
-    #[cfg(laya)]
+    #[cfg(mlx)]
     {
-        let model = laya.loaded().ok_or("No Laya model is loaded.")?;
-        let w = laya.worker(&app);
+        let model = mlx.loaded().laya.ok_or(NOT_LOADED)?;
+        let t = mlx.thread(&app);
         let ids: Vec<String> = questions.iter().map(|q| q.id.clone()).collect();
-        let qs = questions
+        let qs: Vec<engine::Question> = questions
             .into_iter()
             .map(|q| engine::Question {
                 kind: match q.kind {
@@ -377,7 +388,7 @@ pub async fn laya_decide(app: AppHandle, laya: tauri::State<'_, Laya>, state: St
                 options: q.options.into_iter().map(|o| (o.id, o.text)).collect(),
             })
             .collect();
-        let asked = blocking(move || w.questions(state, qs)).await?;
+        let asked = blocking(move || t.run(move |m| loaded(m)?.ask(&state, &qs))).await?;
         let answers = ids
             .into_iter()
             .zip(asked.answers)
@@ -385,9 +396,9 @@ pub async fn laya_decide(app: AppHandle, laya: tauri::State<'_, Laya>, state: St
             .collect();
         Ok(LayaAnswers { answers, ms: asked.ms, model })
     }
-    #[cfg(not(laya))]
+    #[cfg(not(mlx))]
     {
-        let _ = (app, laya, state, questions);
+        let _ = (app, mlx, state, questions);
         Err(UNSUPPORTED.into())
     }
 }
@@ -395,22 +406,28 @@ pub async fn laya_decide(app: AppHandle, laya: tauri::State<'_, Laya>, state: St
 /// Scores how likely each retrieved passage helps answer `request`, one
 /// `noul` row per passage, batched. The webview decides what to drop.
 #[tauri::command]
-pub async fn laya_relevance(app: AppHandle, laya: tauri::State<'_, Laya>, request: String, passages: Vec<LayaPassage>) -> Result<LayaRelevance, String> {
+pub async fn laya_relevance(app: AppHandle, mlx: State<'_, Mlx>, request: String, passages: Vec<LayaPassage>) -> Result<LayaRelevance, String> {
     validate_passages(&request, &passages)?;
-    #[cfg(laya)]
+    #[cfg(mlx)]
     {
-        let model = laya.loaded().ok_or("No Laya model is loaded.")?;
-        let w = laya.worker(&app);
-        let rows = passages
+        let model = mlx.loaded().laya.ok_or(NOT_LOADED)?;
+        let t = mlx.thread(&app);
+        let rows: Vec<(String, engine::Question)> = passages
             .iter()
             .map(|p| (passage_state(&request, p), engine::Question { kind: prompt::Kind::Noul, instructions: RELEVANT.into(), options: vec![] }))
             .collect();
-        let asked = blocking(move || w.rows(rows)).await?;
+        let asked = blocking(move || {
+            t.run(move |m| {
+                let rows: Vec<(&str, &engine::Question)> = rows.iter().map(|(s, q)| (s.as_str(), q)).collect();
+                loaded(m)?.ask_rows(&rows)
+            })
+        })
+        .await?;
         Ok(LayaRelevance { scores: asked.answers.iter().map(|a| a.probabilities[1]).collect(), ms: asked.ms, model })
     }
-    #[cfg(not(laya))]
+    #[cfg(not(mlx))]
     {
-        let _ = (app, laya, request, passages);
+        let _ = (app, mlx, request, passages);
         Err(UNSUPPORTED.into())
     }
 }
@@ -493,7 +510,7 @@ mod tests {
         assert_eq!(passage_state(" q? ", &passage("a.md:1-3", " body ")), "User request:\nq?\n\nPassage from a.md:1-3:\nbody");
     }
 
-    #[cfg(not(laya))]
+    #[cfg(not(mlx))]
     #[test]
     fn says_it_is_unsupported_off_apple_silicon() {
         assert!(UNSUPPORTED.contains("Apple Silicon"));

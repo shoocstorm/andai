@@ -265,7 +265,7 @@
 
       <div class="proof">
         <div class="stat"><div class="label">Your data</div><div class="v grad">Stays local</div><p>Inference and indexing run on your computer. The only download is the model you pick.</p></div>
-        <div class="stat"><div class="label">Throughput</div><div class="v">~65<small>tok/s</small></div><p>Qwen3 0.6B generating on WebGPU, every layer on the GPU. Measured on an Apple M5 Max.</p></div>
+        <div class="stat"><div class="label">Throughput</div><div class="v">~350<small>tok/s</small></div><p>Qwen3 1.7B running natively on the Mac's GPU with MLX. Measured on an Apple M5 Max.</p></div>
         <div class="stat"><div class="label">Warm start</div><div class="v">~1.3<small>s</small></div><p>To load a cached model, measured. The first download is 639 MB.</p></div>
         <div class="stat"><div class="label">Grounding</div><div class="v">[1] [2]<small>cited</small></div><p>Answers cite the exact file and lines they came from.</p></div>
       </div>
@@ -279,8 +279,8 @@
           <p>Retrieval-augmented answers from your own material, run by an agent that works offline and on your computer.</p>
         </div>
         <div class="grid">
-          <article class="card"><div class="ic" style="color:var(--blue)"><svg class="icon"><use href="#i-cpu"/></svg></div><h3>On-device model</h3><p>Qwen3 runs inside the app with llama.cpp and WebGPU, multi-threaded. Download once, then work fully offline.</p></article>
-          <article class="card"><div class="ic" style="color:var(--violet)"><svg class="icon"><use href="#i-db"/></svg></div><h3>Knowledge from your files</h3><p>Drop in PDFs, Markdown, text, CSV or code. They're indexed into a local knowledge graph that follows headings, pages and symbols.</p></article>
+          <article class="card"><div class="ic" style="color:var(--blue)"><svg class="icon"><use href="#i-cpu"/></svg></div><h3>On-device model</h3><p>Qwen3 runs inside the app: natively on the GPU with MLX on Apple Silicon Macs, with llama.cpp and WebGPU everywhere else. Download once, then work fully offline.</p></article>
+          <article class="card"><div class="ic" style="color:var(--violet)"><svg class="icon"><use href="#i-db"/></svg></div><h3>Knowledge from your files</h3><p>Drop in PDFs, Markdown, text, CSV or code. They're indexed into a local knowledge graph that follows headings, pages and symbols. Or start with a built-in sample and its suggested questions.</p></article>
           <article class="card"><div class="ic" style="color:var(--green)"><svg class="icon"><use href="#i-file"/></svg></div><h3>Cited, grounded answers</h3><p>Answers cite passages as [1], [2], each matched to a source you can see. If your documents don't say, Andai tells you.</p></article>
           <article class="card"><div class="ic" style="color:var(--amber)"><svg class="icon"><use href="#i-trace"/></svg></div><h3>Live execution trace</h3><p>Watch each step (analyze, retrieve, assemble, generate) with timings, sources, tokens per second and context use.</p></article>
           <article class="card"><div class="ic" style="color:var(--blue)"><svg class="icon"><use href="#i-user"/></svg></div><h3>A persona you control</h3><p>Edit the system prompt, pick a tone, tune temperature and length. Auto-optimize has the local model rewrite your prompt.</p></article>
@@ -353,9 +353,9 @@
           <div class="step">
             <span class="n">01 · MODEL</span>
             <h3>Load a model</h3>
-            <p>Pick Qwen3 0.6B in Settings. It downloads once, then loads from your computer in about a second.</p>
-            <div class="log"><span class="b">wllama</span> WebGPU · 4 threads
-<span class="ok">✓</span> qwen3-0.6b ready</div>
+            <p>Pick Qwen3 1.7B · MLX on an Apple Silicon Mac, or Qwen3 0.6B anywhere. It downloads once, then loads from your computer in about a second.</p>
+            <div class="log"><span class="b">MLX</span> Metal · native
+<span class="ok">✓</span> qwen3-1.7b-mlx ready</div>
           </div>
           <div class="step">
             <span class="n">02 · KNOWLEDGE</span>
@@ -393,7 +393,7 @@
           </div>
           <div class="log" style="font-size:13px;line-height:1.9"><span class="label">network.log — after setup</span>
 
-<span class="b">inference</span>   on-device · wllama
+<span class="b">inference</span>   on-device · MLX / wllama
 <span class="b">embeddings</span>  on-device · bge-small
 <span class="b">retrieval</span>   on-device · ug graph
 <span class="b">storage</span>     ~/Library · ~/.ug
@@ -411,8 +411,9 @@
           <h2>Questions, answered.</h2>
         </div>
         <div class="faq">
-          <details><summary>Do I need an internet connection?</summary><p>Only to download a model the first time (639 MB for the default Qwen3 0.6B). After that Andai works fully offline.</p></details>
-          <details><summary>Which computers does it run on?</summary><p>Andai is built for macOS, with separate builds for Apple Silicon and Intel, and for Windows 10 and 11 (x64). It's tested on macOS 26 on Apple Silicon. The Intel Mac build hasn't been tested on hardware yet, and the Windows build has only run through automated tests so far, not on a Windows PC. Windows needs the Microsoft Edge WebView2 runtime, which comes with Windows 11. On Apple Silicon Macs you can also try a Laya decision model, which picks each next step in about 10 ms instead of about 0.6 s (measured on an Apple M5 Max); it can also drop retrieved passages that don't help, so the chat model has less to read.</p></details>
+          <details><summary>Do I need an internet connection?</summary><p>Only to download a model the first time (980 MB for Qwen3 1.7B · MLX on an Apple Silicon Mac, 639 MB for Qwen3 0.6B). After that Andai works fully offline.</p></details>
+          <details><summary>Can I try it without my own documents?</summary><p>Yes. The Knowledge screen offers three sample knowledge bases about a made-up ferry operator: its documents, its code, or both. One click indexes a sample on your computer in a few seconds, and the chat suggests questions it can answer.</p></details>
+          <details><summary>Which computers does it run on?</summary><p>Andai is built for macOS, with separate builds for Apple Silicon and Intel, and for Windows 10 and 11 (x64). It's tested on macOS 26 on Apple Silicon. The Intel Mac build hasn't been tested on hardware yet, and the Windows build has only run through automated tests so far, not on a Windows PC. Windows needs the Microsoft Edge WebView2 runtime, which comes with Windows 11. On Apple Silicon Macs, the MLX models run natively on the GPU and are several times faster: Qwen3 1.7B writes about 350 tokens/s instead of 30–65, and starts answering in about 60 ms instead of 3 s (measured on an Apple M5 Max). You can also try a Laya decision model, which picks each next step in about 10 ms instead of about 0.6 s (measured on an Apple M5 Max); it can also drop retrieved passages that don't help, so the chat model has less to read.</p></details>
           <details><summary>What files can I add to a knowledge base?</summary><p>PDF, Markdown, plain text, CSV, and source code (TypeScript, JavaScript, Python, Java, Rust). Andai works on copies, so your originals are never changed.</p></details>
           <details><summary>What do I need for knowledge bases?</summary><p>Indexing uses <a href="https://github.com/shoocstorm/ug">ug</a>, a local knowledge-graph engine. Install the <code>ug</code> CLI (for example in <code>~/.local/bin</code>, or anywhere on your PATH) and Andai finds it automatically.</p></details>
           <details><summary>How good is a model that runs on a laptop?</summary><p>Small models like Qwen3 are fast and private, but less capable than large cloud models. Grounding answers in your own documents, with citations you can check, closes much of that gap for everyday questions.</p></details>
@@ -441,7 +442,7 @@
       <a href="https://github.com/shoocstorm/andai/releases">Releases</a>
       <a href="https://github.com/shoocstorm/andai/blob/main/docs/features.md">Features</a>
       <a href="https://github.com/shoocstorm/andai">Source</a>
-      <span>Built with wllama · ug · Tauri</span>
+      <span>Built with MLX · wllama · ug · Tauri</span>
     </div>
   </footer>
 

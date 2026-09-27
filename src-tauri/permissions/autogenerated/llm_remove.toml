@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-llm-remove"
+description = "Enables the llm_remove command without any pre-configured scope."
+commands.allow = ["llm_remove"]
+
+[[permission]]
+identifier = "deny-llm-remove"
+description = "Denies the llm_remove command without any pre-configured scope."
+commands.deny = ["llm_remove"]

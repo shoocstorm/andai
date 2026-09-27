@@ -8,6 +8,7 @@ import {
   FileText,
   ListFilter,
   Loader2,
+  MessageSquareText,
   MessagesSquare,
   Network,
   PanelRightClose,
@@ -29,10 +30,11 @@ import { runTurn, stopTurn } from '../agent/turn';
 import { Bar, CopyButton, Markdown, Stat, fmtTime } from '../components/ui';
 import { debugReport } from '../agent/debugReport';
 import { inTauri } from '../kb/api';
+import { sampleByName } from '../kb/samples';
 import { loadModel, useEngine } from '../llm/engine';
-import { layaById, MODELS, modelById } from '../llm/models';
+import { layaById, modelById, recommendedModel } from '../llm/models';
 import { clearChat, splitThink, useChat, type Message, type TraceStep } from '../state/chat';
-import { addFiles, createKb, useKb } from '../state/kb';
+import { addFiles, addSample, createKb, useKb } from '../state/kb';
 import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
@@ -341,11 +343,16 @@ const SUGGESTIONS = [
 ];
 
 function EmptyHub() {
-  const { loadedId, status, cached, progress, loadingId } = useEngine();
+  const { loadedId, status, cached, progress, loadingId, native } = useEngine();
   const kbs = useKb((s) => s.kbs);
+  const grounding = useKb((s) => s.grounding);
+  // Grounded in a bundled sample: suggest questions it can answer.
+  const sample = sampleByName(kbs.find((k) => k.slug === grounding)?.name);
+  const [addingSample, setAddingSample] = useState(false);
   const go = useUi((s) => s.go);
   const name = usePersona((s) => s.agentName);
-  const def = MODELS[0];
+  // On Apple Silicon, the MLX model: native on the GPU, several times faster.
+  const def = recommendedModel(native.supported);
   const loading = status === 'loading';
   const pct = progress && progress.total ? progress.loaded / progress.total : 0;
   return (
@@ -359,8 +366,8 @@ function EmptyHub() {
         {name} <span className="grad-text">standing by</span>
       </h2>
       <p className="muted">
-        A private agent running entirely on this machine — local inference with wllama, grounded in your own
-        knowledge graphs built by ug.
+        A private agent running entirely on this machine — local inference{native.supported ? ' on your Mac’s GPU with MLX' : ' with wllama'},
+        grounded in your own knowledge graphs built by ug.
       </p>
 
       {!loadedId ? (
@@ -394,18 +401,39 @@ function EmptyHub() {
             <div>
               <div style={{ fontWeight: 600 }}>Ground answers in your documents</div>
               <div className="faint" style={{ fontSize: 12.5 }}>
-                Drop PDFs, Markdown, text or code — ug turns them into a searchable knowledge graph.
+                Drop PDFs, Markdown, text or code — ug turns them into a searchable knowledge graph. Or try a sample: a
+                fictional ferry operator’s handbook and policies.
               </div>
             </div>
-            <button className="btn secondary" onClick={() => go('knowledge')}>
-              <Database size={14} /> Build
-            </button>
+            <div className="cc-setup-actions">
+              {inTauri && (
+                <button
+                  className="btn primary"
+                  disabled={addingSample}
+                  onClick={() => {
+                    setAddingSample(true);
+                    void addSample('tidewater-docs').finally(() => setAddingSample(false));
+                  }}
+                >
+                  {addingSample ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+                  {addingSample ? 'Indexing…' : 'Try a sample'}
+                </button>
+              )}
+              <button className="btn secondary" onClick={() => go('knowledge')}>
+                <Database size={14} /> Build
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
 
+      {sample && (
+        <div className="label" style={{ marginTop: 6 }}>
+          Try asking {sample.name}
+        </div>
+      )}
       <div className="cc-suggest">
-        {SUGGESTIONS.map((s) => (
+        {(sample ? sample.questions.map((q) => ({ icon: MessageSquareText, title: q, prompt: q })) : SUGGESTIONS).map((s) => (
           <button
             key={s.title}
             className="cc-suggest-card"

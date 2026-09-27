@@ -19,6 +19,9 @@ serde_json = "1"
 tiny_http = "0.12"
 # Verifies downloaded Laya checkpoint files (laya/store.rs); already in the tree via Tauri.
 sha2 = "0.10"
+# The native engine's grammar constraint (llm/grammar.rs): a lazy DFA. Pure
+# Rust, and already in the tree through Tauri's `regex`; no features beyond it.
+regex-automata = { version = "0.4", default-features = false, features = ["std", "syntax", "hybrid"] }
 
 # The Laya decision model runs on MLX, which exists only for Apple Silicon.
 # Everywhere else laya/ compiles to "not supported" and decisions stay on wllama.

@@ -1,5 +1,8 @@
 mod grants;
 mod laya;
+mod llm;
+mod mlx;
+mod samples;
 mod tools;
 mod ug;
 #[cfg_attr(debug_assertions, allow(dead_code))]
@@ -90,7 +93,8 @@ pub fn run() {
         })
         .manage(ug::Indexing::default())
         .manage(grants::FileGrants::default())
-        .manage(laya::Laya::default())
+        .manage(mlx::Mlx::default())
+        .manage(llm::Llm::default())
         .invoke_handler(tauri::generate_handler![
             dev_log,
             dev_exit,
@@ -104,6 +108,7 @@ pub fn run() {
             ug::kb_index,
             ug::kb_search,
             ug::kb_set_kind,
+            samples::kb_add_sample,
             tools::kb_tool,
             laya::laya_status,
             laya::laya_write_chunk,
@@ -113,6 +118,14 @@ pub fn run() {
             laya::laya_unload,
             laya::laya_decide,
             laya::laya_relevance,
+            llm::llm_status,
+            llm::llm_write_chunk,
+            llm::llm_finish,
+            llm::llm_remove,
+            llm::llm_load,
+            llm::llm_unload,
+            llm::llm_generate,
+            llm::llm_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Andai");

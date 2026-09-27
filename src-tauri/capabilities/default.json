@@ -21,6 +21,7 @@
     "allow-kb-index",
     "allow-kb-search",
     "allow-kb-set-kind",
+    "allow-kb-add-sample",
     "allow-kb-tool",
     "allow-laya-status",
     "allow-laya-write-chunk",
@@ -29,7 +30,15 @@
     "allow-laya-load",
     "allow-laya-unload",
     "allow-laya-decide",
-    "allow-laya-relevance"
+    "allow-laya-relevance",
+    "allow-llm-status",
+    "allow-llm-write-chunk",
+    "allow-llm-finish",
+    "allow-llm-remove",
+    "allow-llm-load",
+    "allow-llm-unload",
+    "allow-llm-generate",
+    "allow-llm-cancel"
   ],
   "remote": {
     "urls": [
