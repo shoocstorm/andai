@@ -29,7 +29,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | measured 2026-09-26 · worse, not shipped |
 | 10 | [Robust to the search scope](#10-robust-to-the-search-scope) | done 2026-09-27 with Laya · facts 75.9% → 89.7% (Multilingual), 82.8% → 89.7% (English); Qwen deciders unchanged |
 | 11 | [Rerank kept passages by relevance](#11-rerank-kept-passages-by-relevance) | measured 2026-09-27 · one fact lost per checkpoint, none gained; not shipped |
-| 12 | [Intent gate with Laya](#12-intent-gate-with-laya) | todo · probe first |
+| 12 | [Intent gate with Laya](#12-intent-gate-with-laya) | probed 2026-09-27 · fails the bar on both checkpoints; not shipped |
 | 13 | [Answer claim check](#13-answer-claim-check) | todo |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
@@ -501,6 +501,27 @@ it in the first decision's batch when `needsLookup` is false and answer on
 
 **Done when.** Small talk gets `answer_now` with Laya and lookup
 first-action accuracy doesn't drop, or the probe is recorded as not shipped.
+
+**Probed (2026-09-27), not shipped.** `laya_*_intent_probe` in
+`src-tauri/src/laya/engine.rs` (run by `bun run test:laya`) asks the choice
+on the loop's own step-1 state for the 34 eval requests plus 20 small-talk
+and about-the-assistant lines (54 in all), and prints every score. "No
+lookup" is P(small_talk) + P(about_assistant).
+
+| Checkpoint | No-lookup requests caught (≥ 0.5) | Lookups wrongly skipped (≥ 0.5) |
+|---|---|---|
+| Laya Multilingual | 18 of 25 | **19 of 29** |
+| Laya English | 1 of 25 | 3 of 29 (all three follow-ups) |
+
+Multilingual gets greetings and thanks right (0.67–0.99) but scores plain
+lookups the same way: "Is there a discount for large groups…" 0.85, "What
+code is used to page the on-call duty manager?" 0.77 (as
+`about_assistant`). English puts almost everything in `kb_content`, "hi"
+included (0.58). The gate would only see requests `needsLookup` lets
+through, but those include lookups addressed to the assistant ("Can you
+tell me the refund window?"), and on this evidence Multilingual would skip
+them. Nothing shipped; the probe stays so a new wording or checkpoint can
+be measured the same way.
 
 ## 13. Answer claim check
 

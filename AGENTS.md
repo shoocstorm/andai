@@ -467,7 +467,11 @@ level defaults to *Ask*.
   Laya still misses small talk that `needsLookup` lets through (it searches
   on "hi", clarifies on "thanks"), and a probe of a Laya "needs the
   knowledge base" `noul` scored the ferry question 0.0003 and "hi" 0.53, so
-  it doesn't replace `needsLookup` yet.
+  it doesn't replace `needsLookup` yet. A four-way intent `choice`
+  (`small_talk`, `about_assistant`, `kb_content`, `follow_up`; probe in
+  `laya/engine.rs`, 2026-09-27) fared no better: Multilingual put 19 of 29
+  lookups at ≥ 0.5 "no lookup", English put "hi" in `kb_content`
+  (tracker item 12).
 - **Laya batches questions, but each is its own row:** the state is encoded
   again per question (laya-mlx does the same). Choice alone vs choice +
   stop in one pass: 7.9 → 12.7 ms (multilingual), 18.3 → 30.8 ms (English)

@@ -239,4 +239,97 @@ mod tests {
     fn laya_en_matches_laya_mlx() {
         run("laya-en");
     }
+
+    /// The intent question the probe measures; `agent/loop.ts` would ask the same (item 12).
+    const INTENT: &str = "What is the user doing with this request?";
+    const INTENTS: [(&str, &str); 4] = [
+        ("small_talk", "Greeting, thanks, sign-off or other small talk that needs no information"),
+        ("about_assistant", "Asking about the assistant itself: who it is or what it can do"),
+        ("kb_content", "Asking about the content of the knowledge base: its documents, code or facts"),
+        ("follow_up", "Following up on the earlier conversation's topic"),
+    ];
+
+    /// Item 12 probe (docs/agentic-rag-improvements.md): can Laya tell small
+    /// talk and questions to the assistant from lookups, on the agent's own
+    /// step-1 state? Prints every request's intent scores and a confusion
+    /// matrix; the tracker records the result. Not an assertion: a measurement.
+    fn intent_probe(id: &str) {
+        let engine = Engine::load(&checkpoint_dir(id)).unwrap();
+        let cases: Value = serde_json::from_str(include_str!("../../../tests/fixtures/eval/cases.json")).unwrap();
+        let kbs = [("docs", "document", 3, 17), ("code", "code", 4, 24), ("mixed", "mixed", 7, 40)];
+        // (request, earlier turns as (role, text), kb, expected: lookup or not)
+        type Row<'a> = (String, Vec<(String, String)>, &'a str, bool);
+        let mut rows: Vec<Row> = vec![];
+        for c in cases["cases"].as_array().unwrap() {
+            let history = c["history"]
+                .as_array()
+                .map(|h| h.iter().map(|m| (m["role"].as_str().unwrap().to_string(), m["content"].as_str().unwrap().to_string())).collect())
+                .unwrap_or_default();
+            let kb = kbs.iter().find(|k| k.0 == c["kb"].as_str().unwrap()).unwrap().0;
+            let lookup = !c["first"].as_array().unwrap().iter().any(|f| f == "answer_now");
+            rows.push((c["prompt"].as_str().unwrap().into(), history, kb, lookup));
+        }
+        for p in [
+            "hi", "hello there", "thanks!", "thank you so much", "ok cool", "bye", "good morning", "great, that helps", "nice one", "cheers mate",
+            "who are you?", "what can you do?", "are you an AI?", "what model are you?", "how do you work?", "what's your name?", "can you help me?",
+            "what are you able to answer?", "are you running locally?", "who made you?",
+        ] {
+            rows.push((p.into(), vec![], "docs", false));
+        }
+        let q = Question {
+            kind: Kind::Choice,
+            instructions: INTENT.into(),
+            options: INTENTS.iter().map(|(i, t)| (i.to_string(), t.to_string())).collect(),
+        };
+        let states: Vec<String> = rows
+            .iter()
+            .map(|(p, h, kb, _)| {
+                let (_, kind, files, nodes) = kbs.iter().find(|k| k.0 == *kb).unwrap();
+                let mut s = format!("User request:\n{p}");
+                if !h.is_empty() {
+                    s += &format!("\n\nRecent conversation:\n{}", h.iter().map(|(r, c)| format!("{r}: {c}")).collect::<Vec<_>>().join("\n"));
+                }
+                s + &format!("\n\nKnowledge base: “{kb}”, a {kind} knowledge base ({files} files, {nodes} graph nodes).\n\nTool results so far: none.\n\nTool calls used: 0 of 4.")
+            })
+            .collect();
+        let batch: Vec<(&str, &Question)> = states.iter().map(|s| (s.as_str(), &q)).collect();
+        let asked = engine.ask_rows(&batch).unwrap();
+        let names: Vec<&str> = INTENTS.iter().map(|(i, _)| *i).collect();
+        let no_lookup = |p: &[f64]| p[0] + p[1];
+        let (mut false_skip, mut caught, mut chat) = (vec![], 0, 0);
+        println!("{id} intent probe ({} requests, {:.0} ms):", rows.len(), asked.ms);
+        for ((p, _, _, lookup), a) in rows.iter().zip(&asked.answers) {
+            let best = (0..names.len()).max_by(|x, y| a.probabilities[*x].total_cmp(&a.probabilities[*y])).unwrap();
+            let skip = no_lookup(&a.probabilities);
+            println!(
+                "  {:>6} {:<16} P(no lookup) {:.2} · {}  {p:?}",
+                if *lookup { "lookup" } else { "chat" },
+                names[best],
+                skip,
+                a.probabilities.iter().map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" ")
+            );
+            if *lookup && skip >= 0.5 {
+                false_skip.push(p.clone());
+            }
+            if !*lookup {
+                chat += 1;
+                if skip >= 0.5 {
+                    caught += 1;
+                }
+            }
+        }
+        println!("{id}: no-lookup requests caught {caught}/{chat}; lookups wrongly skipped {} {false_skip:?}", false_skip.len());
+    }
+
+    #[test]
+    #[ignore = "needs the multilingual checkpoint; a probe that prints"]
+    fn laya_multilingual_intent_probe() {
+        intent_probe("laya-multilingual");
+    }
+
+    #[test]
+    #[ignore = "needs the English checkpoint; a probe that prints"]
+    fn laya_en_intent_probe() {
+        intent_probe("laya-en");
+    }
 }
