@@ -4,7 +4,8 @@
 |---|---|---|
 | [features.md](features.md) | Users, evaluators | What Andai does, feature by feature, and what is still a preview |
 | [andai-website/](andai-website/index.html) | Public | Product landing page (static HTML — open `index.html` in a browser) |
-| [../README.md](../README.md) | Developers | Build, run, test, release |
+| [../README.md](../README.md) | Everyone | What Andai is, download, getting started |
+| [development.md](development.md) | Developers | How a turn works, build, run, test, release, the WebKit details |
 | [../AGENTS.md](../AGENTS.md) | Contributors & coding agents | Grounding rules, architecture, conventions, testing, releases, security (§9) |
 | [security.md](security.md) | Users, evaluators, security reviewers | Every security protection, what it means for you, how it's tested, and what isn't covered yet |
 | [agentic-rag-improvements.md](agentic-rag-improvements.md) | Contributors & coding agents | Tracker for planned agent-loop accuracy and speed work, one item at a time |

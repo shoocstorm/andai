@@ -706,7 +706,7 @@ Rules:
       dependencies): `bun run perf` passes, or the baseline was re-recorded
       with a reason (docs/performance.md)
 - [ ] Real vs. simulated table (§3) and platform facts (§2) still true, or updated
-- [ ] README / this file updated if commands, setup or behavior changed
+- [ ] README (users), `docs/development.md` (build, test, release) and this file updated if commands, setup or behavior changed
 - [ ] **Docs and website updated** for any user-visible change (§8), in the same change
 - [ ] Security checklist (§9) holds, and `tests/unit/security.test.ts` passes without loosening an allowlist
 
@@ -805,7 +805,7 @@ model caches.
 | Shortcuts | `docs/features.md` → Workspace, website "Focus mode" row, README, About dialog |
 | Models, sizes, supported file types, requirements, ports | `docs/features.md` → Models / Requirements, website FAQ + proof strip |
 | Performance numbers | Only publish numbers you **measured**, and say on what (model, Mac). Re-measure before changing them |
-| Install / release / signing | Website download CTA + FAQ, `docs/features.md` → Requirements |
+| Install / release / signing | Website download CTA + FAQ, `docs/features.md` → Requirements, README → Get started |
 | A new doc | Link it from `docs/README.md` |
 
 Rules:
