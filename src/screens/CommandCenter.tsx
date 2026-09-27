@@ -652,10 +652,7 @@ function TracePanel({ msg }: { msg?: Message }) {
     <>
       <div className="cc-head">
         <Network size={22} color="var(--blue)" />
-        <div className="cc-title-row">
-          <h1 className="display">Execution Trace</h1>
-          {msg && <CopyTraceButton m={msg} question={title} />}
-        </div>
+        <h1 className="display">Execution Trace</h1>
         {msg && <CopyButton text={() => reportFor(msg)} label="Copy debug report" size={14} />}
         <span className="label cc-session" style={{ color: active ? 'var(--blue)' : undefined }}>
           <span className={`dot${active ? ' pulse' : ''}`} style={{ display: 'inline-block', marginRight: 8, color: active ? 'var(--blue)' : 'var(--text-4)' }} />
@@ -677,7 +674,10 @@ function TracePanel({ msg }: { msg?: Message }) {
               <div className="trace-card root">
                 <div className="trace-top">
                   <span className="label blue">Root task</span>
-                  <span className="pill">{pct}%</span>
+                  <span className="trace-root-side">
+                    <span className="pill">{pct}%</span>
+                    <CopyTraceButton m={msg} question={title} />
+                  </span>
                 </div>
                 <div className="trace-title">{title.length > 70 ? `${title.slice(0, 70)}…` : title || 'Transmission'}</div>
               </div>

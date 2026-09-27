@@ -679,6 +679,12 @@
   gap: 10px;
   margin-bottom: 10px;
 }
+/* root task card: the % pill and the copy-trace button share the right side */
+.trace-root-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .trace-title {
   font: 600 15.5px/1.35 var(--font-display);
 }
@@ -2401,21 +2407,6 @@ tr:hover .kn-remove {
 .cc-user-row:hover > .copy-btn,
 .cc-user-row > .copy-btn:focus-visible,
 .cc-user-row > .copy-btn.done {
-  opacity: 1;
-}
-/* same pattern for the trace header: "Copy trace" hides until the title is hovered */
-.cc-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.cc-title-row > .btn {
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.cc-title-row:hover > .btn,
-.cc-title-row > .btn:focus-visible {
   opacity: 1;
 }
 .ag-step .trace-top > .label {
