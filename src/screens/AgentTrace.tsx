@@ -1184,7 +1184,7 @@ export function copyTrace(m: Message, question: string) {
 
 export function CopyTraceButton({ m, question }: { m: Message; question: string }) {
   return (
-    <button className="btn ghost sm" onClick={() => copyTrace(m, question)} title="Copy this turn’s full trace as JSON">
+    <button className="btn ghost sm" onClick={() => copyTrace(m, question)} title="Copy this turn’s full trace as JSON" aria-label="Copy trace">
       <Copy size={12} />
     </button>
   );
