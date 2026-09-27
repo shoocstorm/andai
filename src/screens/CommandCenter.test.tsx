@@ -854,6 +854,55 @@ describe('Command Center (agent mode)', () => {
     raf.mockRestore();
   });
 
+  it('lists the tool calls right under the plan step, before the steps that came after', () => {
+    turn([{ id: 's1', index: 0, at: 0, decision: null, action: 'kb_search', call: call() }]);
+    render(<CommandCenter />);
+    const order = [...document.querySelectorAll('.cc-reasoning button.cc-chip')].map((b) => /^Show step ([\d.]+) /.exec(b.getAttribute('aria-label')!)![1]);
+    expect(order).toEqual(['01', '01.1', '02', '03']);
+  });
+
+  it('opens what the chat model was sent from the Assemble context card', async () => {
+    const user = userEvent.setup();
+    addMessage({ id: 'u0', role: 'user', content: 'Earlier question', createdAt: 0 });
+    addMessage({ id: 'u', role: 'user', content: 'What headers?', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Use COOP [1].',
+      createdAt: 0,
+      stats: { tokens: 5, tokPerSec: 50, promptTokens: 400, nCtx: 4096, totalMs: 900, firstTokenMs: 500, model: 'Qwen3 8B' },
+      context: {
+        nCtx: 4096,
+        replyTokens: 512,
+        budget: { context: 6389, history: 2662 },
+        passages: [
+          { n: 1, chars: 900, used: 900, status: 'in', source: 'README.md:1-9' },
+          { n: 2, chars: 6000, used: 5489, status: 'clipped', source: 'big.md:1-200' },
+          { n: 3, chars: 400, used: 0, status: 'left out', source: 'late.md:1-9' },
+        ],
+        history: { sent: 1, of: 3, chars: 16 },
+        system: 'You are Andai.\n\n<passage>\n[1] README.md (lines 1-9)\nSet COOP.\n</passage>',
+        messages: [
+          { role: 'system', chars: 6500 },
+          { role: 'user', chars: 16 },
+          { role: 'user', chars: 13 },
+        ],
+        tokens: 2040,
+      },
+      steps: [{ kind: 'build', title: 'Assemble context', detail: '2 messages · ~2,040 tokens', status: 'done' }],
+    });
+    render(<CommandCenter />);
+    await user.click(screen.getByRole('button', { name: 'What went in?' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Assemble context' }));
+    const did = within(dialog.getByRole('region', { name: 'What it did' }));
+    expect(did.getByText(/Qwen3 8B reads at most 4,096 tokens.*kept 512 of them for the reply/)).toBeInTheDocument();
+    expect(did.getByText(/2 of 3 passages went in \(1 cut short to fit\); 1 was left out/)).toBeInTheDocument();
+    expect(did.getByText(/The last 1 of 3 earlier messages went in/)).toBeInTheDocument();
+    expect(did.getByText(/about 2,040 tokens, 50% of the window/)).toBeInTheDocument();
+    expect(dialog.getByText('left out')).toBeInTheDocument();
+    expect(dialog.getByText('user (the question)')).toBeInTheDocument();
+  });
+
   it('shows a fallback note when the loop overrode the decision', () => {
     turn([{ id: 's1', index: 0, at: 0, decision: null, action: 'kb_search', note: 'Decision failed (boom), so searching the knowledge base instead.', call: call() }]);
     render(<CommandCenter />);

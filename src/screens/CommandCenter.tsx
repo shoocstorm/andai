@@ -6,6 +6,7 @@ import {
   Code2,
   Database,
   FileText,
+  HelpCircle,
   ListFilter,
   ShieldCheck,
   Loader2,
@@ -40,7 +41,7 @@ import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
-import { AgentStepCard, ApprovalCard, callChipText, callLive, traceCallId, CopyTraceButton, DecisionSummary, MatchBadge, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
+import { AgentStepCard, ApprovalCard, callChipText, callLive, ContextDialog, traceCallId, CopyTraceButton, DecisionSummary, MatchBadge, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 import { shortcut } from '../lib/platform';
 
@@ -300,6 +301,22 @@ function reportFor(m: Message): string {
   });
 }
 
+/** The "Assemble context" card's button to what the chat model was sent; the dialog is built only while open. */
+function ContextButton({ m }: { m: Message }) {
+  const [open, setOpen] = useState(false);
+  const model = m.stats?.model ?? m.steps?.find((s) => s.kind === 'generate')?.title.replace(/^Generate · /, '') ?? 'The chat model';
+  return (
+    <>
+      <div className="ag-step-buttons">
+        <button className="btn ghost sm ag-toggle" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+          <HelpCircle size={12} /> <span className="ellipsis">What went in?</span>
+        </button>
+      </div>
+      {open && <ContextDialog c={m.context!} model={model} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 /** The DOM id of a step's card in the Execution Trace, so a chip can point at it. */
 const traceStepId = (msgId: string, kind: TraceStep['kind']) => `trace-${msgId}-${kind}`;
 
@@ -353,11 +370,17 @@ function StepChips({ m, steps }: { m: Message; steps: TraceStep[] }) {
                 {s.status === 'running' ? <Loader2 size={14} className="spin" /> : <Icon size={14} />}
                 <span>{chipText(s)}</span>
               </button>
+              {/* the tool calls belong to the plan step: listed right under it, not after the answer's steps */}
+              {s.kind === 'plan' && (
+                <div className="cc-chip-subs">
+                  <ToolChips m={m} planNo={stepNo(m, s)} onPick={flashTrace} />
+                </div>
+              )}
             </motion.div>
           );
         })}
       </AnimatePresence>
-      <ToolChips m={m} planNo={plan ? stepNo(m, plan) : undefined} onPick={flashTrace} />
+      {!plan && <ToolChips m={m} onPick={flashTrace} />}
     </div>
   );
 }
@@ -841,6 +864,7 @@ function TracePanel({ msg }: { msg?: Message }) {
                       {s.detail}
                       {s.ms != null && s.status === 'done' && <span className="faint"> · {(s.ms / 1000).toFixed(2)}s</span>}
                     </div>
+                    {s.kind === 'build' && msg.context && <ContextButton m={msg} />}
                     {s.kind === 'generate' && s.status === 'running' && (
                       <div style={{ marginTop: 12 }}>
                         <Bar value={genTokens / maxTokens} indeterminate={!genTokens} />

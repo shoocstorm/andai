@@ -3165,3 +3165,48 @@ button.cc-chip:focus-visible {
     box-shadow: 0 0 0 2px var(--violet);
   }
 }
+
+/* the tool calls sit under the plan step's chip, indented, not after the other steps */
+.cc-chip-row {
+  flex-wrap: wrap;
+}
+.cc-chip-subs {
+  /* the row's width, less the indent, so a long call is cut with an ellipsis instead of overflowing */
+  flex: 0 0 calc(100% - 22px);
+  min-width: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 22px;
+  padding-left: 12px;
+  border-left: 1px dashed var(--border-strong);
+}
+.cc-chip-subs:empty {
+  display: none;
+}
+/* the Assemble context dialog */
+.dd-budgets li {
+  grid-template-columns: 110px minmax(0, 1fr) auto;
+}
+.dd-passages li {
+  grid-template-columns: 14px minmax(0, 1fr) 48px 72px;
+}
+.dd-messages {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cc-chip-subs .cc-chip-row {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.cc-chip-subs .cc-chip {
+  min-width: 0;
+}
+.dd-grid + .dd-section[aria-label='Messages sent'] {
+  margin-top: 14px;
+}

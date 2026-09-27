@@ -5,7 +5,7 @@
 // drives the "Processing reasoning" chips and the Execution Trace panel.
 
 import { kbSearch, type SearchHit } from '../kb/api';
-import { budgets, buildHistory, buildSystem, CHARS_PER_TOKEN, keywords } from './prompt';
+import { budgets, buildHistory, buildSystem, CHARS_PER_TOKEN, keywords, planPassages, type ContextRecord } from './prompt';
 import { chat, isAbort, loadedModel, type ChatMessage } from '../llm/engine';
 import {
   addMessage,
@@ -177,15 +177,27 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
     const nCtx = model.n_ctx;
     const budget = budgets(nCtx, persona.maxTokens);
     const system = buildSystem(persona, hits, budget.context, kb?.name ?? null, { searched, clarify });
-    const messages: ChatMessage[] = [
-      { role: 'system', content: system },
-      ...buildHistory(useChat.getState().messages, budget.history, id),
-    ];
+    const sentHistory = buildHistory(useChat.getState().messages, budget.history, id);
+    const messages: ChatMessage[] = [{ role: 'system', content: system }, ...sentHistory];
+    const chars = messages.reduce((n, m) => n + m.content.length, 0);
+    // What the chat model is sent and why, for the trace's "Assemble context" dialog.
+    const earlier = useChat.getState().messages.filter((m) => m.id !== id && m.role !== 'error' && (m.role === 'assistant' ? splitThink(m.content).answer : m.content).trim());
+    const plan = searched && !clarify && kb ? planPassages(hits, budget.context) : [];
+    const context: ContextRecord = {
+      nCtx,
+      replyTokens: persona.maxTokens,
+      budget,
+      passages: plan.map((p, i) => ({ ...p, source: `${hits[i].file}:${hits[i].start_line}-${hits[i].end_line}` })),
+      // The question itself is the last message; it isn't "earlier".
+      history: { sent: Math.max(0, sentHistory.length - 1), of: Math.max(0, earlier.length - 1), chars: sentHistory.slice(0, -1).reduce((n, m) => n + m.content.length, 0) },
+      system,
+      messages: messages.map((m) => ({ role: m.role, chars: m.content.length })),
+      tokens: Math.round(chars / CHARS_PER_TOKEN),
+    };
+    patchMessage(id, { context });
     patchStep(id, 'build', {
       status: 'done',
-      detail: `${messages.length - 1} message${messages.length === 2 ? '' : 's'} · ~${Math.round(
-        messages.reduce((n, m) => n + m.content.length, 0) / CHARS_PER_TOKEN,
-      ).toLocaleString()} tokens`,
+      detail: `${messages.length - 1} message${messages.length === 2 ? '' : 's'} · ~${context.tokens.toLocaleString()} tokens`,
     });
 
     patchStep(id, 'generate', { status: 'running' });

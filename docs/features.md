@@ -30,6 +30,11 @@ model download nothing leaves the machine: no account, no API key, no cloud.
   its file name and line range. Click a citation, or a line of
   *retrieval.log*, to read that passage, with what the relevance and claim
   checks said about it.
+- **What the model read.** *What went in?* on the trace's *Assemble context*
+  step shows how the model's context window was split between the reply,
+  retrieved passages and earlier conversation; which passages went in whole,
+  were cut to fit or were left out; how much conversation was kept; and the
+  exact system prompt.
 - **Execution Trace.** A side panel with each step's status and timing,
   each decision and tool call (see below), the sources used, live throughput (tokens/second) and how much of the model's
   context window the turn used. Hide it for a focused view (`⌘J`).

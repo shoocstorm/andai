@@ -68,6 +68,33 @@ export type PersonaInput = { systemPrompt: string; tone: Tone };
  */
 const defang = (text: string) => text.replace(/<(\/?)passage/gi, '‹$1passage');
 
+/** What `buildSystem` does with one retrieved passage under the context budget. */
+export type PassagePlan = {
+  /** Its number in the prompt, `[n]` (the hit's index + 1). */
+  n: number;
+  /** Characters of the passage, and how many went into the prompt. */
+  chars: number;
+  used: number;
+  status: 'in' | 'clipped' | 'left out';
+};
+
+/**
+ * Which passages fit `contextBudget` characters, in order: whole while they
+ * fit, the next one cut to the room left, and none once less than
+ * `MIN_PASSAGE_CHARS` is left. Pure; `buildSystem` follows it.
+ */
+export function planPassages(hits: SearchHit[], contextBudget: number): PassagePlan[] {
+  let used = 0;
+  return hits.map((h, i) => {
+    const chars = (h.snippet ?? h.description ?? '').trim().length;
+    const room = contextBudget - used;
+    if (room < MIN_PASSAGE_CHARS) return { n: i + 1, chars, used: 0, status: 'left out' };
+    const take = Math.min(chars, room);
+    used += take;
+    return { n: i + 1, chars, used: take, status: take < chars ? 'clipped' : 'in' };
+  });
+}
+
 /**
  * System prompt = persona + tone clause + (optionally) retrieved passages.
  * Passage numbers are the hit's index + 1, so `[n]` in the answer matches the
@@ -92,15 +119,13 @@ export function buildSystem(
     } else if (!hits.length) {
       parts.push(`The knowledge base “${kbName}” had no relevant passages for this question. Say so if the answer depends on it.`);
     } else {
-      let used = 0;
-      const blocks: string[] = [];
-      hits.forEach((h, i) => {
+      const plan = planPassages(hits, contextBudget);
+      const blocks = hits.flatMap((h, i) => {
+        const p = plan[i];
+        if (p.status === 'left out') return [];
         const text = (h.snippet ?? h.description ?? '').trim();
-        const room = contextBudget - used;
-        if (room < MIN_PASSAGE_CHARS) return;
-        const clipped = text.length > room ? `${text.slice(0, room)}…` : text;
-        used += clipped.length;
-        blocks.push(`<passage>\n[${i + 1}] ${defang(h.file)} (lines ${h.start_line}-${h.end_line})\n${defang(clipped)}\n</passage>`);
+        const clipped = p.status === 'clipped' ? `${text.slice(0, p.used)}…` : text;
+        return [`<passage>\n[${i + 1}] ${defang(h.file)} (lines ${h.start_line}-${h.end_line})\n${defang(clipped)}\n</passage>`];
       });
       parts.push(
         `Knowledge base “${kbName}” — retrieved context. Answer from it and cite sources inline as [n].\n` +
@@ -167,6 +192,25 @@ export function agentState(input: {
   lines.push(`Tool calls used: ${input.step} of ${input.maxSteps}.`);
   return lines.join('\n\n');
 }
+
+/** What went into the chat model's prompt, and why: the Execution Trace's "Assemble context" dialog. */
+export type ContextRecord = {
+  /** The model's context window, and the tokens kept free for its reply. */
+  nCtx: number;
+  replyTokens: number;
+  /** Character budgets for the passages and the earlier conversation (`budgets`). */
+  budget: { context: number; history: number };
+  /** Each retrieved passage: fit whole, cut, or left out (`planPassages`), with where it's from. */
+  passages: (PassagePlan & { source: string })[];
+  /** Earlier messages sent, of those there were, and their characters. */
+  history: { sent: number; of: number; chars: number };
+  /** The system prompt exactly as sent. */
+  system: string;
+  /** Every message sent, by role and size (the system prompt first, the question last). */
+  messages: { role: string; chars: number }[];
+  /** Approximate prompt tokens (characters / CHARS_PER_TOKEN). */
+  tokens: number;
+};
 
 /** Split the model's context window between retrieved passages and history. */
 export function budgets(nCtx: number, maxTokens: number) {

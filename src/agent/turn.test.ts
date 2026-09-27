@@ -477,6 +477,12 @@ describe('runTurn (agent mode)', () => {
     expect(call.observation).toMatch(/^1 passage/);
     expect(assistant().sources).toHaveLength(1);
     expect(engine.seen[0].messages[0].content).toContain('[1] README.md (lines 11-33)');
+    // the trace's "Assemble context" dialog shows exactly what was sent
+    const ctx = assistant().context!;
+    expect(ctx.system).toBe(engine.seen[0].messages[0].content);
+    expect(ctx.messages.map((x) => x.role)).toEqual(engine.seen[0].messages.map((x) => x.role));
+    expect(ctx.passages).toEqual([expect.objectContaining({ n: 1, status: 'in', source: 'README.md:11-33' })]);
+    expect(ctx.history).toEqual({ sent: 0, of: 0, chars: 0 });
     // the second decision saw the first result
     expect(agent.seenStates[1]).toContain('kb_search {"query":"wllama COOP COEP headers","scope":"broad"} → 1 passage');
     expect(useTools.getState().stats.kb_search.calls).toBe(1);

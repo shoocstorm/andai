@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SearchHit } from '../kb/api';
 import type { Message } from '../state/chat';
 import { TONES } from '../state/persona';
-import { agentState, budgets, buildHistory, buildSystem, isSmallTalk, keywords, MIN_PASSAGE_CHARS, needsLookup } from './prompt';
+import { agentState, budgets, buildHistory, buildSystem, isSmallTalk, keywords, MIN_PASSAGE_CHARS, needsLookup, planPassages } from './prompt';
 
 const hit = (file: string, text: string, start = 1, end = 10): SearchHit => ({
   id: `${file}:${start}`,
@@ -29,6 +29,29 @@ describe('keywords', () => {
   });
   it('returns nothing for a prompt of stopwords', () => {
     expect(keywords('what is it?')).toEqual([]);
+  });
+});
+
+describe('planPassages', () => {
+  const h = (n: number, len: number): SearchHit => ({ id: `h${n}`, name: 'n', node_type: 'Section', file: `f${n}.md`, start_line: 1, end_line: 2, snippet: 'x'.repeat(len) });
+
+  it('fits passages whole while they fit, cuts the next, and leaves out the rest once too little room is left', () => {
+    const plan = planPassages([h(1, 300), h(2, 500), h(3, 400), h(4, 50)], 1000);
+    expect(plan.map(({ n, used, status }) => [n, used, status])).toEqual([
+      [1, 300, 'in'],
+      [2, 500, 'in'],
+      [3, 200, 'clipped'],
+      [4, 0, 'left out'],
+    ]);
+  });
+
+  it('is exactly what buildSystem puts in the prompt', () => {
+    const hits = [h(1, 300), h(2, 500), h(3, 400), h(4, 50)];
+    const system = buildSystem({ systemPrompt: 'You help.', tone: 'professional' }, hits, 1000, 'Docs');
+    expect(system).toContain('[3] f3.md');
+    expect(system).toContain(`${'x'.repeat(200)}…`);
+    expect(system).not.toContain('[4] f4.md');
+    expect(MIN_PASSAGE_CHARS).toBeGreaterThan(0);
   });
 });
 

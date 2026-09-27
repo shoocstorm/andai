@@ -12,6 +12,7 @@ import type { RelevanceRecord } from '../agent/relevance';
 import { claimState, MEASURED, SUPPORTS, type SupportItem, type SupportRecord } from '../agent/claims';
 import { LAYA_MODELS } from '../llm/models';
 import { matchOf } from '../kb/match';
+import { CHARS_PER_TOKEN, type ContextRecord } from '../agent/prompt';
 import { MEASURED_RELEVANCE, passageState, passageText, RELEVANT, type RelevanceItem } from '../agent/relevance';
 import type { SearchHit } from '../kb/api';
 import type { DecisionIO } from '../llm/decide';
@@ -1129,6 +1130,147 @@ export function SourceDialog({ m, n, onClose }: { m: Message; n: number; onClose
             Copy passage
           </CopyButton>
         )}
+        <button className="btn primary sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+const nf = (n: number) => n.toLocaleString('en-US');
+const toks = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
+
+/**
+ * What "Assemble context" did, in plain sentences: how the window was split,
+ * which passages went in whole, cut or not at all, how much conversation was
+ * kept, and the total. Pure, for the context dialog and its tests.
+ */
+export function explainContext(c: ContextRecord, model: string): string[] {
+  const out = [
+    `${model} reads at most ${nf(c.nCtx)} tokens at once. Andai kept ${nf(c.replyTokens)} of them for the reply and 256 spare, and gave about ${nf(toks(c.budget.context))} tokens of the rest to retrieved passages and ${nf(toks(c.budget.history))} to earlier conversation.`,
+  ];
+  const whole = c.passages.filter((p) => p.status === 'in').length;
+  const cut = c.passages.filter((p) => p.status === 'clipped').length;
+  const out_ = c.passages.filter((p) => p.status === 'left out').length;
+  if (!c.passages.length) out.push('No passages went in: the knowledge base wasn’t searched for this turn, or found nothing (the system prompt says which).');
+  else if (!cut && !out_) out.push(`All ${c.passages.length} passage${c.passages.length === 1 ? '' : 's'} went in whole, fenced as untrusted text the model must not take instructions from.`);
+  else
+    out.push(
+      `${whole + cut} of ${c.passages.length} passages went in${cut ? ` (${cut} cut short to fit)` : ''}${out_ ? `; ${out_} ${out_ === 1 ? 'was' : 'were'} left out because the passage budget ran out, so the model never saw ${out_ === 1 ? 'it' : 'them'}` : ''}. They go in the order shown, so later ones give way first.`,
+    );
+  const h = c.history;
+  out.push(
+    !h.of
+      ? 'There was no earlier conversation to include.'
+      : h.sent === h.of
+        ? `All ${h.of} earlier message${h.of === 1 ? '' : 's'} went in (about ${nf(toks(h.chars))} tokens), so the model can follow up on them.`
+        : `The last ${h.sent} of ${h.of} earlier messages went in; older ones didn’t fit the conversation budget, so the model doesn’t see them.`,
+  );
+  out.push(`In all the prompt is about ${nf(c.tokens)} tokens, ${Math.round((c.tokens / c.nCtx) * 100)}% of the window, and the model reads it before writing its first word.`);
+  return out;
+}
+
+/** A bar for how much of a budget was used. */
+function BudgetBar({ label, used, of, unit }: { label: string; used: number; of: number; unit: string }) {
+  const share = of > 0 ? Math.min(1, used / of) : 0;
+  return (
+    <li>
+      <span className="ag-bar-label">{label}</span>
+      <span className="ag-bar-track">
+        <i style={{ width: `${Math.max(1, share * 100)}%` }} />
+      </span>
+      <span className="ag-bar-value mono">
+        {nf(used)} / {nf(of)} {unit}
+      </span>
+    </li>
+  );
+}
+
+const PASSAGE_STATUS: Record<ContextRecord['passages'][number]['status'], string> = { in: 'whole', clipped: 'cut to fit', 'left out': 'left out' };
+
+/** The "Assemble context" step: what the chat model was sent, what was cut or left out, and the exact system prompt. */
+export function ContextDialog({ c, model, onClose }: { c: ContextRecord; model: string; onClose: () => void }) {
+  const passageChars = c.passages.reduce((n, p) => n + p.used, 0);
+  return (
+    <Modal open onClose={onClose} wide label="Assemble context">
+      <div className="dd-head">
+        <div>
+          <div className="label violet">Assemble context</div>
+          <h3>What the chat model read</h3>
+          <div className="faint ag-small">
+            {model} · {c.messages.length} message{c.messages.length === 1 ? '' : 's'} · ~{nf(c.tokens)} tokens of a {nf(c.nCtx)}-token window
+          </div>
+        </div>
+        <button className="btn ghost sm" aria-label="Close dialog" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+
+      <section className="dd-section" aria-label="What it did">
+        <h4 className="label">What it did</h4>
+        <ol className="dd-why">
+          {explainContext(c, model).map((line, i) => (
+            <li key={i} className="selectable">
+              {line}
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <div className="dd-grid">
+        <section className="dd-section" aria-label="Budgets">
+          <h4 className="label">Budgets</h4>
+          <ul className="ag-bars dd-budgets">
+            <BudgetBar label="Passages" used={passageChars} of={c.budget.context} unit="chars" />
+            <BudgetBar label="Conversation" used={c.history.chars} of={c.budget.history} unit="chars" />
+            <BudgetBar label="Whole prompt" used={c.tokens} of={c.nCtx - c.replyTokens} unit="tokens" />
+          </ul>
+          <div className="faint ag-seed">Tokens are estimated at {CHARS_PER_TOKEN} characters each; the reply’s {nf(c.replyTokens)} tokens are kept free.</div>
+        </section>
+        <section className="dd-section" aria-label="Passages">
+          <h4 className="label">Passages</h4>
+          {c.passages.length ? (
+            <ul className="ag-rel-list dd-passages">
+              {c.passages.map((p) => (
+                <li key={p.n} className={p.status === 'left out' ? 'dropped' : 'kept'}>
+                  {p.status === 'left out' ? <X size={13} color="var(--text-4)" /> : <Check size={13} color="var(--violet)" />}
+                  <span className="ag-rel-file ellipsis" title={p.source}>
+                    <span className="mono">[{p.n}] </span>
+                    {p.source}
+                  </span>
+                  <span className="ag-bar-value mono">{nf(p.used)}</span>
+                  <span className="ag-rel-why faint">{PASSAGE_STATUS[p.status]}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="ag-small faint">None.</div>
+          )}
+        </section>
+      </div>
+
+      <section className="dd-section" aria-label="Messages sent">
+        <h4 className="label">Messages sent, in order</h4>
+        <ol className="dd-messages mono ag-small">
+          {c.messages.map((m, i) => (
+            <li key={i}>
+              <span className="faint">{i === 0 ? 'system' : i === c.messages.length - 1 ? `${m.role} (the question)` : m.role}</span> · {nf(m.chars)} chars
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <details className="ag-raw dd-raw">
+        <summary>Exact system prompt ({nf(c.system.length)} characters)</summary>
+        <Field k="System prompt" copy={c.system}>
+          <pre className="ag-pre selectable">{c.system}</pre>
+        </Field>
+      </details>
+      <div className="dd-foot">
+        <CopyButton text={c.system} label="Copy system prompt">
+          Copy system prompt
+        </CopyButton>
         <button className="btn primary sm" onClick={onClose}>
           Close
         </button>

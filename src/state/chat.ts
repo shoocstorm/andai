@@ -4,6 +4,7 @@ import type { Policy } from '../agent/tools/types';
 import type { SearchHit } from '../kb/api';
 import type { RelevanceRecord } from '../agent/relevance';
 import type { SupportRecord } from '../agent/claims';
+import type { ContextRecord } from '../agent/prompt';
 import type { DecisionIO } from '../llm/decide';
 
 /**
@@ -130,6 +131,8 @@ export type Message = {
   agent?: AgentStep[];
   /** The relevance check: every retrieved passage's score and whether it went into the prompt. */
   relevance?: RelevanceRecord;
+  /** What the chat model was sent: budgets, passages in / cut / left out, history kept, the system prompt. */
+  context?: ContextRecord;
   /** The claim check: each cited sentence's support score, and which may not be supported. */
   support?: SupportRecord;
   kbName?: string | null;
