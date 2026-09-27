@@ -119,6 +119,7 @@ pub fn run() {
             laya::laya_unload,
             laya::laya_decide,
             laya::laya_relevance,
+            laya::laya_support,
             llm::llm_status,
             llm::llm_write_chunk,
             llm::llm_finish,

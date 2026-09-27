@@ -2873,3 +2873,35 @@ tr:hover .kn-remove {
 .ag-step .trace-top > .label {
   white-space: nowrap;
 }
+
+/* the claim check's note under an answer: only when a cited sentence may not be supported */
+.cc-support {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-2);
+  border-left: 2px solid var(--amber);
+  padding: 2px 0 2px 10px;
+}
+.cc-support > summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+.cc-support ul {
+  margin: 6px 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* claims are sentences: they wrap, and a flagged one is only dimmed (it isn't removed from the answer) */
+.ag-claims li {
+  align-items: start;
+}
+.ag-claims li .ag-rel-file {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.ag-rel-list.ag-claims li.dropped .ag-rel-file {
+  text-decoration: none;
+}

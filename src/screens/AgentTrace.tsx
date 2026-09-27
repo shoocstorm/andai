@@ -9,6 +9,7 @@ import { toolById } from '../agent/tools/registry';
 import { CopyButton, Modal, fmtTime } from '../components/ui';
 import { shellCommand } from '../agent/debugReport';
 import type { RelevanceRecord } from '../agent/relevance';
+import type { SupportRecord } from '../agent/claims';
 import type { SearchHit } from '../kb/api';
 import type { DecisionIO } from '../llm/decide';
 import type { AgentStep, CallStatus, DecisionRecord, Message, ToolCallRecord } from '../state/chat';
@@ -670,6 +671,62 @@ export function RelevanceList({ r }: { r: RelevanceRecord }) {
         {fmtMs(r.ms)}
       </div>
     </section>
+  );
+}
+
+/**
+ * The claim check under its trace step: every cited sentence, the source it
+ * cites, and how likely that passage supports it.
+ */
+export function SupportList({ r }: { r: SupportRecord }) {
+  return (
+    <section className="trace-subs ag-rel" aria-label="Claim check">
+      <div className="faint ag-small">
+        {r.model} scored how likely each cited passage supports the sentence that cites it. Below {pct(r.flagBelow)}, a sentence is
+        marked as possibly unsupported; the answer itself is never changed.
+      </div>
+      <ul className="ag-rel-list ag-claims">
+        {r.items.map((x, i) => (
+          <li key={i} className={x.flagged ? 'dropped' : 'kept'} aria-label={`[${x.n}] ${x.sentence}: ${pct(x.score)}, ${x.flagged ? 'may not be supported' : 'supported'}`}>
+            {x.flagged ? <X size={13} color="var(--text-4)" /> : <Check size={13} color="var(--violet)" />}
+            <span className="ag-rel-file selectable">
+              <span className="mono">[{x.n}] </span>
+              {x.sentence}
+            </span>
+            <span className="ag-bar-track">
+              <i style={{ width: `${Math.max(1, x.score * 100)}%` }} />
+            </span>
+            <span className="ag-bar-value mono">{pct(x.score)}</span>
+            <span className="ag-rel-why faint">{x.flagged ? 'unsupported?' : 'supported'}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="faint ag-small">{fmtMs(r.ms)}</div>
+    </section>
+  );
+}
+
+/**
+ * Under an answer, only when the claim check flagged something: which cited
+ * sentences may not be supported by the source they cite. Plain text.
+ */
+export function SupportNote({ r }: { r: SupportRecord }) {
+  const flagged = r.items.filter((x) => x.flagged);
+  if (!flagged.length) return null;
+  return (
+    <details className="cc-support">
+      <summary>
+        {flagged.length} of {r.items.length} cited sentence{r.items.length === 1 ? '' : 's'} may not be supported by the source {flagged.length === 1 ? 'it cites' : 'they cite'}
+      </summary>
+      <ul>
+        {flagged.map((x, i) => (
+          <li key={i} className="selectable">
+            <span className="mono">[{x.n}]</span> {x.sentence} <span className="faint mono">({pct(x.score)})</span>
+          </li>
+        ))}
+      </ul>
+      <div className="faint">Checked by {r.model}. It can be wrong both ways: read the source to be sure.</div>
+    </details>
   );
 }
 

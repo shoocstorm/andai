@@ -12,6 +12,7 @@ import {
   patchMessage,
   patchStep,
   settleCall,
+  splitThink,
   uid,
   useChat,
   type Message,
@@ -22,6 +23,7 @@ import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { runAgent } from './loop';
 import { checkRelevance, KEEP_TOP } from './relevance';
+import { checkClaims } from './claims';
 import { decidesWithLaya } from '../llm/decide';
 
 let controller: AbortController | null = null;
@@ -80,6 +82,8 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
     { kind: 'build', title: 'Assemble context', detail: 'Persona + retrieved passages + history', status: 'queued' },
     { kind: 'generate', title: `Generate · ${model.name}`, detail: 'Waiting for first token…', status: 'queued' },
   );
+  // And, after the answer, its cited sentences are checked against their passages (agent/claims.ts).
+  if (relevance) steps.push({ kind: 'verify', title: 'Claim check', detail: 'Waiting for the answer…', status: 'queued' });
   const id = uid();
   const msg: Message = {
     id,
@@ -225,6 +229,31 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
       }
     }
     patchMessage(id, { streaming: false });
+
+    if (relevance) {
+      const sources = useChat.getState().messages.find((m) => m.id === id)?.sources ?? [];
+      patchStep(id, 'verify', { status: 'running', detail: 'Checking cited sentences against their passages…' });
+      try {
+        const r = await checkClaims(splitThink(reply).answer, sources);
+        if (!r) {
+          patchStep(id, 'verify', { status: 'skipped', detail: 'The answer cites no passages' });
+        } else {
+          const flagged = r.items.filter((x) => x.flagged).length;
+          patchMessage(id, { support: r });
+          patchStep(id, 'verify', {
+            status: 'done',
+            detail: `${flagged ? `${flagged} of ${r.items.length}` : `All ${r.items.length}`} cited sentence${r.items.length === 1 ? '' : 's'} ${flagged ? 'may not be supported by their source' : 'look supported'} · ${r.ms} ms`,
+          });
+        }
+      } catch (e) {
+        // A failed or stopped check never touches the answer, which is complete.
+        patchStep(
+          id,
+          'verify',
+          signal.aborted ? { status: 'skipped', detail: 'Stopped by operator' } : { status: 'error', detail: `Check failed (${e instanceof Error ? e.message : e})` },
+        );
+      }
+    }
   } catch (e) {
     if (isAbort(e) || signal.aborted) {
       patchMessage(id, (m) => ({

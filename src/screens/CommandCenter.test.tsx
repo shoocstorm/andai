@@ -469,6 +469,52 @@ describe('Command Center (agent mode)', () => {
     expect(list.getByText(/1 dropped · ~180 fewer prompt tokens/)).toBeInTheDocument();
   });
 
+  it('notes under the answer which cited sentences may not be supported, and lists every claim in the trace', () => {
+    const support = {
+      model: 'Laya English',
+      ms: 60,
+      modelMs: 52,
+      flagBelow: 0.1,
+      items: [
+        { sentence: 'Use COOP.', n: 1, score: 0.93, flagged: false },
+        { sentence: 'Cars pay 18.5.', n: 2, score: 0.04, flagged: true },
+      ],
+    };
+    addMessage({ id: 'u', role: 'user', content: 'What headers?', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Use COOP [1]. Cars pay 18.5 [2].',
+      createdAt: 0,
+      kbName: 'Docs',
+      support,
+      steps: [
+        { kind: 'generate', title: 'Generate', detail: '', status: 'done' },
+        { kind: 'verify', title: 'Claim check', detail: '1 of 2 cited sentences may not be supported by their source · 60 ms', status: 'done' },
+      ],
+    });
+    render(<CommandCenter />);
+    expect(screen.getByText('1 of 2 cited sentences may not be supported by the source it cites')).toBeInTheDocument();
+    const list = within(screen.getByRole('region', { name: 'Claim check' }));
+    expect(list.getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual([
+      '[1] Use COOP.: 93%, supported',
+      '[2] Cars pay 18.5.: 4.0%, may not be supported',
+    ]);
+  });
+
+  it('says nothing under the answer when every cited sentence looks supported', () => {
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Use COOP [1].',
+      createdAt: 0,
+      support: { model: 'Laya English', ms: 30, modelMs: 25, flagBelow: 0.1, items: [{ sentence: 'Use COOP.', n: 1, score: 0.9, flagged: false }] },
+    });
+    render(<CommandCenter />);
+    expect(screen.queryByText(/may not be supported/)).toBeNull();
+  });
+
   it('shows a fallback note when the loop overrode the decision', () => {
     turn([{ id: 's1', index: 0, at: 0, decision: null, action: 'kb_search', note: 'Decision failed (boom), so searching the knowledge base instead.', call: call() }]);
     render(<CommandCenter />);

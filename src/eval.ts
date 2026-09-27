@@ -78,6 +78,7 @@ function report(c: EvalCase, msg: Message | undefined, error: string | null, ms:
           items: msg.relevance.items.map((x) => ({ source: `${x.file}:${x.start_line}-${x.end_line}`, score: x.score, kept: x.kept })),
         }
       : null,
+    support: msg?.support ? { ms: msg.support.ms, items: msg.support.items.map(({ n, sentence, score, flagged }) => ({ n, sentence, score, flagged })) } : null,
     answer: msg?.content ?? '',
     stats: msg?.stats ? { promptTokens: msg.stats.promptTokens, tokens: msg.stats.tokens, firstTokenMs: msg.stats.firstTokenMs } : null,
   };

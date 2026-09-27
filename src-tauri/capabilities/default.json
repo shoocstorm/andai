@@ -32,6 +32,7 @@
     "allow-laya-unload",
     "allow-laya-decide",
     "allow-laya-relevance",
+    "allow-laya-support",
     "allow-llm-status",
     "allow-llm-write-chunk",
     "allow-llm-finish",

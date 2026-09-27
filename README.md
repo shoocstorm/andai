@@ -65,6 +65,9 @@ What that buys you:
 - **Picks how to search.** Laya also decides whether a search looks for a
   specific name or a whole topic, in the same pass, so the chat model only
   writes the search phrase.
+- **Checks its citations.** After the answer, Laya checks each cited
+  sentence against the passage it cites and notes, under the answer, any
+  that may not be supported. The answer itself is never changed.
 - **Filters noise.** Before the answer is written, Laya scores each retrieved
   passage and drops clear misses, so the chat model reads less and answers
   sooner.

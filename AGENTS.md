@@ -94,6 +94,7 @@ Andai/
 │  ├─ agent/turn.ts          one turn: plan (agent loop) or analyze → retrieve (fixed) → build → generate
 │  ├─ agent/loop.ts          agent loop: decide → fill args → policy gate → run tool → observe; writes Message.agent
 │  ├─ agent/relevance.ts     relevance check (Laya): score retrieved passages, drop clear misses before the prompt
+│  ├─ agent/claims.ts        claim check (Laya): score each cited sentence against its passage, note the unsupported ones
 │  ├─ agent/evidence.ts      PURE: merges what the tools found into the answer's passages (same node, covered ranges, order)
 │  ├─ agent/tools/           tool registry (code only), ug tools, argument filling, schema validation + GBNF
 │  ├─ kb/api.ts              typed wrappers over the Rust ug bridge + hit dedupe
@@ -134,7 +135,8 @@ approval card) → `kbTool` (Rust `kb_tool` → `ug <cmd> --json`) →
 `tool.observe` → `addEvidence`] × up to `maxSteps` → `mergeEvidence` →
 relevance check (with Laya: `checkRelevance` drops passages scored < 0.10
 past the top 2) → `buildSystem` (tool results fenced as passages) + `buildHistory` → `engine.chat` (native
-MLX `llm_generate`, streamed over a channel, or wllama) → answer. Every decision and call
+MLX `llm_generate`, streamed over a channel, or wllama) → answer → claim check (with Laya: `checkClaims`
+scores each `[n]`-cited sentence against its passage and notes those < 0.10 under the answer). Every decision and call
 is written to `Message.agent`, which drives the tool chips, approval cards and
 the Execution Trace. **Agent mode off, or no KB:** `runTurn` → `kbSearch` (one
 `ug search` with the question) → `buildSystem` → `engine.chat`.
@@ -503,9 +505,20 @@ level defaults to *Ask*.
   (3 gained; lost `mixed-followup-surcharge`, where Laya chose `focused` for
   the topical query "vehicle features" and the answer named the constant
   without 18.5). Laya English: 36 → 37 ms per decision with the extra row.
+- **Laya as a claim check** (`agent/claims.ts`, `laya_support`, 2026-09-27):
+  after the answer, one `noul` row per cited sentence and source ("The
+  passage supports this statement.", state `Statement: … Passage from …`).
+  On 60 cited sentences from eval answers, own passage vs. one cited for
+  another question: AUC 0.67 (multilingual), 0.82 (English). Below 0.10,
+  1–2 of 60 own citations were clear false alarms and the rest real gaps,
+  so it flags "may not be supported" and never changes the answer. In the
+  eval it flagged 1 of 32 (multilingual, 15 ms) and 4 of 33 (English, 41 ms)
+  cited sentences (tracker item 13).
 - **Don't edit `src/` while `eval:agent` runs from the same checkout.** The
   harness serves the dev UI with hot reload, and a reload mid-run failed it
-  ("eval-docs did not index: empty", 2026-09-27). Measure a "before" from an
+  ("eval-docs did not index: empty", 2026-09-27). A second run failed with
+  "62 of 34 questions reported" while only `AGENTS.md` and `scripts/e2e.mjs`
+  were being edited (cause not found), so edit nothing while it runs. Measure a "before" from an
   export of `HEAD` (`git archive HEAD | tar -x`, `node_modules` symlinked,
   `public/wllama` copied, `CARGO_TARGET_DIR` pointed at this checkout's
   `src-tauri/target`).
@@ -535,7 +548,7 @@ level defaults to *Ask*.
 | Reasoning chips, Execution Trace, stats | Real (actual step timings, tokens, tok/s; every decision and tool call) | `agent/turn.ts`, `agent/loop.ts`, `screens/AgentTrace.tsx` |
 | Knowledge bases: create, ingest, index, search, delete | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts` |
 | Sample knowledge bases (Tidewater Ferries: documents, code, both), suggested questions | Real (bundled files, indexed by the user's ug) | `src-tauri/src/samples.rs`, `kb/samples.ts`, `screens/Knowledge.tsx` |
-| Laya decision model (download, verify, load, decide, stop question, relevance check, search scope; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
+| Laya decision model (download, verify, load, decide, stop question, relevance check, search scope, claim check; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
 | Agent tool loop: decisions, 8 ug tools, per-tool policy, approvals, decision model, Tools screen | Real | `agent/loop.ts`, `agent/tools/`, `llm/decide.ts`, `state/tools.ts`, `screens/Tools.tsx`, `src-tauri/src/tools.rs` |
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |
@@ -934,6 +947,7 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Model downloads pinned to a commit and verified (size + sha256) before load; mismatch → removed | `llm/models.ts`, `llm/integrity.ts`, `engine.loadModel` | `integrity.test.ts` (FIPS vectors, tamper), `engine.test.ts` (gate), `models.test.ts` (pinning); e2e logs the check |
 | Laya checkpoints: closed catalog in Rust (commit, sizes, sha256); chunks land in `.part` files and only `laya_finish` moves them into place, after every size and hash matches, else all are deleted; `load` reads only a verified folder | `laya/catalog.rs`, `laya/store.rs` | Rust unit tests (mismatch, order, oversize, tampering, 0600/0700); e2e downloads and verifies once |
 | Laya decisions: state ≤ 64 KB, question ≤ 2 KB, 2–16 options with `[a-z0-9_]` ids, text ≤ 1 KB; mask tokens stripped from all input | `laya/mod.rs` `validate`, `laya/prompt.rs` | Rust unit tests |
+| Laya relevance and claim checks: a fixed statement in Rust (`RELEVANT`, `SUPPORTS`), never text from the webview; 1–24 passages or claims, request ≤ 4 KB, statement ≤ 2 KB, passage ≤ 16 KB, source ≤ 512 bytes | `laya/mod.rs` `validate_passages`, `validate_claims` | Rust unit tests |
 | MLX chat models: closed catalog in Rust (commit, sizes, sha256), the same verified store as Laya; generation bounded (1–512 messages ≤ 512 KB, no NUL, max_tokens ≤ 8192, sampling ranges, grammar ≤ 8 KB, context 512–32768); roles are system/user/assistant only | `llm/catalog.rs`, `laya/store.rs`, `llm/mod.rs` `validate` | Rust unit tests; `test:llm` |
 | Sample knowledge bases: a closed list of ids; files only from the app's resource folder, copied like a user's | `samples.rs` | Rust unit tests |
 | Models added from Hugging Face: only public, ungated repos; pinned to the commit seen when picked; GGUF by its LFS sha256 (the webview's integrity gate); MLX through Rust: repo/commit syntax, a closed set of file names (config, tokenizer, template, safetensors; no pickle, no code), sizes and caps (32 GB a file, 64 GB a model, 16 MB inline, 32 models), config and template checked before any download, manifest written and re-validated by Rust, inline files re-hashed on every load. Search results and model data are shown as text, never Markdown or HTML; no model card is rendered | `llm/hub.ts`, `llm/custom.ts`, `src-tauri/src/llm/custom.rs`, `config.rs` | `hub.test.ts`, `custom.test.ts`, Rust unit tests, `security.test.ts`; e2e (search, inspect, add, remove) |

@@ -1,0 +1,845 @@
+{
+ "about": "Claim-check probe (docs/agentic-rag-improvements.md, item 13): cited sentences from the item 10 eval answers, each with its own passage (own: true) and a passage cited for another question (own: false). Built from eval/laya10-after-*.json and tests/fixtures/eval/.",
+ "rows": [
+  {
+   "id": "doc-weather",
+   "sentence": "If a sailing is cancelled due to bad weather, passengers are offered a full refund or a free rebooking on any sailing within 30 days .",
+   "source": "refund-policy.md:12-16",
+   "text": "## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.",
+   "own": true
+  },
+  {
+   "id": "doc-weather",
+   "sentence": "If a sailing is cancelled due to bad weather, passengers are offered a full refund or a free rebooking on any sailing within 30 days .",
+   "source": "refunds.ts:1-13",
+   "text": "// Refund rules. Must match docs/refund-policy.md.\n\n/** Share of the fare refunded when a passenger cancels this many hours before departure. */\nexport function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}\n\n/** A sailing Tidewater cancelled for weather is always refunded in full. */\nexport function weatherRefund(fare: number): number {\n  return fare;\n}",
+   "own": false
+  },
+  {
+   "id": "doc-wind",
+   "sentence": "Sailings are cancelled when sustained winds exceed 38 knots .",
+   "source": "operations.md:1-25",
+   "text": "# Tidewater operations handbook\n\n## Fleet\n\n| Vessel | Passengers | Vehicles |\n|---|---|---|\n| MV Kestrel | 212 | 40 |\n| MV Osprey | 150 | none (foot passengers only) |\n\n## Routes\n\n- Harlow ↔ Pellin Island: 55 minutes, served by both vessels.\n- Harlow ↔ Dunmere: 1 hour 20 minutes, MV Kestrel only.\n\n## Check-in\n\nCheck-in closes 20 minutes before departure for foot passengers and\n45 minutes before departure for vehicles. Late vehicles are moved to the next\nsailing with space.\n\n## Weather limits\n\nThe duty manager cancels a sailing when sustained winds exceed 38 knots or\nthe swell forecast at Pellin Island is above 3 metres. The on-call duty\nmanager is paged with the code TW-7.",
+   "own": true
+  },
+  {
+   "id": "doc-wind",
+   "sentence": "Sailings are cancelled when sustained winds exceed 38 knots .",
+   "source": "operations.md:10-14",
+   "text": "## Routes\n\n- Harlow ↔ Pellin Island: 55 minutes, served by both vessels.\n- Harlow ↔ Dunmere: 1 hour 20 minutes, MV Kestrel only.",
+   "own": false
+  },
+  {
+   "id": "doc-group",
+   "sentence": "The discount is 15% on the whole booking for parties of 10 or more passengers .",
+   "source": "release-notes.md:13-18",
+   "text": "## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": true
+  },
+  {
+   "id": "doc-group",
+   "sentence": "The discount is 15% on the whole booking for parties of 10 or more passengers .",
+   "source": "refund-policy.md:17-20",
+   "text": "## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": false
+  },
+  {
+   "id": "doc-paper",
+   "sentence": "All tickets are now QR codes in the app or in the confirmation email .",
+   "source": "release-notes.md:1-19",
+   "text": "# Booking app release notes\n\n## 2.5.1 (2026-05-14)\n\n- Fixed a crash when a booking had no passengers left after a transfer.\n\n## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.\n\n## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": true
+  },
+  {
+   "id": "doc-paper",
+   "sentence": "All tickets are now QR codes in the app or in the confirmation email .",
+   "source": "booking.ts:35-40",
+   "text": "export async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": false
+  },
+  {
+   "id": "doc-refund-time",
+   "sentence": "Refunds typically take 5 business days to process .",
+   "source": "refund-policy.md:1-21",
+   "text": "# Tidewater Ferries refund policy\n\nThis policy applies to every ticket sold through the Tidewater booking app.\n\n## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.\n\n## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.\n\n## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": true
+  },
+  {
+   "id": "doc-refund-time",
+   "sentence": "Refunds typically take 5 business days to process .",
+   "source": "fares.ts:1-38",
+   "text": "// Fare calculation for the Tidewater booking service.\n\nexport type Route = 'harlow-pellin' | 'harlow-dunmere';\n\n/** Base fare per passenger, in euros. */\nexport const BASE_FARES: Record<Route, number> = {\n  'harlow-pellin': 12,\n  'harlow-dunmere': 19.5,\n};\n\n/** Added once per booking that brings a vehicle. */\nexport const VEHICLE_SURCHARGE = 18.5;\n\n/** Fridays and Sundays cost more (release 2.5.0). */\nexport const PEAK_MULTIPLIER = 1.25;\nconst PEAK_DAYS = [5, 0]; // Friday, Sunday (Date.getDay())\n\n/** Parties of this size or larger get GROUP_DISCOUNT off the whole booking. */\nexport const GROUP_SIZE = 10;\nexport const GROUP_DISCOUNT = 0.15;\n\n/** 15% off the whole booking for parties of GROUP_SIZE passengers or more. */\nexport function applyGroupDiscount(total: number, passengers: number): number {\n  return passengers >= GROUP_SIZE ? total * (1 - GROUP_DISCOUNT) : total;\n}\n\n/**\n * The price of a booking: the route's base fare per passenger, plus the\n * vehicle surcharge, times the peak multiplier on peak days, then the group\n * discount. Rounded to cents.\n */\nexport function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": false
+  },
+  {
+   "id": "doc-pager",
+   "sentence": "The code used to page the on call duty manager is TW 7 .",
+   "source": "operations.md:21-25",
+   "text": "## Weather limits\n\nThe duty manager cancels a sailing when sustained winds exceed 38 knots or\nthe swell forecast at Pellin Island is above 3 metres. The on-call duty\nmanager is paged with the code TW-7.",
+   "own": true
+  },
+  {
+   "id": "doc-pager",
+   "sentence": "The code used to page the on call duty manager is TW 7 .",
+   "source": "retry.ts:12-23",
+   "text": "export async function withRetry<T>(fn: () => Promise<T>, attempts = DEFAULT_ATTEMPTS, baseDelayMs = BASE_DELAY_MS): Promise<T> {\n  let last: unknown;\n  for (let i = 0; i < attempts; i++) {\n    try {\n      return await fn();\n    } catch (e) {\n      last = e;\n      if (i < attempts - 1) await sleep(baseDelayMs * 2 ** i);\n    }\n  }\n  throw last;\n}",
+   "own": false
+  },
+  {
+   "id": "doc-followup-osprey",
+   "sentence": "The MV Osprey carries 150 passengers and no vehicles .",
+   "source": "operations.md:1-25",
+   "text": "# Tidewater operations handbook\n\n## Fleet\n\n| Vessel | Passengers | Vehicles |\n|---|---|---|\n| MV Kestrel | 212 | 40 |\n| MV Osprey | 150 | none (foot passengers only) |\n\n## Routes\n\n- Harlow ↔ Pellin Island: 55 minutes, served by both vessels.\n- Harlow ↔ Dunmere: 1 hour 20 minutes, MV Kestrel only.\n\n## Check-in\n\nCheck-in closes 20 minutes before departure for foot passengers and\n45 minutes before departure for vehicles. Late vehicles are moved to the next\nsailing with space.\n\n## Weather limits\n\nThe duty manager cancels a sailing when sustained winds exceed 38 knots or\nthe swell forecast at Pellin Island is above 3 metres. The on-call duty\nmanager is paged with the code TW-7.",
+   "own": true
+  },
+  {
+   "id": "doc-followup-osprey",
+   "sentence": "The MV Osprey carries 150 passengers and no vehicles .",
+   "source": "refund-policy.md:12-16",
+   "text": "## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.",
+   "own": false
+  },
+  {
+   "id": "doc-followup-late-cancel",
+   "sentence": "Canceling less than 6 hours before departure results in no refund .",
+   "source": "refund-policy.md:5-11",
+   "text": "## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.",
+   "own": true
+  },
+  {
+   "id": "doc-followup-late-cancel",
+   "sentence": "Canceling less than 6 hours before departure results in no refund .",
+   "source": "refund-policy.md:1-21",
+   "text": "# Tidewater Ferries refund policy\n\nThis policy applies to every ticket sold through the Tidewater booking app.\n\n## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.\n\n## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.\n\n## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": false
+  },
+  {
+   "id": "code-compute-fare",
+   "sentence": "This is used in the createBooking function to determine the price and then charge the card .",
+   "source": "fares.ts:32-38",
+   "text": "export function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": true
+  },
+  {
+   "id": "code-compute-fare",
+   "sentence": "This is used in the createBooking function to determine the price and then charge the card .",
+   "source": "fares.ts:16-16",
+   "text": "const PEAK_DAYS = [5, 0]; // Friday, Sunday (Date.getDay())",
+   "own": false
+  },
+  {
+   "id": "code-surcharge",
+   "sentence": "The vehicle surcharge is defined as 18.5 units in the code .",
+   "source": "fares.ts:12-12",
+   "text": "export const VEHICLE_SURCHARGE = 18.5;",
+   "own": true
+  },
+  {
+   "id": "code-surcharge",
+   "sentence": "The vehicle surcharge is defined as 18.5 units in the code .",
+   "source": "release-notes.md:7-12",
+   "text": "## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.",
+   "own": false
+  },
+  {
+   "id": "code-surcharge",
+   "sentence": "This value is used in the computeFare function to add to the base fare based on whether a vehicle is involved .",
+   "source": "fares.ts:32-38",
+   "text": "export function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": true
+  },
+  {
+   "id": "code-surcharge",
+   "sentence": "This value is used in the computeFare function to add to the base fare based on whether a vehicle is involved .",
+   "source": "operations.md:10-14",
+   "text": "## Routes\n\n- Harlow ↔ Pellin Island: 55 minutes, served by both vessels.\n- Harlow ↔ Dunmere: 1 hour 20 minutes, MV Kestrel only.",
+   "own": false
+  },
+  {
+   "id": "code-callers",
+   "sentence": "The computeFare function is called by the createBooking function .",
+   "source": "fares.ts:32-38",
+   "text": "export function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": true
+  },
+  {
+   "id": "code-callers",
+   "sentence": "The computeFare function is called by the createBooking function .",
+   "source": "release-notes.md:1-18",
+   "text": "# Booking app release notes\n\n## 2.5.1 (2026-05-14)\n\n- Fixed a crash when a booking had no passengers left after a transfer.\n\n## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.\n\n## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": false
+  },
+  {
+   "id": "code-callers",
+   "sentence": "The function is called in the createBooking function to determine the total fare before it is charged .",
+   "source": "fares.ts:32-38",
+   "text": "export function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": true
+  },
+  {
+   "id": "code-callers",
+   "sentence": "The function is called in the createBooking function to determine the total fare before it is charged .",
+   "source": "operations.md:10-14",
+   "text": "## Routes\n\n- Harlow ↔ Pellin Island: 55 minutes, served by both vessels.\n- Harlow ↔ Dunmere: 1 hour 20 minutes, MV Kestrel only.",
+   "own": false
+  },
+  {
+   "id": "code-peak",
+   "sentence": "The peak multiplier is 1.25 .",
+   "source": "fares.ts:15-15",
+   "text": "export const PEAK_MULTIPLIER = 1.25;",
+   "own": true
+  },
+  {
+   "id": "code-peak",
+   "sentence": "The peak multiplier is 1.25 .",
+   "source": "release-notes.md:7-12",
+   "text": "## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.",
+   "own": false
+  },
+  {
+   "id": "code-peak",
+   "sentence": "It applies on Friday and Sunday , as specified by the PEAK_DAYS array.",
+   "source": "fares.ts:16-16",
+   "text": "const PEAK_DAYS = [5, 0]; // Friday, Sunday (Date.getDay())",
+   "own": true
+  },
+  {
+   "id": "code-peak",
+   "sentence": "It applies on Friday and Sunday , as specified by the PEAK_DAYS array.",
+   "source": "refund-policy.md:1-21",
+   "text": "# Tidewater Ferries refund policy\n\nThis policy applies to every ticket sold through the Tidewater booking app.\n\n## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.\n\n## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.\n\n## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": false
+  },
+  {
+   "id": "code-refund-where",
+   "sentence": "The refund share for a cancellation is computed in the refundFraction function .",
+   "source": "refunds.ts:4-8",
+   "text": "export function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}",
+   "own": true
+  },
+  {
+   "id": "code-refund-where",
+   "sentence": "The refund share for a cancellation is computed in the refundFraction function .",
+   "source": "fares.ts:1-38",
+   "text": "// Fare calculation for the Tidewater booking service.\n\nexport type Route = 'harlow-pellin' | 'harlow-dunmere';\n\n/** Base fare per passenger, in euros. */\nexport const BASE_FARES: Record<Route, number> = {\n  'harlow-pellin': 12,\n  'harlow-dunmere': 19.5,\n};\n\n/** Added once per booking that brings a vehicle. */\nexport const VEHICLE_SURCHARGE = 18.5;\n\n/** Fridays and Sundays cost more (release 2.5.0). */\nexport const PEAK_MULTIPLIER = 1.25;\nconst PEAK_DAYS = [5, 0]; // Friday, Sunday (Date.getDay())\n\n/** Parties of this size or larger get GROUP_DISCOUNT off the whole booking. */\nexport const GROUP_SIZE = 10;\nexport const GROUP_DISCOUNT = 0.15;\n\n/** 15% off the whole booking for parties of GROUP_SIZE passengers or more. */\nexport function applyGroupDiscount(total: number, passengers: number): number {\n  return passengers >= GROUP_SIZE ? total * (1 - GROUP_DISCOUNT) : total;\n}\n\n/**\n * The price of a booking: the route's base fare per passenger, plus the\n * vehicle surcharge, times the peak multiplier on peak days, then the group\n * discount. Rounded to cents.\n */\nexport function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": false
+  },
+  {
+   "id": "code-refund-where",
+   "sentence": "The computed refund share is then used in the cancelBooking function to determine the amount to refund.",
+   "source": "booking.ts:35-40",
+   "text": "export async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": true
+  },
+  {
+   "id": "code-refund-where",
+   "sentence": "The computed refund share is then used in the cancelBooking function to determine the amount to refund.",
+   "source": "operations.md:10-14",
+   "text": "## Routes\n\n- Harlow ↔ Pellin Island: 55 minutes, served by both vessels.\n- Harlow ↔ Dunmere: 1 hour 20 minutes, MV Kestrel only.",
+   "own": false
+  },
+  {
+   "id": "code-usages-refund",
+   "sentence": "The refundFraction function is called by the cancelBooking function in booking.ts .",
+   "source": "booking.ts:35-40",
+   "text": "export async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": true
+  },
+  {
+   "id": "code-usages-refund",
+   "sentence": "The refundFraction function is called by the cancelBooking function in booking.ts .",
+   "source": "booking.ts:1-40",
+   "text": "// Creating and cancelling bookings.\n\nimport { computeFare, type Route } from './fares';\nimport { refundFraction } from './refunds';\nimport { withRetry } from './retry';\n\nexport type Booking = {\n  id: string;\n  route: Route;\n  passengers: number;\n  vehicle: boolean;\n  departure: Date;\n  fare: number;\n};\n\nexport type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};\n\n/** Prices the booking with computeFare and charges the card, retrying gateway timeouts. */\nexport async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}\n\n/** Refunds the share refundFraction allows for the time left before departure, and returns the amount. */\nexport async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": false
+  },
+  {
+   "id": "code-usages-refund",
+   "sentence": "It is defined in refunds.ts .",
+   "source": "refunds.ts:4-8",
+   "text": "export function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}",
+   "own": true
+  },
+  {
+   "id": "code-usages-refund",
+   "sentence": "It is defined in refunds.ts .",
+   "source": "release-notes.md:7-12",
+   "text": "## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "createBooking calculates the fare and charges the card, retrying on gateway timeouts .",
+   "source": "booking.ts:1-41",
+   "text": "// Creating and cancelling bookings.\n\nimport { computeFare, type Route } from './fares';\nimport { refundFraction } from './refunds';\nimport { withRetry } from './retry';\n\nexport type Booking = {\n  id: string;\n  route: Route;\n  passengers: number;\n  vehicle: boolean;\n  departure: Date;\n  fare: number;\n};\n\nexport type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};\n\n/** Prices the booking with computeFare and charges the card, retrying gateway timeouts. */\nexport async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}\n\n/** Refunds the share refundFraction allows for the time left before departure, and returns the amount. */\nexport async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "createBooking calculates the fare and charges the card, retrying on gateway timeouts .",
+   "source": "release-notes.md:7-12",
+   "text": "## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "cancelBooking refunds a fraction of the fare based on hours before departure, returning the amount .",
+   "source": "booking.ts:1-41",
+   "text": "// Creating and cancelling bookings.\n\nimport { computeFare, type Route } from './fares';\nimport { refundFraction } from './refunds';\nimport { withRetry } from './retry';\n\nexport type Booking = {\n  id: string;\n  route: Route;\n  passengers: number;\n  vehicle: boolean;\n  departure: Date;\n  fare: number;\n};\n\nexport type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};\n\n/** Prices the booking with computeFare and charges the card, retrying gateway timeouts. */\nexport async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}\n\n/** Refunds the share refundFraction allows for the time left before departure, and returns the amount. */\nexport async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "cancelBooking refunds a fraction of the fare based on hours before departure, returning the amount .",
+   "source": "fares.ts:6-9",
+   "text": "export const BASE_FARES: Record<Route, number> = {\n  'harlow-pellin': 12,\n  'harlow-dunmere': 19.5,\n};",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "The withRetry function in retry.ts implements exponential backoff for retrying gateway calls .",
+   "source": "retry.ts:12-23",
+   "text": "export async function withRetry<T>(fn: () => Promise<T>, attempts = DEFAULT_ATTEMPTS, baseDelayMs = BASE_DELAY_MS): Promise<T> {\n  let last: unknown;\n  for (let i = 0; i < attempts; i++) {\n    try {\n      return await fn();\n    } catch (e) {\n      last = e;\n      if (i < attempts - 1) await sleep(baseDelayMs * 2 ** i);\n    }\n  }\n  throw last;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "The withRetry function in retry.ts implements exponential backoff for retrying gateway calls .",
+   "source": "refunds.ts:11-13",
+   "text": "export function weatherRefund(fare: number): number {\n  return fare;\n}",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "The computeFare function in fares.ts calculates the total fare, including base fares, vehicle surcharge, peak multipliers, and group discounts .",
+   "source": "fares.ts:32-38",
+   "text": "export function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "The computeFare function in fares.ts calculates the total fare, including base fares, vehicle surcharge, peak multipliers, and group discounts .",
+   "source": "refunds.ts:4-8",
+   "text": "export function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "The refundFraction function in refunds.ts refunds 100% of the fare if cancelled more than 48 hours before departure .",
+   "source": "refunds.ts:1-13",
+   "text": "// Refund rules. Must match docs/refund-policy.md.\n\n/** Share of the fare refunded when a passenger cancels this many hours before departure. */\nexport function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}\n\n/** A sailing Tidewater cancelled for weather is always refunded in full. */\nexport function weatherRefund(fare: number): number {\n  return fare;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "The refundFraction function in refunds.ts refunds 100% of the fare if cancelled more than 48 hours before departure .",
+   "source": "booking.ts:1-40",
+   "text": "// Creating and cancelling bookings.\n\nimport { computeFare, type Route } from './fares';\nimport { refundFraction } from './refunds';\nimport { withRetry } from './retry';\n\nexport type Booking = {\n  id: string;\n  route: Route;\n  passengers: number;\n  vehicle: boolean;\n  departure: Date;\n  fare: number;\n};\n\nexport type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};\n\n/** Prices the booking with computeFare and charges the card, retrying gateway timeouts. */\nexport async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}\n\n/** Refunds the share refundFraction allows for the time left before departure, and returns the amount. */\nexport async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": false
+  },
+  {
+   "id": "mixed-group-impl",
+   "sentence": "The function applyGroupDiscount implements the group discount as described in the release notes .",
+   "source": "release-notes.md:13-18",
+   "text": "## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": true
+  },
+  {
+   "id": "mixed-group-impl",
+   "sentence": "The function applyGroupDiscount implements the group discount as described in the release notes .",
+   "source": "refund-policy.md:1-21",
+   "text": "# Tidewater Ferries refund policy\n\nThis policy applies to every ticket sold through the Tidewater booking app.\n\n## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.\n\n## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.\n\n## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": false
+  },
+  {
+   "id": "mixed-group-impl",
+   "sentence": "This function takes total and passengers as parameters and returns the discounted total based on whether the number of passengers meets or exceeds the GROUP_SIZE threshold .",
+   "source": "release-notes.md:13-18",
+   "text": "## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": true
+  },
+  {
+   "id": "mixed-group-impl",
+   "sentence": "This function takes total and passengers as parameters and returns the discounted total based on whether the number of passengers meets or exceeds the GROUP_SIZE threshold .",
+   "source": "refunds.ts:1-13",
+   "text": "// Refund rules. Must match docs/refund-policy.md.\n\n/** Share of the fare refunded when a passenger cancels this many hours before departure. */\nexport function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}\n\n/** A sailing Tidewater cancelled for weather is always refunded in full. */\nexport function weatherRefund(fare: number): number {\n  return fare;\n}",
+   "own": false
+  },
+  {
+   "id": "mixed-cancel",
+   "sentence": "This is determined by the refundFraction function , which returns 1, 0.5, or 0 based on the hours before departure .",
+   "source": "refunds.ts:4-8",
+   "text": "export function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}",
+   "own": true
+  },
+  {
+   "id": "mixed-cancel",
+   "sentence": "This is determined by the refundFraction function , which returns 1, 0.5, or 0 based on the hours before departure .",
+   "source": "operations.md:3-9",
+   "text": "## Fleet\n\n| Vessel | Passengers | Vehicles |\n|---|---|---|\n| MV Kestrel | 212 | 40 |\n| MV Osprey | 150 | none (foot passengers only) |",
+   "own": false
+  },
+  {
+   "id": "mixed-cancel",
+   "sentence": "This is determined by the refundFraction function , which returns 1, 0.5, or 0 based on the hours before departure .",
+   "source": "refund-policy.md:5-11",
+   "text": "## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.",
+   "own": true
+  },
+  {
+   "id": "mixed-cancel",
+   "sentence": "This is determined by the refundFraction function , which returns 1, 0.5, or 0 based on the hours before departure .",
+   "source": "booking.ts:1-41",
+   "text": "// Creating and cancelling bookings.\n\nimport { computeFare, type Route } from './fares';\nimport { refundFraction } from './refunds';\nimport { withRetry } from './retry';\n\nexport type Booking = {\n  id: string;\n  route: Route;\n  passengers: number;\n  vehicle: boolean;\n  departure: Date;\n  fare: number;\n};\n\nexport type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};\n\n/** Prices the booking with computeFare and charges the card, retrying gateway timeouts. */\nexport async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}\n\n/** Refunds the share refundFraction allows for the time left before departure, and returns the amount. */\nexport async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": false
+  },
+  {
+   "id": "mixed-context-createbooking",
+   "sentence": "computeFare : Calculates the total fare based on route, passengers, vehicle, and date.",
+   "source": "fares.ts:32-38",
+   "text": "export function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": true
+  },
+  {
+   "id": "mixed-context-createbooking",
+   "sentence": "computeFare : Calculates the total fare based on route, passengers, vehicle, and date.",
+   "source": "fares.ts:20-20",
+   "text": "export const GROUP_DISCOUNT = 0.15;",
+   "own": false
+  },
+  {
+   "id": "mixed-context-createbooking",
+   "sentence": "gateway.chargeCard : Charges the card with the calculated fare, retrying on timeout.",
+   "source": "booking.ts:22-32",
+   "text": "export async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}",
+   "own": true
+  },
+  {
+   "id": "mixed-context-createbooking",
+   "sentence": "gateway.chargeCard : Charges the card with the calculated fare, retrying on timeout.",
+   "source": "fares.ts:20-20",
+   "text": "export const GROUP_DISCOUNT = 0.15;",
+   "own": false
+  },
+  {
+   "id": "mixed-unanswerable",
+   "sentence": "The database is structured using TypeScript types and managed through the createBooking function .",
+   "source": "booking.ts:22-32",
+   "text": "export async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}",
+   "own": true
+  },
+  {
+   "id": "mixed-unanswerable",
+   "sentence": "The database is structured using TypeScript types and managed through the createBooking function .",
+   "source": "operations.md:15-20",
+   "text": "## Check-in\n\nCheck-in closes 20 minutes before departure for foot passengers and\n45 minutes before departure for vehicles. Late vehicles are moved to the next\nsailing with space.",
+   "own": false
+  },
+  {
+   "id": "mixed-followup-surcharge",
+   "sentence": "The computeFare function adds the VEHICLE_SURCHARGE for a vehicle .",
+   "source": "fares.ts:12-12",
+   "text": "export const VEHICLE_SURCHARGE = 18.5;",
+   "own": true
+  },
+  {
+   "id": "mixed-followup-surcharge",
+   "sentence": "The computeFare function adds the VEHICLE_SURCHARGE for a vehicle .",
+   "source": "refund-policy.md:17-20",
+   "text": "## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": false
+  },
+  {
+   "id": "doc-weather",
+   "sentence": "If a sailing is cancelled due to bad weather, passengers are offered a full refund or a free rebooking on any sailing within 30 days .",
+   "source": "refund-policy.md:1-21",
+   "text": "# Tidewater Ferries refund policy\n\nThis policy applies to every ticket sold through the Tidewater booking app.\n\n## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.\n\n## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.\n\n## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": true
+  },
+  {
+   "id": "doc-weather",
+   "sentence": "If a sailing is cancelled due to bad weather, passengers are offered a full refund or a free rebooking on any sailing within 30 days .",
+   "source": "fares.ts:16-16",
+   "text": "const PEAK_DAYS = [5, 0]; // Friday, Sunday (Date.getDay())",
+   "own": false
+  },
+  {
+   "id": "doc-weather",
+   "sentence": "The ticket can still be transferred to another passenger for free .",
+   "source": "refund-policy.md:1-21",
+   "text": "# Tidewater Ferries refund policy\n\nThis policy applies to every ticket sold through the Tidewater booking app.\n\n## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.\n\n## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.\n\n## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": true
+  },
+  {
+   "id": "doc-weather",
+   "sentence": "The ticket can still be transferred to another passenger for free .",
+   "source": "fares.ts:1-38",
+   "text": "// Fare calculation for the Tidewater booking service.\n\nexport type Route = 'harlow-pellin' | 'harlow-dunmere';\n\n/** Base fare per passenger, in euros. */\nexport const BASE_FARES: Record<Route, number> = {\n  'harlow-pellin': 12,\n  'harlow-dunmere': 19.5,\n};\n\n/** Added once per booking that brings a vehicle. */\nexport const VEHICLE_SURCHARGE = 18.5;\n\n/** Fridays and Sundays cost more (release 2.5.0). */\nexport const PEAK_MULTIPLIER = 1.25;\nconst PEAK_DAYS = [5, 0]; // Friday, Sunday (Date.getDay())\n\n/** Parties of this size or larger get GROUP_DISCOUNT off the whole booking. */\nexport const GROUP_SIZE = 10;\nexport const GROUP_DISCOUNT = 0.15;\n\n/** 15% off the whole booking for parties of GROUP_SIZE passengers or more. */\nexport function applyGroupDiscount(total: number, passengers: number): number {\n  return passengers >= GROUP_SIZE ? total * (1 - GROUP_DISCOUNT) : total;\n}\n\n/**\n * The price of a booking: the route's base fare per passenger, plus the\n * vehicle surcharge, times the peak multiplier on peak days, then the group\n * discount. Rounded to cents.\n */\nexport function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": false
+  },
+  {
+   "id": "doc-weather",
+   "sentence": "Refunds take 5 business days to process .",
+   "source": "refund-policy.md:1-21",
+   "text": "# Tidewater Ferries refund policy\n\nThis policy applies to every ticket sold through the Tidewater booking app.\n\n## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.\n\n## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.\n\n## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": true
+  },
+  {
+   "id": "doc-weather",
+   "sentence": "Refunds take 5 business days to process .",
+   "source": "booking.ts:16-19",
+   "text": "export type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};",
+   "own": false
+  },
+  {
+   "id": "doc-crossing-time",
+   "sentence": "The crossing from Harlow to Pellin Island takes 55 minutes, served by both vessels .",
+   "source": "operations.md:1-25",
+   "text": "# Tidewater operations handbook\n\n## Fleet\n\n| Vessel | Passengers | Vehicles |\n|---|---|---|\n| MV Kestrel | 212 | 40 |\n| MV Osprey | 150 | none (foot passengers only) |\n\n## Routes\n\n- Harlow ↔ Pellin Island: 55 minutes, served by both vessels.\n- Harlow ↔ Dunmere: 1 hour 20 minutes, MV Kestrel only.\n\n## Check-in\n\nCheck-in closes 20 minutes before departure for foot passengers and\n45 minutes before departure for vehicles. Late vehicles are moved to the next\nsailing with space.\n\n## Weather limits\n\nThe duty manager cancels a sailing when sustained winds exceed 38 knots or\nthe swell forecast at Pellin Island is above 3 metres. The on-call duty\nmanager is paged with the code TW-7.",
+   "own": true
+  },
+  {
+   "id": "doc-crossing-time",
+   "sentence": "The crossing from Harlow to Pellin Island takes 55 minutes, served by both vessels .",
+   "source": "release-notes.md:3-6",
+   "text": "## 2.5.1 (2026-05-14)\n\n- Fixed a crash when a booking had no passengers left after a transfer.",
+   "own": false
+  },
+  {
+   "id": "doc-wind",
+   "sentence": "Sailings are cancelled when sustained winds exceed 38 knots or the swell forecast at Pellin Island is above 3 metres .",
+   "source": "operations.md:21-25",
+   "text": "## Weather limits\n\nThe duty manager cancels a sailing when sustained winds exceed 38 knots or\nthe swell forecast at Pellin Island is above 3 metres. The on-call duty\nmanager is paged with the code TW-7.",
+   "own": true
+  },
+  {
+   "id": "doc-wind",
+   "sentence": "Sailings are cancelled when sustained winds exceed 38 knots or the swell forecast at Pellin Island is above 3 metres .",
+   "source": "fares.ts:32-38",
+   "text": "export function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": false
+  },
+  {
+   "id": "doc-paper",
+   "sentence": "All tickets are now QR codes in the app or in the confirmation email .",
+   "source": "release-notes.md:1-18",
+   "text": "# Booking app release notes\n\n## 2.5.1 (2026-05-14)\n\n- Fixed a crash when a booking had no passengers left after a transfer.\n\n## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.\n\n## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": true
+  },
+  {
+   "id": "doc-paper",
+   "sentence": "All tickets are now QR codes in the app or in the confirmation email .",
+   "source": "release-notes.md:13-18",
+   "text": "## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": false
+  },
+  {
+   "id": "doc-refund-time",
+   "sentence": "Refunds typically take 5 business days to process .",
+   "source": "refund-policy.md:17-20",
+   "text": "## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": true
+  },
+  {
+   "id": "doc-refund-time",
+   "sentence": "Refunds typically take 5 business days to process .",
+   "source": "release-notes.md:13-18",
+   "text": "## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": false
+  },
+  {
+   "id": "doc-followup-late-cancel",
+   "sentence": "Canceling less than 6 hours before departure results in no refund .",
+   "source": "refund-policy.md:1-21",
+   "text": "# Tidewater Ferries refund policy\n\nThis policy applies to every ticket sold through the Tidewater booking app.\n\n## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.\n\n## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.\n\n## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": true
+  },
+  {
+   "id": "doc-followup-late-cancel",
+   "sentence": "Canceling less than 6 hours before departure results in no refund .",
+   "source": "release-notes.md:7-12",
+   "text": "## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.",
+   "own": false
+  },
+  {
+   "id": "code-callers",
+   "sentence": "The computeFare function is called by the createBooking function .",
+   "source": "booking.ts:22-32",
+   "text": "export async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}",
+   "own": true
+  },
+  {
+   "id": "code-callers",
+   "sentence": "The computeFare function is called by the createBooking function .",
+   "source": "retry.ts:4-4",
+   "text": "export const BASE_DELAY_MS = 250;",
+   "own": false
+  },
+  {
+   "id": "code-retry-default",
+   "sentence": "According to the context, DEFAULT_ATTEMPTS is set to 3 .",
+   "source": "retry.ts:3-3",
+   "text": "export const DEFAULT_ATTEMPTS = 3;",
+   "own": true
+  },
+  {
+   "id": "code-retry-default",
+   "sentence": "According to the context, DEFAULT_ATTEMPTS is set to 3 .",
+   "source": "release-notes.md:7-12",
+   "text": "## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.",
+   "own": false
+  },
+  {
+   "id": "code-peak",
+   "sentence": "It applies on Friday and Sunday , as determined by Date.getDay() .",
+   "source": "fares.ts:16-16",
+   "text": "const PEAK_DAYS = [5, 0]; // Friday, Sunday (Date.getDay())",
+   "own": true
+  },
+  {
+   "id": "code-peak",
+   "sentence": "It applies on Friday and Sunday , as determined by Date.getDay() .",
+   "source": "fares.ts:12-12",
+   "text": "export const VEHICLE_SURCHARGE = 18.5;",
+   "own": false
+  },
+  {
+   "id": "code-refund-where",
+   "sentence": "The refund share for a cancellation is computed in the refundFraction function, which is defined in refunds.ts .",
+   "source": "refunds.ts:4-8",
+   "text": "export function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}",
+   "own": true
+  },
+  {
+   "id": "code-refund-where",
+   "sentence": "The refund share for a cancellation is computed in the refundFraction function, which is defined in refunds.ts .",
+   "source": "booking.ts:1-41",
+   "text": "// Creating and cancelling bookings.\n\nimport { computeFare, type Route } from './fares';\nimport { refundFraction } from './refunds';\nimport { withRetry } from './retry';\n\nexport type Booking = {\n  id: string;\n  route: Route;\n  passengers: number;\n  vehicle: boolean;\n  departure: Date;\n  fare: number;\n};\n\nexport type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};\n\n/** Prices the booking with computeFare and charges the card, retrying gateway timeouts. */\nexport async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}\n\n/** Refunds the share refundFraction allows for the time left before departure, and returns the amount. */\nexport async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": false
+  },
+  {
+   "id": "code-refund-where",
+   "sentence": "This is used in the cancelBooking function to calculate the refund amount .",
+   "source": "booking.ts:35-40",
+   "text": "export async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": true
+  },
+  {
+   "id": "code-refund-where",
+   "sentence": "This is used in the cancelBooking function to calculate the refund amount .",
+   "source": "operations.md:21-25",
+   "text": "## Weather limits\n\nThe duty manager cancels a sailing when sustained winds exceed 38 knots or\nthe swell forecast at Pellin Island is above 3 metres. The on-call duty\nmanager is paged with the code TW-7.",
+   "own": false
+  },
+  {
+   "id": "code-source-retry",
+   "sentence": ", , , and are the relevant sections of the code.",
+   "source": "retry.ts:12-23",
+   "text": "export async function withRetry<T>(fn: () => Promise<T>, attempts = DEFAULT_ATTEMPTS, baseDelayMs = BASE_DELAY_MS): Promise<T> {\n  let last: unknown;\n  for (let i = 0; i < attempts; i++) {\n    try {\n      return await fn();\n    } catch (e) {\n      last = e;\n      if (i < attempts - 1) await sleep(baseDelayMs * 2 ** i);\n    }\n  }\n  throw last;\n}",
+   "own": true
+  },
+  {
+   "id": "code-source-retry",
+   "sentence": ", , , and are the relevant sections of the code.",
+   "source": "release-notes.md:1-19",
+   "text": "# Booking app release notes\n\n## 2.5.1 (2026-05-14)\n\n- Fixed a crash when a booking had no passengers left after a transfer.\n\n## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.\n\n## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": false
+  },
+  {
+   "id": "code-source-retry",
+   "sentence": ", , , and are the relevant sections of the code.",
+   "source": "retry.ts:6-6",
+   "text": "const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));",
+   "own": true
+  },
+  {
+   "id": "code-source-retry",
+   "sentence": ", , , and are the relevant sections of the code.",
+   "source": "refund-policy.md:1-21",
+   "text": "# Tidewater Ferries refund policy\n\nThis policy applies to every ticket sold through the Tidewater booking app.\n\n## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.\n\n## Weather cancellations\n\nWhen Tidewater cancels a sailing because of weather, passengers choose\nbetween a full refund and free rebooking on any sailing within 30 days.\n\n## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": false
+  },
+  {
+   "id": "code-source-retry",
+   "sentence": ", , , and are the relevant sections of the code.",
+   "source": "retry.ts:3-3",
+   "text": "export const DEFAULT_ATTEMPTS = 3;",
+   "own": true
+  },
+  {
+   "id": "code-source-retry",
+   "sentence": ", , , and are the relevant sections of the code.",
+   "source": "booking.ts:1-40",
+   "text": "// Creating and cancelling bookings.\n\nimport { computeFare, type Route } from './fares';\nimport { refundFraction } from './refunds';\nimport { withRetry } from './retry';\n\nexport type Booking = {\n  id: string;\n  route: Route;\n  passengers: number;\n  vehicle: boolean;\n  departure: Date;\n  fare: number;\n};\n\nexport type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};\n\n/** Prices the booking with computeFare and charges the card, retrying gateway timeouts. */\nexport async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}\n\n/** Refunds the share refundFraction allows for the time left before departure, and returns the amount. */\nexport async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "withRetry function : Retries a function call with increasing delays.",
+   "source": "retry.ts:12-23",
+   "text": "export async function withRetry<T>(fn: () => Promise<T>, attempts = DEFAULT_ATTEMPTS, baseDelayMs = BASE_DELAY_MS): Promise<T> {\n  let last: unknown;\n  for (let i = 0; i < attempts; i++) {\n    try {\n      return await fn();\n    } catch (e) {\n      last = e;\n      if (i < attempts - 1) await sleep(baseDelayMs * 2 ** i);\n    }\n  }\n  throw last;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "withRetry function : Retries a function call with increasing delays.",
+   "source": "booking.ts:15-41",
+   "text": "export type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};\n\n/** Prices the booking with computeFare and charges the card, retrying gateway timeouts. */\nexport async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}\n\n/** Refunds the share refundFraction allows for the time left before departure, and returns the amount. */\nexport async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "Used in createBooking and cancelBooking .",
+   "source": "booking.ts:22-32",
+   "text": "export async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "Used in createBooking and cancelBooking .",
+   "source": "refund-policy.md:17-20",
+   "text": "## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "Used in createBooking and cancelBooking .",
+   "source": "booking.ts:35-40",
+   "text": "export async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "Used in createBooking and cancelBooking .",
+   "source": "release-notes.md:7-12",
+   "text": "## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "refundFraction function : Returns a refund fraction based on hours before departure.",
+   "source": "refunds.ts:1-13",
+   "text": "// Refund rules. Must match docs/refund-policy.md.\n\n/** Share of the fare refunded when a passenger cancels this many hours before departure. */\nexport function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}\n\n/** A sailing Tidewater cancelled for weather is always refunded in full. */\nexport function weatherRefund(fare: number): number {\n  return fare;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "refundFraction function : Returns a refund fraction based on hours before departure.",
+   "source": "release-notes.md:1-18",
+   "text": "# Booking app release notes\n\n## 2.5.1 (2026-05-14)\n\n- Fixed a crash when a booking had no passengers left after a transfer.\n\n## 2.5.0 (2026-04-20)\n\n- Paper tickets are retired: every ticket is now a QR code in the app or in\n  the confirmation email.\n- Peak pricing: sailings on Fridays and Sundays cost 25% more.\n\n## 2.4.0 (2026-03-02)\n\n- Group bookings: parties of 10 or more passengers get a 15% discount on the\n  whole booking.\n- Payment calls are retried with exponential backoff when the card gateway\n  times out.",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "Applies 100% refund for weather cancellations .",
+   "source": "refunds.ts:1-13",
+   "text": "// Refund rules. Must match docs/refund-policy.md.\n\n/** Share of the fare refunded when a passenger cancels this many hours before departure. */\nexport function refundFraction(hoursBeforeDeparture: number): number {\n  if (hoursBeforeDeparture > 48) return 1;\n  if (hoursBeforeDeparture >= 6) return 0.5;\n  return 0;\n}\n\n/** A sailing Tidewater cancelled for weather is always refunded in full. */\nexport function weatherRefund(fare: number): number {\n  return fare;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "Applies 100% refund for weather cancellations .",
+   "source": "refund-policy.md:5-11",
+   "text": "## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "computeFare function : Calculates total fare with discounts and surcharges.",
+   "source": "fares.ts:32-38",
+   "text": "export function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "computeFare function : Calculates total fare with discounts and surcharges.",
+   "source": "booking.ts:7-14",
+   "text": "export type Booking = {\n  id: string;\n  route: Route;\n  passengers: number;\n  vehicle: boolean;\n  departure: Date;\n  fare: number;\n};",
+   "own": false
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "Includes peak day multipliers .",
+   "source": "fares.ts:32-38",
+   "text": "export function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": true
+  },
+  {
+   "id": "code-smalltalk",
+   "sentence": "Includes peak day multipliers .",
+   "source": "fares.ts:1-38",
+   "text": "// Fare calculation for the Tidewater booking service.\n\nexport type Route = 'harlow-pellin' | 'harlow-dunmere';\n\n/** Base fare per passenger, in euros. */\nexport const BASE_FARES: Record<Route, number> = {\n  'harlow-pellin': 12,\n  'harlow-dunmere': 19.5,\n};\n\n/** Added once per booking that brings a vehicle. */\nexport const VEHICLE_SURCHARGE = 18.5;\n\n/** Fridays and Sundays cost more (release 2.5.0). */\nexport const PEAK_MULTIPLIER = 1.25;\nconst PEAK_DAYS = [5, 0]; // Friday, Sunday (Date.getDay())\n\n/** Parties of this size or larger get GROUP_DISCOUNT off the whole booking. */\nexport const GROUP_SIZE = 10;\nexport const GROUP_DISCOUNT = 0.15;\n\n/** 15% off the whole booking for parties of GROUP_SIZE passengers or more. */\nexport function applyGroupDiscount(total: number, passengers: number): number {\n  return passengers >= GROUP_SIZE ? total * (1 - GROUP_DISCOUNT) : total;\n}\n\n/**\n * The price of a booking: the route's base fare per passenger, plus the\n * vehicle surcharge, times the peak multiplier on peak days, then the group\n * discount. Rounded to cents.\n */\nexport function computeFare(route: Route, passengers: number, vehicle: boolean, date: Date): number {\n  let total = BASE_FARES[route] * passengers;\n  if (vehicle) total += VEHICLE_SURCHARGE;\n  if (PEAK_DAYS.includes(date.getDay())) total *= PEAK_MULTIPLIER;\n  total = applyGroupDiscount(total, passengers);\n  return Math.round(total * 100) / 100;\n}",
+   "own": false
+  },
+  {
+   "id": "mixed-group-impl",
+   "sentence": "The function that implements the group discount based on the release notes is fares.ts (lines 23 25) .",
+   "source": "fares.ts:23-25",
+   "text": "export function applyGroupDiscount(total: number, passengers: number): number {\n  return passengers >= GROUP_SIZE ? total * (1 - GROUP_DISCOUNT) : total;\n}",
+   "own": true
+  },
+  {
+   "id": "mixed-group-impl",
+   "sentence": "The function that implements the group discount based on the release notes is fares.ts (lines 23 25) .",
+   "source": "booking.ts:15-41",
+   "text": "export type Gateway = {\n  chargeCard: (amount: number) => Promise<string>;\n  refundCard: (amount: number) => Promise<string>;\n};\n\n/** Prices the booking with computeFare and charges the card, retrying gateway timeouts. */\nexport async function createBooking(\n  gateway: Gateway,\n  route: Route,\n  passengers: number,\n  vehicle: boolean,\n  departure: Date,\n): Promise<Booking> {\n  const fare = computeFare(route, passengers, vehicle, departure);\n  const id = await withRetry(() => gateway.chargeCard(fare));\n  return { id, route, passengers, vehicle, departure, fare };\n}\n\n/** Refunds the share refundFraction allows for the time left before departure, and returns the amount. */\nexport async function cancelBooking(gateway: Gateway, booking: Booking, now: Date): Promise<number> {\n  const hours = (booking.departure.getTime() - now.getTime()) / 3_600_000;\n  const amount = Math.round(booking.fare * refundFraction(hours) * 100) / 100;\n  if (amount > 0) await withRetry(() => gateway.refundCard(amount));\n  return amount;\n}",
+   "own": false
+  },
+  {
+   "id": "mixed-group-impl",
+   "sentence": "This function is named applyGroupDiscount and applies a 15% discount to the total when the number of passengers meets or exceeds the GROUP_SIZE (which is set in fares.ts (lines 19 19) to 10).",
+   "source": "fares.ts:19-19",
+   "text": "export const GROUP_SIZE = 10;",
+   "own": true
+  },
+  {
+   "id": "mixed-group-impl",
+   "sentence": "This function is named applyGroupDiscount and applies a 15% discount to the total when the number of passengers meets or exceeds the GROUP_SIZE (which is set in fares.ts (lines 19 19) to 10).",
+   "source": "operations.md:1-26",
+   "text": "# Tidewater operations handbook\n\n## Fleet\n\n| Vessel | Passengers | Vehicles |\n|---|---|---|\n| MV Kestrel | 212 | 40 |\n| MV Osprey | 150 | none (foot passengers only) |\n\n## Routes\n\n- Harlow ↔ Pellin Island: 55 minutes, served by both vessels.\n- Harlow ↔ Dunmere: 1 hour 20 minutes, MV Kestrel only.\n\n## Check-in\n\nCheck-in closes 20 minutes before departure for foot passengers and\n45 minutes before departure for vehicles. Late vehicles are moved to the next\nsailing with space.\n\n## Weather limits\n\nThe duty manager cancels a sailing when sustained winds exceed 38 knots or\nthe swell forecast at Pellin Island is above 3 metres. The on-call duty\nmanager is paged with the code TW-7.",
+   "own": false
+  },
+  {
+   "id": "mixed-cancel",
+   "sentence": "This is outlined in and .",
+   "source": "refund-policy.md:5-11",
+   "text": "## Cancelling a booking\n\n- Cancel **more than 48 hours** before departure: full refund.\n- Cancel **between 48 and 6 hours** before departure: 50% refund.\n- Cancel **less than 6 hours** before departure: no refund. The ticket can\n  still be transferred to another passenger for free.",
+   "own": true
+  },
+  {
+   "id": "mixed-cancel",
+   "sentence": "This is outlined in and .",
+   "source": "operations.md:3-9",
+   "text": "## Fleet\n\n| Vessel | Passengers | Vehicles |\n|---|---|---|\n| MV Kestrel | 212 | 40 |\n| MV Osprey | 150 | none (foot passengers only) |",
+   "own": false
+  },
+  {
+   "id": "mixed-cancel",
+   "sentence": "This is outlined in and .",
+   "source": "refund-policy.md:17-20",
+   "text": "## Processing\n\nRefunds go back to the original payment method and take 5 business days to\nprocess. Tidewater never refunds in cash at the terminal.",
+   "own": true
+  },
+  {
+   "id": "mixed-cancel",
+   "sentence": "This is outlined in and .",
+   "source": "operations.md:10-14",
+   "text": "## Routes\n\n- Harlow ↔ Pellin Island: 55 minutes, served by both vessels.\n- Harlow ↔ Dunmere: 1 hour 20 minutes, MV Kestrel only.",
+   "own": false
+  },
+  {
+   "id": "mixed-followup-surcharge",
+   "sentence": "The computeFare function adds VEHICLE_SURCHARGE for vehicles .",
+   "source": "fares.ts:12-12",
+   "text": "export const VEHICLE_SURCHARGE = 18.5;",
+   "own": true
+  },
+  {
+   "id": "mixed-followup-surcharge",
+   "sentence": "The computeFare function adds VEHICLE_SURCHARGE for vehicles .",
+   "source": "fares.ts:6-9",
+   "text": "export const BASE_FARES: Record<Route, number> = {\n  'harlow-pellin': 12,\n  'harlow-dunmere': 19.5,\n};",
+   "own": false
+  }
+ ]
+}

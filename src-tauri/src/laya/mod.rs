@@ -129,6 +129,15 @@ pub const MAX_REQUEST: usize = 4 * 1024;
 /// 0.85 English (AGENTS.md §2).
 #[cfg_attr(not(mlx), allow(dead_code))]
 pub const RELEVANT: &str = "This passage contains information that helps answer the user's request.";
+/// The claim check, asked of each cited sentence against the passage it cites
+/// (a `noul`). Probed on the item 10 eval answers (60 cited sentences, each
+/// with its own passage and one cited for another question): AUC 0.67
+/// multilingual, 0.82 English (AGENTS.md §2).
+#[cfg_attr(not(mlx), allow(dead_code))]
+pub const SUPPORTS: &str = "The passage supports this statement.";
+/// Claim check: claims per call, and the bound on each statement.
+pub const MAX_CLAIMS: usize = 24;
+pub const MAX_STATEMENT: usize = 2 * 1024;
 /// Questions per call: each is its own row in the batch.
 pub const MAX_QUESTIONS: usize = 4;
 /// One IPC chunk of a checkpoint download.
@@ -174,6 +183,36 @@ pub fn validate_passages(request: &str, passages: &[LayaPassage]) -> Result<(), 
 #[cfg_attr(not(mlx), allow(dead_code))]
 pub fn passage_state(request: &str, p: &LayaPassage) -> String {
     format!("User request:\n{}\n\nPassage from {}:\n{}", request.trim(), p.source, p.text.trim())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LayaClaim {
+    /// One sentence of the answer.
+    statement: String,
+    /// The passage it cites: where it's from, and its text.
+    source: String,
+    text: String,
+}
+
+pub fn validate_claims(claims: &[LayaClaim]) -> Result<(), String> {
+    if !(1..=MAX_CLAIMS).contains(&claims.len()) {
+        return Err(format!("check 1–{MAX_CLAIMS} claims at a time, got {}", claims.len()));
+    }
+    for (i, c) in claims.iter().enumerate() {
+        if c.statement.trim().is_empty() || c.statement.len() > MAX_STATEMENT {
+            return Err(format!("claim {} must be 1–{MAX_STATEMENT} bytes", i + 1));
+        }
+        if c.source.len() > MAX_SOURCE || c.text.len() > MAX_PASSAGE {
+            return Err(format!("claim {}'s passage is over {MAX_PASSAGE} bytes (or its source over {MAX_SOURCE})", i + 1));
+        }
+    }
+    Ok(())
+}
+
+/// The state one claim is judged in: the statement, then the passage it cites.
+#[cfg_attr(not(mlx), allow(dead_code))]
+pub fn claim_state(c: &LayaClaim) -> String {
+    format!("Statement:\n{}\n\nPassage from {}:\n{}", c.statement.trim(), c.source, c.text.trim())
 }
 
 /// Bounds on what the webview may ask the model to score.
@@ -433,6 +472,35 @@ pub async fn laya_relevance(app: AppHandle, mlx: State<'_, Mlx>, request: String
     }
 }
 
+/// Scores how likely each cited passage supports the sentence that cites it,
+/// one `noul` row per claim, batched. The webview decides what to flag.
+#[tauri::command]
+pub async fn laya_support(app: AppHandle, mlx: State<'_, Mlx>, claims: Vec<LayaClaim>) -> Result<LayaRelevance, String> {
+    validate_claims(&claims)?;
+    #[cfg(mlx)]
+    {
+        let model = mlx.loaded().laya.ok_or(NOT_LOADED)?;
+        let t = mlx.thread(&app);
+        let rows: Vec<(String, engine::Question)> = claims
+            .iter()
+            .map(|c| (claim_state(c), engine::Question { kind: prompt::Kind::Noul, instructions: SUPPORTS.into(), options: vec![] }))
+            .collect();
+        let asked = blocking(move || {
+            t.run(move |m| {
+                let rows: Vec<(&str, &engine::Question)> = rows.iter().map(|(s, q)| (s.as_str(), q)).collect();
+                loaded(m)?.ask_rows(&rows)
+            })
+        })
+        .await?;
+        Ok(LayaRelevance { scores: asked.answers.iter().map(|a| a.probabilities[1]).collect(), ms: asked.ms, model })
+    }
+    #[cfg(not(mlx))]
+    {
+        let _ = (app, mlx, claims);
+        Err(UNSUPPORTED.into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,6 +577,28 @@ mod tests {
     #[test]
     fn a_passage_is_judged_after_the_request() {
         assert_eq!(passage_state(" q? ", &passage("a.md:1-3", " body ")), "User request:\nq?\n\nPassage from a.md:1-3:\nbody");
+    }
+
+    fn claim(statement: &str, text: &str) -> LayaClaim {
+        LayaClaim { statement: statement.into(), source: "a.md:1-3".into(), text: text.into() }
+    }
+
+    #[test]
+    fn bounds_the_claim_check() {
+        assert!(validate_claims(&[claim("It is 48 hours.", "text")]).is_ok());
+        assert!(validate_claims(&[]).unwrap_err().contains("1–24"));
+        assert!(validate_claims(&vec![claim("s", "t"); MAX_CLAIMS + 1]).is_err());
+        assert!(validate_claims(&[claim("  ", "t")]).is_err());
+        assert!(validate_claims(&[claim(&"s".repeat(MAX_STATEMENT + 1), "t")]).is_err());
+        assert!(validate_claims(&[claim("s", &"t".repeat(MAX_PASSAGE + 1))]).is_err());
+        let mut long_source = claim("s", "t");
+        long_source.source = "s".repeat(MAX_SOURCE + 1);
+        assert!(validate_claims(&[long_source]).is_err());
+    }
+
+    #[test]
+    fn a_claim_is_judged_before_its_passage() {
+        assert_eq!(claim_state(&claim(" It is 48. ", " body ")), "Statement:\nIt is 48.\n\nPassage from a.md:1-3:\nbody");
     }
 
     #[cfg(not(mlx))]

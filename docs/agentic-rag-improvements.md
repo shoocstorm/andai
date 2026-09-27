@@ -30,7 +30,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 10 | [Robust to the search scope](#10-robust-to-the-search-scope) | done 2026-09-27 with Laya · facts 75.9% → 89.7% (Multilingual), 82.8% → 89.7% (English); Qwen deciders unchanged |
 | 11 | [Rerank kept passages by relevance](#11-rerank-kept-passages-by-relevance) | measured 2026-09-27 · one fact lost per checkpoint, none gained; not shipped |
 | 12 | [Intent gate with Laya](#12-intent-gate-with-laya) | probed 2026-09-27 · fails the bar on both checkpoints; not shipped |
-| 13 | [Answer claim check](#13-answer-claim-check) | todo |
+| 13 | [Answer claim check](#13-answer-claim-check) | done 2026-09-27 · AUC 0.67 / 0.82; flags 1 of 32 and 4 of 33 cited sentences on the eval, 15 / 41 ms |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
 not shipped: 4, 9; 8 changed the recommendation (a small decision model with
@@ -537,6 +537,39 @@ answers (own passage vs. another), not a guess.
 
 **Done when.** AUC and the flag rate are recorded, and e2e and release e2e
 pass.
+
+**Done (2026-09-27).** A new command, `laya_support` (claims of
+`{statement, source, text}`; the statement "The passage supports this
+statement." is a Rust constant), `agent/claims.ts` (`citedClaims` pure,
+`checkClaims`), a `verify` step after `generate`, `Message.support`, and a
+note under the answer only when something is flagged.
+
+*Probe first* (`laya_*_claims_probe` in `laya/engine.rs`, fixture
+`src-tauri/tests/fixtures/laya/claims.json`: 60 cited sentences from the
+item 10 answers, each with its own passage and with one cited for another
+question):
+
+| Checkpoint | AUC | Own passages below 0.10 | Other passages below 0.10 |
+|---|---|---|---|
+| Laya Multilingual | 0.67 | 4 / 60 | 24 / 60 |
+| Laya English | 0.82 | 8 / 60 | 36 / 60 |
+
+"Own" isn't "supported": read one by one, most own passages below 0.10
+were real gaps (a release note cited for a function name it never
+mentions; `VEHICLE_SURCHARGE = 18.5` cited for "computeFare adds it"; a
+sentence reduced to ", , , and are the relevant sections"). The clear false
+alarms were 1 (Multilingual: the weather limits) and 2 (English:
+`PEAK_DAYS`, `refundFraction`). Hence `FLAG_BELOW = 0.10` and "may not be
+supported" in the UI, never "wrong".
+
+*In the agent eval* (`eval/laya13-after-*`; no answer changed, as the check
+only annotates): Multilingual checked 20 answers, 32 cited sentences, and
+flagged 1 (the `computeFare` surcharge sentence, whose answer misses 18.5),
+15 ms median; English checked 17 answers, 33 sentences, and flagged 4 (two
+junk sentences, the surcharge one, and the `refundFraction` false alarm),
+41 ms median. `bun run test:e2e` and `test:e2e:release` pass; their step
+checks now accept the Laya-only relevance and claim steps as skipped, which
+they are when there's nothing to check.
 
 ## Decided: a native engine (MLX)
 

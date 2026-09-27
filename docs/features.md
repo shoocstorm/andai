@@ -109,6 +109,14 @@ pasting in whatever one search returns:
   eval it made the prompt 23% shorter with Laya English (the first word came
   about 0.6 s sooner) and 8% shorter with Laya Multilingual, with no loss of
   answer facts, for 36–57 ms per question.
+- **Claim check (with a Laya decision model).** After the answer is
+  written, Laya checks each sentence that cites a source (`[n]`) against the
+  passage it cites. When one probably isn't supported, a short note under
+  the answer lists it, and the Execution Trace shows every cited sentence
+  with its score. The answer itself is never changed, and the note says
+  *may not be*: in our tests most flags were real gaps (a source that
+  doesn't mention what the sentence says), but not all. It takes about
+  15 ms (Laya Multilingual) to 41 ms (Laya English) per answer.
 - **Search scope (with a Laya decision model).** A knowledge search is either
   *focused* (direct matches for a name or exact term) or *broad* (related
   passages too). With Laya loaded, Laya picks the scope as a typed choice in

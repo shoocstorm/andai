@@ -332,4 +332,51 @@ mod tests {
     fn laya_en_intent_probe() {
         intent_probe("laya-en");
     }
+
+    /// Item 13 probe (docs/agentic-rag-improvements.md): does Laya tell a
+    /// cited sentence's own passage from a passage cited for another question?
+    /// Prints the AUC and, per threshold, how many own passages it would flag
+    /// (false alarms) and how many others it would catch. A measurement.
+    fn claims_probe(id: &str) {
+        let engine = Engine::load(&checkpoint_dir(id)).unwrap();
+        let fx: Value = serde_json::from_str(include_str!("../../tests/fixtures/laya/claims.json")).unwrap();
+        let rows = fx["rows"].as_array().unwrap();
+        let states: Vec<String> = rows
+            .iter()
+            .map(|r| crate::laya::claim_state(&serde_json::from_value(serde_json::json!({ "statement": r["sentence"], "source": r["source"], "text": r["text"] })).unwrap()))
+            .collect();
+        let q = Question { kind: Kind::Noul, instructions: crate::laya::SUPPORTS.into(), options: vec![] };
+        let batch: Vec<(&str, &Question)> = states.iter().map(|s| (s.as_str(), &q)).collect();
+        let asked = engine.ask_rows(&batch).unwrap();
+        let scored: Vec<(f64, bool)> = asked.answers.iter().zip(rows).map(|(a, r)| (a.probabilities[1], r["own"].as_bool().unwrap())).collect();
+        let (pos, neg): (Vec<f64>, Vec<f64>) = (
+            scored.iter().filter(|x| x.1).map(|x| x.0).collect(),
+            scored.iter().filter(|x| !x.1).map(|x| x.0).collect(),
+        );
+        let wins: f64 = pos.iter().map(|p| neg.iter().map(|n| if p > n { 1.0 } else if p == n { 0.5 } else { 0.0 }).sum::<f64>()).sum();
+        let auc = wins / (pos.len() * neg.len()) as f64;
+        println!("{id} claim probe: {} rows in {:.0} ms, AUC {auc:.3}", rows.len(), asked.ms);
+        for (r, (p, own)) in rows.iter().zip(&scored) {
+            if *own && *p < 0.1 {
+                println!("  own passage below 0.10 ({p:.3}): {:?} ← {}", r["sentence"].as_str().unwrap(), r["source"].as_str().unwrap());
+            }
+        }
+        for t in [0.05, 0.1, 0.2, 0.3, 0.5] {
+            let flagged_own = pos.iter().filter(|p| **p < t).count();
+            let caught = neg.iter().filter(|n| **n < t).count();
+            println!("  flag below {t:.2}: own passages flagged {flagged_own}/{}, other passages caught {caught}/{}", pos.len(), neg.len());
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the multilingual checkpoint; a probe that prints"]
+    fn laya_multilingual_claims_probe() {
+        claims_probe("laya-multilingual");
+    }
+
+    #[test]
+    #[ignore = "needs the English checkpoint; a probe that prints"]
+    fn laya_en_claims_probe() {
+        claims_probe("laya-en");
+    }
 }

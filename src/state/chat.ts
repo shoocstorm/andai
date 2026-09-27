@@ -3,14 +3,16 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import type { Policy } from '../agent/tools/types';
 import type { SearchHit } from '../kb/api';
 import type { RelevanceRecord } from '../agent/relevance';
+import type { SupportRecord } from '../agent/claims';
 import type { DecisionIO } from '../llm/decide';
 
 /**
  * `retrieve` belongs to the fixed pipeline; `plan` to agent mode, whose tool
  * calls are in `Message.agent`. `filter` is the relevance check (agent/relevance.ts,
- * with a Laya decision model only), recorded in `Message.relevance`.
+ * with a Laya decision model only), recorded in `Message.relevance`; `verify`
+ * the claim check after the answer (agent/claims.ts, Laya only), in `Message.support`.
  */
-export type StepKind = 'analyze' | 'retrieve' | 'plan' | 'filter' | 'build' | 'generate';
+export type StepKind = 'analyze' | 'retrieve' | 'plan' | 'filter' | 'build' | 'generate' | 'verify';
 export type StepStatus = 'queued' | 'running' | 'done' | 'skipped' | 'error';
 
 export type TraceStep = {
@@ -128,6 +130,8 @@ export type Message = {
   agent?: AgentStep[];
   /** The relevance check: every retrieved passage's score and whether it went into the prompt. */
   relevance?: RelevanceRecord;
+  /** The claim check: each cited sentence's support score, and which may not be supported. */
+  support?: SupportRecord;
   kbName?: string | null;
   stats?: TurnStats;
   streaming?: boolean;

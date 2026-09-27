@@ -138,7 +138,12 @@ if (failure || !result) {
   check('knowledge base indexed by ug', kb.status === 'ready' && kb.nodes > 0 && !kb.error, JSON.stringify(kb));
   check('every source indexed', kb.sources.length === fixtures.length && kb.sources.every((s) => s.status === 'indexed'));
   check('ug progress streamed to the UI', result.ugLogLines > 5, `${result.ugLogLines} lines`);
-  check('all four agent steps completed', steps?.length === 4 && steps.every((s) => s.status === 'done'), JSON.stringify(steps));
+  // With a Laya decision model the turn also has the relevance and claim checks, which skip
+  // when there's nothing to check (no more than two passages, an answer that cites nothing).
+  const LAYA_STEPS = ['filter', 'verify'];
+  const settled = (list) => list?.every((s) => s.status === 'done' || (LAYA_STEPS.includes(s.kind) && s.status === 'skipped'));
+  const core = (list) => (list ?? []).filter((s) => !LAYA_STEPS.includes(s.kind));
+  check('all four agent steps completed', core(steps).length === 4 && core(steps).every((s) => s.status === 'done') && settled(steps), JSON.stringify(steps));
   check('retrieval returned the notes', sources?.includes('wllama-notes.md'), JSON.stringify(sources));
   console.log(`[e2e] model sha256 check: ${result.verifyMs == null ? 'reused a verified copy' : `${Math.round(result.verifyMs)} ms`}`);
   check('generation produced tokens', stats?.tokens > 0 && stats?.tokPerSec > 1, JSON.stringify(stats));
@@ -161,7 +166,7 @@ if (failure || !result) {
   check('kb_tool runs ug through the Rust boundary', a.overview?.ok && a.overview.argv?.[0] === 'project_overview', JSON.stringify(a.overview));
   check(
     'agent turn completes with every step traced',
-    a.turn?.steps?.every((s) => s.status === 'done') && a.turn?.agent?.length > 0 &&
+    settled(a.turn?.steps) && a.turn?.agent?.length > 0 &&
       a.turn.agent.every((s) => !s.call || ['done', 'error', 'skipped'].includes(s.call.status)),
     JSON.stringify(a.turn?.agent),
   );

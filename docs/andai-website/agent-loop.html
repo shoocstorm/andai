@@ -777,6 +777,7 @@ Tool calls used: 1 of 20.</pre>
               <tr><td><b>Next step</b></td><td>Which tool to run, or answer, or ask to clarify, at every step (except a step-1 search first)</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
               <tr><td><b>Stop check</b></td><td>Whether the tool results so far already answer the request (a yes/no question, in the same pass as the next step)</td><td class="no">No: “answer” is one of the options</td><td class="yes">Yes</td></tr>
               <tr><td><b>Relevance check</b></td><td>Which retrieved passages go into the answer prompt</td><td class="no">No: too slow per passage</td><td class="yes">Yes</td></tr>
+              <tr><td><b>Claim check</b></td><td>After the answer, whether each cited sentence is supported by the passage it cites; possibly unsupported ones are noted under the answer, which is never changed</td><td class="no">No: too slow per sentence</td><td class="yes">Yes</td></tr>
               <tr><td><b>Search scope</b></td><td>Whether a knowledge search is focused (a name or exact term) or broad (a topic), asked in the same pass as the next step</td><td class="no">No: the chat model writes it with the query</td><td class="yes">Yes</td></tr>
             </tbody>
           </table>

@@ -98,11 +98,22 @@ vi.mock('./tools/argfill', () => ({
   },
 }));
 
-const rel = vi.hoisted(() => ({ scores: null as number[] | null, fail: null as Error | null }));
+const rel = vi.hoisted(() => ({
+  scores: null as number[] | null,
+  fail: null as Error | null,
+  support: null as number[] | null,
+  supportFail: null as Error | null,
+  claims: [] as unknown[][],
+}));
 vi.mock('../llm/laya', () => ({
   layaRelevance: async (_request: string, passages: unknown[]) => {
     if (rel.fail) throw rel.fail;
     return { scores: rel.scores ?? passages.map(() => 0.9), ms: 20, model: 'laya-multilingual' };
+  },
+  layaSupport: async (claims: unknown[]) => {
+    rel.claims.push(claims);
+    if (rel.supportFail) throw rel.supportFail;
+    return { scores: rel.support ?? claims.map(() => 0.9), ms: 9, model: 'laya-multilingual' };
   },
 }));
 
@@ -211,6 +222,54 @@ beforeEach(() => {
     fillFixed: [],
     ownPick: 'focused',
     ownPasses: 0,
+  });
+});
+
+describe('claim check (with a Laya decision model)', () => {
+  beforeEach(() => {
+    rel.support = null;
+    rel.supportFail = null;
+    rel.claims = [];
+  });
+
+  it('checks the cited sentences against their sources after the answer, and records what may not be supported', async () => {
+    agent.laya = true;
+    engine.deltas = ['Use COOP [1]. ', 'It needs COEP too [1].'];
+    rel.support = [0.8, 0.03];
+    await runTurn('What headers does wllama need?');
+    expect(rel.claims).toEqual([
+      [
+        { statement: 'Use COOP.', source: expect.stringContaining(':'), text: expect.any(String) },
+        { statement: 'It needs COEP too.', source: expect.stringContaining(':'), text: expect.any(String) },
+      ],
+    ]);
+    expect(assistant().support!.items.map((x) => x.flagged)).toEqual([false, true]);
+    expect(statuses().verify).toBe('done');
+    expect(assistant().steps!.find((s) => s.kind === 'verify')!.detail).toMatch(/^1 of 2 cited sentences may not be supported/);
+    expect(assistant().content).toBe('Use COOP [1]. It needs COEP too [1].');
+  });
+
+  it('leaves the answer as it is when the check fails', async () => {
+    agent.laya = true;
+    engine.deltas = ['Use COOP [1].'];
+    rel.supportFail = new Error('No Laya model is loaded.');
+    await runTurn('What headers does wllama need?');
+    expect(statuses().verify).toBe('error');
+    expect(assistant()).toMatchObject({ content: 'Use COOP [1].', streaming: false });
+    expect(assistant().stopped).toBeUndefined();
+    expect(assistant().support).toBeUndefined();
+  });
+
+  it('skips the check when the answer cites nothing, and never runs it without Laya', async () => {
+    agent.laya = true;
+    await runTurn('What headers does wllama need?');
+    expect(statuses().verify).toBe('skipped');
+    clearChat();
+    agent.laya = false;
+    engine.deltas = ['Use COOP [1].'];
+    await runTurn('What headers does wllama need?');
+    expect(assistant().steps!.some((s) => s.kind === 'verify')).toBe(false);
+    expect(rel.claims).toEqual([]);
   });
 });
 

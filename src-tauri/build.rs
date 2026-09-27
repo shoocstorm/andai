@@ -25,6 +25,7 @@ const COMMANDS: &[&str] = &[
     "laya_unload",
     "laya_decide",
     "laya_relevance",
+    "laya_support",
     "llm_status",
     "llm_write_chunk",
     "llm_finish",

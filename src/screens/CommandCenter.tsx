@@ -7,6 +7,7 @@ import {
   Database,
   FileText,
   ListFilter,
+  ShieldCheck,
   Loader2,
   MessageSquareText,
   MessagesSquare,
@@ -39,7 +40,7 @@ import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
-import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, RelevanceList, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
+import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, RelevanceList, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 import { shortcut } from '../lib/platform';
 
@@ -52,6 +53,7 @@ const STEP_STYLE: Record<TraceStep['kind'], { color: string; icon: typeof Search
   filter: { color: 'var(--violet)', icon: ListFilter },
   build: { color: 'var(--blue)', icon: Network },
   generate: { color: 'var(--amber)', icon: Code2 },
+  verify: { color: 'var(--violet)', icon: ShieldCheck },
 };
 
 export function CommandCenter() {
@@ -274,6 +276,7 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
               ))}
             </details>
           )}
+          {m.support && <SupportNote r={m.support} />}
           <div className="cc-answer-meta">
             {fmtTime(m.createdAt)} · {m.stats?.model ?? 'Andai'}
             {m.stats && ` · ${m.stats.tokens} tok · ${m.stats.tokPerSec.toFixed(1)} tok/s`}
@@ -332,6 +335,8 @@ function chipText(s: TraceStep) {
       return `Assembling context: ${s.detail}`;
     case 'generate':
       return s.status === 'running' ? `Generating response: ${s.detail}` : `Response complete: ${s.detail}`;
+    case 'verify':
+      return s.status === 'running' ? `Checking claims: ${s.detail}` : `Claim check: ${s.detail}`;
   }
 }
 
@@ -737,6 +742,7 @@ function TracePanel({ msg }: { msg?: Message }) {
                   </div>
                 )}
                 {s.kind === 'filter' && msg.relevance && <RelevanceList r={msg.relevance} />}
+                {s.kind === 'verify' && msg.support && <SupportList r={msg.support} />}
                 {(s.kind === 'retrieve' || s.kind === 'plan') && !!msg.sources?.length && (
                   <div className="trace-subs">
                     {msg.sources.slice(0, 5).map((h, j) => (
