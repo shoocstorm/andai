@@ -3,6 +3,7 @@ import {
   CloudUpload,
   Code2,
   Database,
+  ExternalLink,
   FileText,
   FileType2,
   Loader2,
@@ -15,9 +16,9 @@ import {
   X,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Bar, Modal, Segmented, Slider, fmtAgo, fmtBytes } from '../components/ui';
-import { inTauri, kbPickFiles, type KbInfo, type KbKind, type Source } from '../kb/api';
+import { inTauri, kbPickFiles, openUgWebsite, type KbInfo, type KbKind, type Source } from '../kb/api';
 import { SAMPLES, type SampleDef } from '../kb/samples';
 import { addFiles, addSample, createKb, deleteKb, indexKb, removeSource, setKind, useKb } from '../state/kb';
 import { toast, useUi } from '../state/ui';
@@ -48,8 +49,9 @@ export function Knowledge() {
             />
           ) : ug && !ug.found ? (
             <Notice
-              title="ug CLI not found"
-              body="Andai builds knowledge graphs with ug. Install it so `ug` is on your PATH or in ~/.local/bin, then restart Andai."
+              title="Install UltraGraph to build knowledge bases"
+              body="Andai turns your files into a local semantic knowledge graph with ug (UltraGraph), a fast, private knowledge-graph engine that runs entirely on your machine. Install it from the UltraGraph website with one command, then restart Andai."
+              action={<GetUltraGraph />}
             />
           ) : null}
 
@@ -108,15 +110,32 @@ export function Knowledge() {
   );
 }
 
-function Notice({ title, body }: { title: string; body: string }) {
+function Notice({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
   return (
     <div className="kn-notice">
       <AlertTriangle size={18} />
       <div>
         <div style={{ fontWeight: 600, color: 'var(--text)' }}>{title}</div>
         <div>{body}</div>
+        {action && <div className="kn-notice-action">{action}</div>}
       </div>
     </div>
+  );
+}
+
+/** Opens UltraGraph's site, where the `ug` CLI is installed from. */
+export function GetUltraGraph() {
+  return (
+    <button
+      className="btn primary sm"
+      onClick={() =>
+        openUgWebsite().catch((e) =>
+          toast({ tone: 'error', title: 'Could not open ultra-graph.web.app', body: String(e) }),
+        )
+      }
+    >
+      Get UltraGraph <span className="mono">ultra-graph.web.app</span> <ExternalLink size={13} />
+    </button>
   );
 }
 

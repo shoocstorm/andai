@@ -3,7 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SAMPLES } from '../kb/samples';
 import { addSample, useKb } from '../state/kb';
-import { Samples } from './Knowledge';
+import { openUgWebsite } from '../kb/api';
+import { GetUltraGraph, Samples } from './Knowledge';
+
+vi.mock('../kb/api', async (original) => ({
+  ...(await original<typeof import('../kb/api')>()),
+  openUgWebsite: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('../state/kb', async (original) => ({
   ...(await original<typeof import('../state/kb')>()),
@@ -34,5 +40,14 @@ describe('sample knowledge bases', () => {
     expect(added).toBeDisabled();
     expect(added).toHaveTextContent('Added');
     expect(screen.getByRole('button', { name: 'Add sample Tidewater Ferries · Code' })).toBeEnabled();
+  });
+});
+
+describe('ug install prompt', () => {
+  it('opens the UltraGraph website through Rust', async () => {
+    const user = userEvent.setup();
+    render(<GetUltraGraph />);
+    await user.click(screen.getByRole('button', { name: /Get UltraGraph/ }));
+    expect(openUgWebsite).toHaveBeenCalledOnce();
   });
 });

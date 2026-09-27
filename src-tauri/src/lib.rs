@@ -99,6 +99,7 @@ pub fn run() {
             dev_log,
             dev_exit,
             ug::ug_status,
+            ug::open_ug_website,
             ug::kb_list,
             ug::kb_create,
             ug::kb_add_files,

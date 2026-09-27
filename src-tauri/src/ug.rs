@@ -158,8 +158,15 @@ pub(crate) fn ug_path() -> Option<PathBuf> {
     ug_candidates(std::env::var_os("PATH").as_deref(), home_dir().as_deref()).into_iter().find(|p| p.is_file())
 }
 
+/// UltraGraph's site: install script and downloads. It lives here, not in the
+/// webview, so `src/` still names no remote URL (security.test.ts).
+pub(crate) const UG_WEBSITE: &str = "https://ultra-graph.web.app";
+
+pub(crate) const UG_MISSING: &str =
+    "The `ug` (UltraGraph) CLI was not found. Install it from https://ultra-graph.web.app, then restart Andai.";
+
 fn ug() -> Result<Command, String> {
-    let path = ug_path().ok_or("The `ug` CLI was not found. Install it, then restart Andai.")?;
+    let path = ug_path().ok_or(UG_MISSING)?;
     let mut cmd = Command::new(path);
     cmd.env("NO_COLOR", "1").env("CLICOLOR", "0").stdin(Stdio::null());
     Ok(cmd)
@@ -401,6 +408,30 @@ pub fn ug_status() -> UgStatus {
         Some(strip_ansi(&String::from_utf8_lossy(&out.stdout)).trim().to_string())
     });
     UgStatus { found: path.is_some(), path: path.map(|p| p.to_string_lossy().into()), version }
+}
+
+/// Opens UltraGraph's site in the default browser. It takes no argument, so
+/// the webview can't use it to open anything else, and the app itself makes
+/// no request (the browser does).
+#[tauri::command]
+pub fn open_ug_website() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = Command::new("/usr/bin/open");
+    #[cfg(windows)]
+    let mut cmd = {
+        let root = std::env::var_os("SystemRoot").map(PathBuf::from).filter(|p| p.is_absolute());
+        let mut c = Command::new(root.ok_or("SystemRoot is not set")?.join("System32").join("rundll32.exe"));
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = Command::new("xdg-open");
+    cmd.arg(UG_WEBSITE).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    match cmd.status() {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("could not open the browser ({s})")),
+        Err(e) => Err(format!("could not open the browser: {e}")),
+    }
 }
 
 #[tauri::command]

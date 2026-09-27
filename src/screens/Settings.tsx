@@ -9,6 +9,7 @@ import { useKb } from '../state/kb';
 import { useTheme, type ThemeMode } from '../state/theme';
 import { toast } from '../state/ui';
 import { HubModels } from './HubModels';
+import { GetUltraGraph } from './Knowledge';
 
 /**
  * The optional second model that scores the agent's next action
@@ -393,6 +394,15 @@ export function Settings() {
               <Row k="Graph nodes" v={kbs.reduce((n, k) => n + k.nodes, 0).toLocaleString()} />
               <Row k="On disk" v={fmtBytes(kbs.reduce((n, k) => n + k.sizeBytes, 0))} />
             </dl>
+            {ug && !ug.found && (
+              <div className="st-ug-missing">
+                <p className="muted" style={{ margin: '12px 0 10px', fontSize: 13.5 }}>
+                  Knowledge bases need <b>ug (UltraGraph)</b>, a fast local knowledge-graph engine. Install it from the
+                  UltraGraph website, then restart Andai.
+                </p>
+                <GetUltraGraph />
+              </div>
+            )}
           </div>
 
           <div className="panel pad">

@@ -72,7 +72,7 @@ export function TopBar() {
       <button
         className="icon-btn"
         data-state={ug?.found ? 'ok' : 'warn'}
-        title={ug?.found ? `ug knowledge engine · ${ug.version}` : 'ug CLI not found'}
+        title={ug?.found ? `ug knowledge engine · ${ug.version}` : 'ug (UltraGraph) not installed · get it at ultra-graph.web.app'}
         onClick={() => go('knowledge')}
       >
         <Radio size={19} />
@@ -126,8 +126,8 @@ export function Sidebar() {
   return (
     <aside className={`sidebar${collapsed ? ' collapsed' : ''}`} aria-label="Main navigation">
       <div className="agent-card" onClick={() => go('persona')} {...tip(`${name} · Persona`)}>
-        <div className="agent-tile" style={{ ['--dot' as string]: core.color }}>
-          <SquareTerminal size={20} />
+        <div className="agent-tile app-icon" style={{ ['--dot' as string]: core.color }}>
+          <img className="agent-logo" src="/andai-icon.svg" alt="" width={44} height={44} draggable={false} />
         </div>
         <div className="agent-meta">
           <div className="agent-name">{name}</div>

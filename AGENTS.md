@@ -869,6 +869,7 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Private files (0700 dirs / 0600 files; Unix only, see §2), 100 MB cap, absolute PATH only | `ug.rs` | Rust unit tests |
 | Windows installer makes no network request (WebView2 not bootstrapped) | `tauri.conf.json` | `security.test.ts` |
 | `dev_log` / `dev_exit` need `ANDAI_SMOKE=1` | `lib.rs` | `security.test.ts` |
+| `open_ug_website` takes no argument: it opens only `ug::UG_WEBSITE` (the ug install page, shown when ug is missing) in the system browser; the app makes no request and `src/` names no URL | `ug.rs` | `tauri-acl.test.ts`, `security.test.ts` |
 | Webview holds no fs/shell/http/opener/dialog permission | `capabilities/default.json` | `security.test.ts` |
 | Model downloads pinned to a commit and verified (size + sha256) before load; mismatch → removed | `llm/models.ts`, `llm/integrity.ts`, `engine.loadModel` | `integrity.test.ts` (FIPS vectors, tamper), `engine.test.ts` (gate), `models.test.ts` (pinning); e2e logs the check |
 | Laya checkpoints: closed catalog in Rust (commit, sizes, sha256); chunks land in `.part` files and only `laya_finish` moves them into place, after every size and hash matches, else all are deleted; `load` reads only a verified folder | `laya/catalog.rs`, `laya/store.rs` | Rust unit tests (mismatch, order, oversize, tampering, 0600/0700); e2e downloads and verifies once |

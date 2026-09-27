@@ -5,6 +5,7 @@ const COMMANDS: &[&str] = &[
     "dev_log",
     "dev_exit",
     "ug_status",
+    "open_ug_website",
     "kb_list",
     "kb_create",
     "kb_add_files",

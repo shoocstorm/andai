@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="824" height="824" viewBox="100 100 824 824">
+  <!-- The app icon (src-tauri/icons, andai-icon.svg) cropped to its tile, so the bolt stays legible at 16 px. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1B2130"/>
+      <stop offset="1" stop-color="#0C0F15"/>
+    </linearGradient>
+    <linearGradient id="orb" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8EC1FF"/>
+      <stop offset="1" stop-color="#D3A8FF"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#9DB8FF" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#9DB8FF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="190" fill="url(#bg)"/>
+  <rect x="101" y="101" width="822" height="822" rx="189" fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="3"/>
+  <circle cx="512" cy="512" r="330" fill="url(#glow)"/>
+  <rect x="302" y="302" width="420" height="420" rx="92" fill="url(#orb)"/>
+  <path d="M552 352 L402 548 H500 L468 672 L622 470 H522 Z" fill="#141A26"/>
+</svg>

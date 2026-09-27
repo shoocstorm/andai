@@ -287,7 +287,7 @@ fn docs_dir(app: &AppHandle, slug: &str) -> Result<PathBuf, String> {
 pub async fn kb_tool(app: AppHandle, slug: String, call: ToolCall) -> Result<ToolOutput, String> {
     let docs = docs_dir(&app, &slug)?;
     let args = plan(&call, &slug, &docs)?;
-    let bin = ug_path().ok_or("The `ug` CLI was not found. Install it, then restart Andai.")?;
+    let bin = ug_path().ok_or(crate::ug::UG_MISSING)?;
     tauri::async_runtime::spawn_blocking(move || run(&bin, &args, &docs, TOOL_TIMEOUT, MAX_OUTPUT_BYTES))
         .await
         .map_err(|e| e.to_string())?

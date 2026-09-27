@@ -12,6 +12,7 @@
     "allow-dev-log",
     "allow-dev-exit",
     "allow-ug-status",
+    "allow-open-ug-website",
     "allow-kb-list",
     "allow-kb-create",
     "allow-kb-add-files",

@@ -603,11 +603,11 @@ export function AgentStepCard({ s }: { s: AgentStep }) {
       {c?.observation && <div className="trace-detail">{c.observation}</div>}
       <div className="ag-step-buttons">
         <button className="btn ghost sm ag-toggle" onClick={() => setWhy(true)}>
-          <HelpCircle size={12} /> Why this step?
+          <HelpCircle size={12} /> <span className="ellipsis">Why this step?</span>
         </button>
         {c && (
           <button className="btn ghost sm ag-toggle" aria-haspopup="dialog" onClick={() => setOpen(true)}>
-            <Wrench size={12} /> Tool call
+            <Wrench size={12} /> <span className="ellipsis">Tool call</span>
           </button>
         )}
       </div>

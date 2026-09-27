@@ -758,10 +758,17 @@
   color: var(--text-2);
   font-size: 13.5px;
 }
-.kn-notice svg {
+.kn-notice > svg {
   color: var(--amber);
   flex: none;
   margin-top: 2px;
+}
+.kn-notice-action {
+  margin-top: 10px;
+}
+.kn-notice-action .mono {
+  opacity: 0.75;
+  font-size: 12px;
 }
 .kn-tabs {
   display: flex;
@@ -2251,10 +2258,22 @@ tr:hover .kn-remove {
 .ag-err {
   color: var(--red);
 }
+/* One row, even in a narrow trace panel: compact, and labels shrink before they wrap. */
 .ag-step-buttons {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.ag-step-buttons .btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-top: 0;
+  padding: 0 10px;
+  gap: 6px;
+  letter-spacing: 0.06em;
+}
+.ag-step-buttons .btn svg {
+  flex-shrink: 0;
 }
 /* decision dialog (AgentTrace.tsx DecisionDialog) */
 .dd-head {

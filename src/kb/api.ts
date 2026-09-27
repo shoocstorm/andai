@@ -56,6 +56,8 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 
 export const ugStatus = () =>
   inTauri ? invoke<UgStatus>('ug_status') : Promise.resolve<UgStatus>({ found: false, path: null, version: null });
+/** Opens UltraGraph's site (install instructions) in the system browser; Rust holds the URL. */
+export const openUgWebsite = () => call<void>('open_ug_website');
 export const kbList = () => (inTauri ? invoke<KbInfo[]>('kb_list') : Promise.resolve<KbInfo[]>([]));
 export const kbCreate = (name: string) => call<KbInfo>('kb_create', { name });
 /** Rust opens the dialog and grants what the user picks (src-tauri/src/grants.rs). */

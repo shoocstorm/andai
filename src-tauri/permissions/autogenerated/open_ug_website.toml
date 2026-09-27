@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-ug-website"
+description = "Enables the open_ug_website command without any pre-configured scope."
+commands.allow = ["open_ug_website"]
+
+[[permission]]
+identifier = "deny-open-ug-website"
+description = "Denies the open_ug_website command without any pre-configured scope."
+commands.deny = ["open_ug_website"]
