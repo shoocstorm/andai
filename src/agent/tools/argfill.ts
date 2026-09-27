@@ -14,6 +14,8 @@ export type FillContext = {
   kind: 'document' | 'code' | 'mixed';
   /** What the tools have shown so far (loop.ts); a matching argument must be one of them. */
   known?: Known;
+  /** Enum arguments already picked (by Laya, loop.ts); each is held to its one value. */
+  fixed?: Record<string, string>;
   signal?: AbortSignal;
 };
 
@@ -48,9 +50,15 @@ export const MAX_FILE_ENUM = 64;
  * every retry repeated it; a free symbol name fails the same way ("No symbol
  * named …"), and free line numbers read lines nothing pointed to.
  */
-export function schemaFor(tool: ToolDef, known: Known = {}): ObjectSchema | null {
+export function schemaFor(tool: ToolDef, known: Known = {}, fixed: Record<string, string> = {}): ObjectSchema | null {
   if (!tool.schema) return null;
   let schema = tool.schema;
+  // A picked value narrows its enum to one, so the grammar and `validate` hold it as they hold any enum.
+  for (const [key, value] of Object.entries(fixed)) {
+    const prop = schema.properties[key];
+    if (prop?.type !== 'string' || (prop.enum && !prop.enum.includes(value))) continue;
+    schema = { ...schema, properties: { ...schema.properties, [key]: { ...prop, enum: [value] } } };
+  }
   for (const [key, from] of HELD) {
     const prop = schema.properties[key];
     const values = known[from] ?? [];
@@ -74,7 +82,7 @@ export function parseObject(text: string): unknown {
 }
 
 export function fillMessages(tool: ToolDef, ctx: FillContext, previous?: { raw: string; errors: string[] }): ChatMessage[] {
-  const schema = schemaFor(tool, ctx.known);
+  const schema = schemaFor(tool, ctx.known, ctx.fixed);
   const files = HELD.map(([key, from, label]) => {
     const values = ctx.known?.[from];
     return schema?.properties[key] && values?.length ? `${label}: ${values.slice(0, MAX_FILE_ENUM).join(', ')}${values.length > MAX_FILE_ENUM ? ', …' : ''}\n` : '';
@@ -104,7 +112,7 @@ export function fillMessages(tool: ToolDef, ctx: FillContext, previous?: { raw: 
 }
 
 export async function fillArgs(tool: ToolDef, ctx: FillContext): Promise<Fill> {
-  const schema = schemaFor(tool, ctx.known);
+  const schema = schemaFor(tool, ctx.known, ctx.fixed);
   if (!schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null };
   let previous: { raw: string; errors: string[] } | undefined;
   let model: string | null = null;

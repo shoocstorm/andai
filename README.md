@@ -62,6 +62,9 @@ What that buys you:
 - **Knows when to stop.** In the same pass, Laya checks whether the results
   so far already answer the question, so the agent stops looking once they
   do.
+- **Picks how to search.** Laya also decides whether a search looks for a
+  specific name or a whole topic, in the same pass, so the chat model only
+  writes the search phrase.
 - **Filters noise.** Before the answer is written, Laya scores each retrieved
   passage and drops clear misses, so the chat model reads less and answers
   sooner.

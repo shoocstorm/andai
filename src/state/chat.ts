@@ -56,6 +56,8 @@ export type ToolCallRecord = {
   /** Model that wrote the arguments, and how many tries it took. */
   argModel: string | null;
   argAttempts: number;
+  /** Arguments Laya picked as typed choices (the chat model wrote the rest). */
+  argChoices?: { arg: string; value: string; probability: number; model: string }[];
   policy: Policy;
   approval?: 'pending' | 'approved' | 'denied';
   /** ug arguments as run (from Rust). */

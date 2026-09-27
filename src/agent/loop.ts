@@ -8,7 +8,7 @@
 // as fenced passages (prompt.ts) and a clipped summary line.
 
 import { kbTool, type KbInfo, type SearchHit } from '../kb/api';
-import { decide, decidesWithLaya, DecisionError, seededShuffle, type Decision, type DecisionOption } from '../llm/decide';
+import { decide, decidesWithLaya, DecisionError, layaChoices, seededShuffle, type ArgChoice, type ArgPick, type Decision, type DecisionOption } from '../llm/decide';
 import {
   addAgentStep,
   OUTPUT_KEEP,
@@ -150,6 +150,10 @@ const record = (d: Decision, seed: number): DecisionRecord => ({
   ...(d.truncated ? { truncated: true } : {}),
 });
 
+/** The enum arguments of `tools` that Laya picks as typed choices (`ToolDef.choices`), as Laya questions. */
+export const argChoices = (tools: ToolDef[]): ArgChoice[] =>
+  tools.flatMap((t) => (t.choices ?? []).map((c) => ({ id: `${t.id}_${c.arg}`, tool: t.id, arg: c.arg, question: c.question, options: c.options })));
+
 const argKey = (tool: string, args: Record<string, unknown>) =>
   `${tool} ${JSON.stringify(Object.keys(args).sort().map((k) => [k, args[k]]))}`;
 
@@ -227,6 +231,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     let note: string | undefined;
     let fallback: AgentStep['fallback'];
     let failedDecision: AgentStep['failedDecision'];
+    let picks: ArgPick[] = [];
     const searchTool = tools.find((t) => t.id === 'kb_search');
     // What to do when the decision can't be trusted: search once if nothing
     // was looked up yet (the fixed pipeline's behavior), else answer.
@@ -242,9 +247,15 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     } else {
       try {
         const options = decisionOptions(tools, seed + index, found.length > 0);
-        const stopCheck = found.length > 0 && decidesWithLaya();
-        const d = await decide(state(), QUESTION, stopCheck ? options.filter((o) => o.id !== ANSWER) : options, signal, stopCheck ? { stop: STOP } : {});
+        const withLaya = decidesWithLaya();
+        const stopCheck = found.length > 0 && withLaya;
+        const d = await decide(state(), QUESTION, stopCheck ? options.filter((o) => o.id !== ANSWER) : options, signal, {
+          ...(stopCheck ? { stop: STOP } : {}),
+          // Enum arguments ride in the same pass, a few ms, in case their tool is chosen.
+          ...(withLaya ? { choices: argChoices(tools) } : {}),
+        });
         decision = record(d, seed + index);
+        picks = d.picks ?? [];
         action = d.chosen;
         if (d.stop && d.stop.probability >= STOP_AT) {
           action = ANSWER;
@@ -294,6 +305,23 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
 
     const tool = tools.find((t) => t.id === action)!;
     const policy = policyOf(tool, settings.policies);
+    // Laya picks the tool's enum arguments: from the decision's pass, or, when
+    // the tool came without one (search first, a fallback), in a pass of their own.
+    let mine = picks.filter((p) => p.tool === tool.id);
+    let pickModel = decision?.model ?? '';
+    const asked = argChoices([tool]);
+    if (asked.length && mine.length < asked.length && decidesWithLaya()) {
+      try {
+        const r = await layaChoices(state(), asked);
+        mine = r.picks;
+        pickModel = decision?.model ?? r.model;
+      } catch {
+        // The chat model writes them instead, as without Laya.
+        mine = [];
+      }
+      if (signal.aborted) throw aborted();
+    }
+    const fixed = Object.fromEntries(mine.map((p) => [p.arg, p.value]));
     const call: ToolCallRecord = {
       tool: tool.id,
       title: tool.title,
@@ -304,6 +332,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       policy,
       startedAt: Date.now(),
       status: 'filling',
+      ...(mine.length ? { argChoices: mine.map((p) => ({ arg: p.arg, value: p.value, probability: p.probability, model: pickModel })) } : {}),
     };
     const s = step({ decision, action, note, fallback, failedDecision, call });
     const patch = (p: Partial<ToolCallRecord>) => patchCall(msgId, s.id, p);
@@ -313,13 +342,13 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     progress(`Step ${s.index + 1} · ${tool.title}: writing arguments…`);
     let args: Record<string, unknown>;
     try {
-      const fill = await fillArgs(tool, { state: state(), kind, known: { files: knownFiles(), symbols: symbolsIn(hits()), ranges: rangesIn(hits()) }, signal });
+      const fill = await fillArgs(tool, { state: state(), kind, known: { files: knownFiles(), symbols: symbolsIn(hits()), ranges: rangesIn(hits()) }, fixed, signal });
       if (fill.ok) {
         args = fill.args;
         patch({ args, argsRaw: sameJson(fill.raw, args) ? null : fill.raw, argModel: fill.model, argAttempts: fill.attempts });
       } else if (tool.id === 'kb_search') {
         // The fixed pipeline's query: the question itself.
-        args = { query: prompt.slice(0, 300), scope: 'broad' };
+        args = { query: prompt.slice(0, 300), scope: fixed.scope ?? 'broad' };
         patch({
           args,
           argsRaw: fill.raw,

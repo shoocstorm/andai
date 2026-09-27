@@ -155,6 +155,17 @@ describe('fillArgs', () => {
     expect(schemaFor(tool('kb_search'), { files: ['notes.md'] })).toBe(tool('kb_search').schema);
   });
 
+  it('holds an argument Laya picked to its one value, and ignores a value its enum doesn’t allow', async () => {
+    const t = tool('kb_search');
+    expect(schemaFor(t, {}, { scope: 'focused' })!.properties.scope).toMatchObject({ enum: ['focused'] });
+    expect(schemaFor(t, {}, { scope: 'sideways' })).toBe(t.schema);
+    expect(schemaFor(t, {}, {})).toBe(t.schema);
+    eng.replies = ['{"query":"group discount","scope":"focused"}'];
+    const fill = await fillArgs(t, { ...ctx, fixed: { scope: 'focused' } });
+    expect(fill).toMatchObject({ ok: true, args: { query: 'group discount', scope: 'focused' } });
+    expect((eng.seen[0] as { grammar: string }).grammar).not.toContain('broad');
+  });
+
   it('holds a symbol argument to the symbols seen so far, and lists them', async () => {
     const symbols = ['computeFare', 'VEHICLE_SURCHARGE'];
     eng.replies = ['{"symbol":"computeFare"}'];

@@ -24,6 +24,12 @@ export type ToolDef = {
   command: string;
   /** Arguments the model fills in; null when the tool takes none. */
   schema: ObjectSchema | null;
+  /**
+   * Enum arguments Laya picks as typed choices, in the same pass as the
+   * decision (llm/decide.ts `ArgChoice`); the chat model then writes the rest.
+   * Without Laya the chat model writes them as usual.
+   */
+  choices?: { arg: string; question: string; options: { id: string; text: string }[] }[];
   /** How to fill the arguments, given what the knowledge base holds. */
   guide: (kind: KbKind) => string;
   /** Validated arguments → the call Rust re-validates and runs. */

@@ -27,7 +27,10 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 7 | [Skip the obvious first decision](#7-skip-the-obvious-first-decision) | done 2026-09-26 · first action 100%, 45% fewer decisions |
 | 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | done 2026-09-26 · 1.7B decides worse; recommend 1.7B answers + 0.6B decisions |
 | 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | measured 2026-09-26 · worse, not shipped |
-| 10 | [Robust to the search scope](#10-robust-to-the-search-scope) | todo |
+| 10 | [Robust to the search scope](#10-robust-to-the-search-scope) | done 2026-09-27 with Laya · facts 75.9% → 89.7% (Multilingual), 82.8% → 89.7% (English); Qwen deciders unchanged |
+| 11 | [Rerank kept passages by relevance](#11-rerank-kept-passages-by-relevance) | todo |
+| 12 | [Intent gate with Laya](#12-intent-gate-with-laya) | todo · probe first |
+| 13 | [Answer claim check](#13-answer-claim-check) | todo |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
 not shipped: 4, 9; 8 changed the recommendation (a small decision model with
@@ -427,6 +430,76 @@ their surrounding lines.
 
 **Done when.** MLX 1.7B + 0.6B reaches wllama's fact rate, and wllama
 doesn't lose any.
+
+**Done with a Laya decider (2026-09-27).** An enum argument is a typed
+choice, which is Laya's job: `kb_search` declares `scope` in
+`ToolDef.choices`, Laya asks it as a `choice` row in the decision's batch
+(or in its own ~8 ms pass on the search-first path), and `schemaFor` holds
+the argument to the picked value, so the chat model writes only the query.
+The baseline showed the failure plainly: the chat model wrote `broad` for
+13 of 16 code and mixed searches, `computeFare` and `withRetry` included.
+Qwen3 1.7B on MLX answering, 34 questions, seed 7 (`eval/laya10-*`):
+
+| Decider | Facts | Grounded | ms / decision | s / question |
+|---|---|---|---|---|
+| Laya Multilingual, before → after | 75.9% → 89.7% | 75.8% → 84.8% | 49 → 21 | 1.56 → 0.83 |
+| Laya English, before → after | 82.8% → 89.7% | 76.7% → 80.0% | 36 → 37 | 0.87 → 0.89 |
+
+Gained: `code-surcharge`, `code-peak`, `code-lines-cancel` on both, and
+`mixed-cancel` on Multilingual. Lost: `mixed-followup-surcharge` on
+English, where Laya chose `focused` for the topical follow-up query
+"vehicle features" and the answer named `VEHICLE_SURCHARGE` without 18.5
+(it misses on Multilingual before and after). The Multilingual "before"
+run's 49 ms per decision is about twice what Laya Multilingual measured
+before (22 ms, AGENTS.md §2); the cause wasn't investigated, so only the
+English row's timings are a fair comparison: the extra row costs nothing
+measurable. **Still open:** a Qwen decider
+(wllama or MLX 0.6B) has no argument choices, so MLX 1.7B + 0.6B keeps the
+gap this item was opened for. Small-talk misses with Laya are item 12.
+
+## 11. Rerank kept passages by relevance
+
+**Why.** The relevance check scores every passage but only drops the ones
+below 0.10; `buildSystem` cuts from the end, so a high-scoring passage late
+in the list can lose to a low-scoring one.
+
+**What.** Keep the top `KEEP_TOP` in place, order the other kept passages by
+score (stable), and set `sources` after the check as now, so `[n]` stays
+aligned. The trace shows each passage's rank.
+
+**Done when.** Facts and grounding hold or improve on both Laya setups with
+no question losing a fact; prompt tokens and first-token time are reported.
+
+## 12. Intent gate with Laya
+
+**Why.** With Laya deciding, small talk still searches ("hi", "who are
+you?") or clarifies ("thanks"): 5 first-action misses with Multilingual.
+A `noul` "needs the knowledge base" probe failed (AGENTS.md §2).
+
+**What.** Probe first: a `choice` over `small_talk`, `about_assistant`,
+`kb_content`, `follow_up` on every eval question plus ~20 small-talk and
+about-the-assistant lines, both checkpoints, confusion matrix here. Ship
+only if no lookup question lands on a no-lookup intent at ≥ 0.5; then ask
+it in the first decision's batch when `needsLookup` is false and answer on
+`small_talk` / `about_assistant`.
+
+**Done when.** Small talk gets `answer_now` with Laya and lookup
+first-action accuracy doesn't drop, or the probe is recorded as not shipped.
+
+## 13. Answer claim check
+
+**Why.** 76–85% of answers are grounded, and nothing checks whether a cited
+sentence is supported by the passage it cites.
+
+**What.** After the answer, with Laya, score each `[n]`-cited sentence
+against its passage (a `noul` per row, a Rust command generalized from
+`laya_relevance` with a closed set of statements), and show a quiet note
+under the answer listing sentences that may not be supported. Never block
+or change the answer. The threshold comes from an AUC probe on the eval's
+answers (own passage vs. another), not a guess.
+
+**Done when.** AUC and the flag rate are recorded, and e2e and release e2e
+pass.
 
 ## Decided: a native engine (MLX)
 

@@ -408,7 +408,8 @@ level defaults to *Ask*.
   `focused` only with GGUF Q4_K_M; broad search returns one-line fragments
   and the answer misses the function. MLX 5-bit scored 89.7% at 302 tok/s
   and DWQ 4-bit 82.8%; 4-bit ships (349 tok/s, a human decision,
-  2026-09-27). Making the agent robust to `scope` is the next tracker item.
+  2026-09-27). With a Laya decider, Laya now picks `scope` (tracker item 10,
+  below); with a Qwen decider the chat model still writes it.
 - **Models from Hugging Face** (2026-09-27; `llm/hub.ts`, `llm/custom.ts`,
   `src-tauri/src/llm/custom.rs`). The API answers the app's origin with CORS
   (`access-control-allow-origin` echoes it). `/api/models?…&expand[]=gated`
@@ -485,6 +486,25 @@ level defaults to *Ask*.
   2406 ms median, facts 79.3% → 79.3% (one question gained, one lost), 57 ms.
   The eval's knowledge bases are small (7 files); larger ones retrieve more
   noise to drop.
+- **Laya picks enum arguments** (`ToolDef.choices`, today `kb_search`'s
+  `scope`), 2026-09-27. The chat model wrote `broad` for 13 of 16 code and
+  mixed searches, bare identifiers included (`computeFare`, `withRetry`), in
+  every MLX precision. Laya asks each as a `choice` row in the decision's
+  batch (next + stop + choices ≤ `MAX_QUESTIONS`), or in its own pass when
+  the tool came without a decision (search first), and `schemaFor` narrows
+  the argument's enum to the picked value so the grammar holds it. A failed
+  pick leaves the argument to the chat model. Agent eval, Qwen3 1.7B MLX
+  answering (`eval/laya10-*`): Laya Multilingual facts 75.9% → 89.7% (4
+  gained, none lost), grounded 75.8% → 84.8%; Laya English 82.8% → 89.7%
+  (3 gained; lost `mixed-followup-surcharge`, where Laya chose `focused` for
+  the topical query "vehicle features" and the answer named the constant
+  without 18.5). Laya English: 36 → 37 ms per decision with the extra row.
+- **Don't edit `src/` while `eval:agent` runs from the same checkout.** The
+  harness serves the dev UI with hot reload, and a reload mid-run failed it
+  ("eval-docs did not index: empty", 2026-09-27). Measure a "before" from an
+  export of `HEAD` (`git archive HEAD | tar -x`, `node_modules` symlinked,
+  `public/wllama` copied, `CARGO_TARGET_DIR` pointed at this checkout's
+  `src-tauri/target`).
 - **The e2e and eval runners serve the dev UI on port 1431**
   (`scripts/dev-port.mjs`, `ANDAI_DEV_PORT`), not 1420. "localhost" reaches
   both 127.0.0.1 and [::1]: with a developer's own `tauri dev` on 1420, a
@@ -511,7 +531,7 @@ level defaults to *Ask*.
 | Reasoning chips, Execution Trace, stats | Real (actual step timings, tokens, tok/s; every decision and tool call) | `agent/turn.ts`, `agent/loop.ts`, `screens/AgentTrace.tsx` |
 | Knowledge bases: create, ingest, index, search, delete | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts` |
 | Sample knowledge bases (Tidewater Ferries: documents, code, both), suggested questions | Real (bundled files, indexed by the user's ug) | `src-tauri/src/samples.rs`, `kb/samples.ts`, `screens/Knowledge.tsx` |
-| Laya decision model (download, verify, load, decide, stop question, relevance check; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
+| Laya decision model (download, verify, load, decide, stop question, relevance check, search scope; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
 | Agent tool loop: decisions, 8 ug tools, per-tool policy, approvals, decision model, Tools screen | Real | `agent/loop.ts`, `agent/tools/`, `llm/decide.ts`, `state/tools.ts`, `screens/Tools.tsx`, `src-tauri/src/tools.rs` |
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |

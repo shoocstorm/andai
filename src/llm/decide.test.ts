@@ -39,13 +39,14 @@ vi.mock('./engine', async () => {
   };
 });
 
-const { decide, DecisionError, decisionMessages, labelsFor, optionLogprobs, seededShuffle, softmax } = await import('./decide');
+const { decide, DecisionError, decisionMessages, labelsFor, layaChoices, optionLogprobs, seededShuffle, softmax } = await import('./decide');
 
 /** A Laya reply: the choice, and a yes/no answer when `stop` is given. */
-const reply = (p: number[], extra: { truncated?: boolean; tokens?: number; stop?: number } = {}) => ({
+const reply = (p: number[], extra: { truncated?: boolean; tokens?: number; stop?: number; more?: { id: string; probabilities: number[] }[] } = {}) => ({
   answers: [
     { id: 'next', probabilities: p, inputTokens: extra.tokens ?? 476, truncated: extra.truncated ?? false },
     ...(extra.stop != null ? [{ id: 'stop', probabilities: [1 - extra.stop, extra.stop], inputTokens: 300, truncated: false }] : []),
+    ...(extra.more ?? []).map((m) => ({ ...m, inputTokens: 300, truncated: false })),
   ],
   ms: 8.4,
   model: 'laya-multilingual',
@@ -245,6 +246,51 @@ describe('decide on a Laya checkpoint', () => {
     expect(d.stop).toEqual({ statement: 'The results suffice.', probability: 0.8 });
     expect(d.io.response?.laya?.stop).toBe(0.8);
     expect(d.io.request.messages.at(-1)).toEqual({ role: 'yes/no', content: 'The results suffice.' });
+  });
+
+  const scope = {
+    id: 'kb_search_scope',
+    tool: 'kb_search',
+    arg: 'scope',
+    question: 'How?',
+    options: [
+      { id: 'focused', text: 'A name' },
+      { id: 'broad', text: 'A topic' },
+    ],
+  };
+
+  it('asks argument choices in the same call, after the stop question, and returns the picks', async () => {
+    eng.laya = 'laya-multilingual';
+    eng.layaReply = reply([0.2, 0.7, 0.1], { stop: 0.3, more: [{ id: 'kb_search_scope', probabilities: [0.85, 0.15] }] });
+    const d = await decide('s', 'q', opts, undefined, { stop: 'It holds.', choices: [scope] });
+    const [, questions] = eng.layaSeen[0] as [string, { id: string; kind: string }[]];
+    expect(questions.map((q) => [q.id, q.kind])).toEqual([
+      ['next', 'choice'],
+      ['stop', 'noul'],
+      ['kb_search_scope', 'choice'],
+    ]);
+    expect(d.picks).toEqual([
+      { id: 'kb_search_scope', tool: 'kb_search', arg: 'scope', value: 'focused', probability: 0.85, scores: [{ id: 'focused', probability: 0.85 }, { id: 'broad', probability: 0.15 }] },
+    ]);
+    expect(d.io.response?.laya?.choices).toEqual([{ id: 'kb_search_scope', scores: d.picks![0].scores }]);
+    expect(d.io.request.messages.at(-1)!.role).toBe('argument: scope');
+  });
+
+  it('asks only as many argument choices as the batch holds, and leaves out a malformed answer', async () => {
+    eng.laya = 'laya-multilingual';
+    const more = ['a', 'b', 'c'].map((x) => ({ ...scope, id: `t_${x}` }));
+    eng.layaReply = reply([0.2, 0.7, 0.1], { stop: 0.3, more: [{ id: 't_a', probabilities: [0.5] }] });
+    const d = await decide('s', 'q', opts, undefined, { stop: 'It holds.', choices: more });
+    const [, questions] = eng.layaSeen[0] as [string, { id: string }[]];
+    expect(questions.map((q) => q.id)).toEqual(['next', 'stop', 't_a', 't_b']);
+    expect(d.picks).toBeUndefined();
+  });
+
+  it('asks argument choices on their own for a tool picked without a decision', async () => {
+    eng.laya = 'laya-multilingual';
+    eng.layaReply = { answers: [{ id: 'kb_search_scope', probabilities: [0.3, 0.7], inputTokens: 200, truncated: false }], ms: 6, model: 'laya-multilingual' };
+    const r = await layaChoices('s', [scope]);
+    expect(r).toMatchObject({ ms: 6, model: 'Laya Multilingual', picks: [{ arg: 'scope', value: 'broad', probability: 0.7 }] });
   });
 
   it('ignores a stop statement on the letter readout', async () => {

@@ -104,6 +104,12 @@ export function RawDecisionCall({ io, labels }: { io: DecisionIO; labels?: Recor
                 Yes/no: P(true) <span className="mono">{pct(r.laya.stop)}</span>
               </div>
             )}
+            {r.laya.choices?.map((c) => (
+              <div key={c.id} className="ag-small">
+                Argument <span className="mono">{c.id}</span>:{' '}
+                <span className="mono">{c.scores.map((t) => `${t.id} ${pct(t.probability)}`).join(' · ')}</span>
+              </div>
+            ))}
             <table className="ag-logprobs mono">
               <thead>
                 <tr>
@@ -232,6 +238,7 @@ export function explainCall(c: ToolCallRecord): string[] {
   if (c.args) {
     const n = Object.keys(c.args).length;
     out.push(n ? `${writer} filled in the arguments${tries}: ${argsInline(c.args, 160)}.` : `${c.title} takes no arguments.`);
+    for (const p of c.argChoices ?? []) out.push(`${p.model} picked ${p.arg} “${p.value}” (${pct(p.probability)}) as a typed choice, and the chat model kept it.`);
   } else if (c.status === 'filling') out.push(`${writer} is writing the arguments.`);
   else out.push(`${writer} could not write valid arguments${tries}, so the tool never ran.`);
   if (c.approval === 'pending') out.push('It is waiting for your approval before it runs.');
@@ -348,6 +355,11 @@ export function ToolCallDialog({ s, open, onClose }: { s: AgentStep; open: boole
               {c.argAttempts > 1 ? ` in ${c.argAttempts} attempts` : ''}
             </div>
           )}
+          {c.argChoices?.map((p) => (
+            <div key={p.arg} className="faint ag-small tc-by">
+              <span className="mono">{p.arg}</span> picked by {p.model} ({pct(p.probability)})
+            </div>
+          ))}
           {c.argsRaw && (
             <details className="ag-raw">
               <summary>Model’s raw reply{c.argAttempts > 1 ? ` (${c.argAttempts} attempts)` : ''}</summary>

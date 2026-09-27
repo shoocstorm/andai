@@ -15,12 +15,22 @@
 // flagged (`bounded`); with no letter scored at all, the decision fails.
 
 import { complete, deciderLaya, slotFor, type Completion, type Slot } from './engine';
-import { layaDecide } from './laya';
+import { layaDecide, type LayaAnswer, type LayaQuestion } from './laya';
 
 export const LETTERS = 'ABCDEFGHIJKLMNOP';
 export const MAX_OPTIONS = LETTERS.length;
 
 export type DecisionOption = { id: string; text: string };
+
+/**
+ * An enum argument of a tool, asked of Laya as its own choice (e.g.
+ * `kb_search`'s `scope`), so the chat model doesn't have to write it. `id` is
+ * the Laya question id: a slug, unique in the batch.
+ */
+export type ArgChoice = { id: string; tool: string; arg: string; question: string; options: DecisionOption[] };
+
+/** Laya's answer to an `ArgChoice`: the chosen value and every option's probability. */
+export type ArgPick = { id: string; tool: string; arg: string; value: string; probability: number; scores: { id: string; probability: number }[] };
 
 export type Decision = {
   options: { id: string; label: string; text: string; probability: number; logprob: number }[];
@@ -40,6 +50,8 @@ export type Decision = {
   truncated?: boolean;
   /** Laya only, when asked: the probability that the stop statement holds (the results suffice). */
   stop?: { statement: string; probability: number };
+  /** Laya only, when asked: the argument choices answered in the same pass. */
+  picks?: ArgPick[];
 };
 
 /**
@@ -55,7 +67,15 @@ export type DecisionIO = {
     sampled: string | null;
     topLogprobs: { token: string; logprob: number }[];
     /** Laya: calibrated score per option id, its input size, whether input was cut, and its own time (Rust, ms). */
-    laya?: { scores: { id: string; probability: number }[]; inputTokens: number; truncated: boolean; ms: number; stop?: number };
+    laya?: {
+      scores: { id: string; probability: number }[];
+      inputTokens: number;
+      truncated: boolean;
+      ms: number;
+      stop?: number;
+      /** Argument choices asked in the same pass, per question id. */
+      choices?: { id: string; scores: { id: string; probability: number }[] }[];
+    };
   } | null;
 };
 
@@ -137,21 +157,46 @@ export function seededShuffle<T>(items: T[], seed: number): T[] {
   return out;
 }
 
-/** Scores `options` for `question` given `state`, on the decision model (or the chat model as fallback). */
-/** Whether decisions go to a Laya checkpoint, which can also answer a yes/no `stop` question. */
+/** Whether decisions go to a Laya checkpoint, which can also answer a yes/no `stop` question and argument choices. */
 export const decidesWithLaya = () => deciderLaya() != null;
+
+/** Laya answers at most this many questions per pass (src-tauri/src/laya/mod.rs `MAX_QUESTIONS`). */
+export const LAYA_MAX_QUESTIONS = 4;
+
+const choiceQuestion = (c: ArgChoice): LayaQuestion => ({ id: c.id, kind: 'choice', question: c.question, options: c.options.map(({ id, text }) => ({ id, text })) });
+
+/** Reads the answers to `choices` out of a Laya batch; a choice without a well-formed answer is left out. */
+function picksFrom(answers: LayaAnswer[], choices: ArgChoice[]): ArgPick[] {
+  return choices.flatMap((c) => {
+    const p = answers.find((a) => a.id === c.id)?.probabilities ?? [];
+    if (p.length !== c.options.length || !p.every(Number.isFinite)) return [];
+    const scores = c.options.map((o, i) => ({ id: o.id, probability: p[i] }));
+    const best = scores.reduce((a, b) => (b.probability > a.probability ? b : a));
+    return [{ id: c.id, tool: c.tool, arg: c.arg, value: best.id, probability: best.probability, scores }];
+  });
+}
+
+/**
+ * Asks Laya only argument choices, for a tool the loop picked without a
+ * decision (the first search, `searchFirst`). One pass, about 8 ms.
+ */
+export async function layaChoices(state: string, choices: ArgChoice[]): Promise<{ picks: ArgPick[]; ms: number; model: string }> {
+  const r = await layaDecide(state, choices.slice(0, LAYA_MAX_QUESTIONS).map(choiceQuestion));
+  return { picks: picksFrom(r.answers, choices), ms: r.ms, model: deciderLaya()?.name ?? r.model };
+}
 
 /**
  * Scores `options` for `question` given `state`. With a Laya checkpoint, a
  * `stop` statement is asked in the same pass as a yes/no question and its
- * probability comes back as `Decision.stop`; other deciders ignore it.
+ * probability comes back as `Decision.stop`, and argument `choices` come back
+ * as `Decision.picks` (as many as fit the batch); other deciders ignore both.
  */
 export async function decide(
   state: string,
   question: string,
   options: DecisionOption[],
   signal?: AbortSignal,
-  extra: { stop?: string } = {},
+  extra: { stop?: string; choices?: ArgChoice[] } = {},
 ): Promise<Decision> {
   if (options.length < 2 || options.length > MAX_OPTIONS) {
     throw new Error(`A decision needs 2–${MAX_OPTIONS} options, got ${options.length}.`);
@@ -159,7 +204,7 @@ export async function decide(
   const started = performance.now();
   const labels = labelsFor(options.length);
   const laya = deciderLaya();
-  if (laya) return decideWithLaya(laya.name, state, question, options, labels, started, extra.stop);
+  if (laya) return decideWithLaya(laya.name, state, question, options, labels, started, extra.stop, extra.choices);
   const target = slotFor('decider');
   if (!target) throw new Error('No model loaded — open Settings → Models to load one.');
   if (!target.def.decider) throw new Error(`${target.def.name} can't make decisions; load a decision model in Settings → Models.`);
@@ -233,7 +278,10 @@ async function decideWithLaya(
   labels: string[],
   started: number,
   stop?: string,
+  allChoices: ArgChoice[] = [],
 ): Promise<Decision> {
+  // `next`, then `stop`, then as many argument choices as the batch still holds.
+  const choices = allChoices.slice(0, LAYA_MAX_QUESTIONS - 1 - (stop ? 1 : 0));
   const io: DecisionIO = {
     request: {
       state,
@@ -242,8 +290,9 @@ async function decideWithLaya(
         { role: 'question', content: question },
         { role: 'options', content: options.map((o) => `${o.id}: ${o.text}`).join('\n') },
         ...(stop ? [{ role: 'yes/no', content: stop }] : []),
+        ...choices.map((c) => ({ role: `argument: ${c.arg}`, content: `${c.question}\n${c.options.map((o) => `${o.id}: ${o.text}`).join('\n')}` })),
       ],
-      params: { model: name, type: stop ? 'choice + noul' : 'choice' },
+      params: { model: name, type: ['choice', ...(stop ? ['noul'] : []), ...choices.map((c) => `choice (${c.arg})`)].join(' + ') },
     },
     response: null,
   };
@@ -252,6 +301,7 @@ async function decideWithLaya(
     r = await layaDecide(state, [
       { id: 'next', kind: 'choice', question, options: options.map(({ id, text }) => ({ id, text })) },
       ...(stop ? [{ id: 'stop', kind: 'noul' as const, question: stop }] : []),
+      ...choices.map(choiceQuestion),
     ]);
   } catch (e) {
     throw new DecisionError(e instanceof Error ? e.message : String(e), io, performance.now() - started);
@@ -264,6 +314,7 @@ async function decideWithLaya(
   const stopP = stop ? r.answers.find((a) => a.id === 'stop')?.probabilities[1] : undefined;
   if (stop && !Number.isFinite(stopP)) throw new DecisionError(`${name} didn't answer the yes/no question.`, io, performance.now() - started);
   const truncated = r.answers.some((a) => a.truncated);
+  const picks = picksFrom(r.answers, choices);
   io.response = {
     sampled: null,
     topLogprobs: [],
@@ -273,6 +324,7 @@ async function decideWithLaya(
       truncated,
       ms: r.ms,
       ...(stopP != null ? { stop: stopP } : {}),
+      ...(picks.length ? { choices: picks.map((k) => ({ id: k.id, scores: k.scores })) } : {}),
     },
   };
   const scored = options.map((o, i) => ({ id: o.id, label: labels[i], text: o.text, probability: p[i], logprob: Math.log(p[i]) }));
@@ -289,5 +341,6 @@ async function decideWithLaya(
     io,
     truncated,
     ...(stop && stopP != null ? { stop: { statement: stop, probability: stopP } } : {}),
+    ...(picks.length ? { picks } : {}),
   };
 }

@@ -115,6 +115,18 @@ export const UG_TOOLS: ToolDef[] = [
       required: ['query', 'scope'],
       additionalProperties: false,
     },
+    // The chat model wrote `broad` for name-like requests with every MLX
+    // precision (docs/agentic-rag-improvements.md, item 10); Laya picks it.
+    choices: [
+      {
+        arg: 'scope',
+        question: 'How should the knowledge base be searched for this request?',
+        options: [
+          { id: 'focused', text: 'Direct matches for a specific name, identifier or exact term, such as a function, file, product or code' },
+          { id: 'broad', text: 'A topic or concept, gathering related passages and surrounding context' },
+        ],
+      },
+    ],
     guide: (kind) => `${QUERY_GUIDE[kind]} Use scope "focused" for a specific name or term, "broad" to gather surrounding context.`,
     toCall: (a, ctx) => ({
       tool: 'kb_search',

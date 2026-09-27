@@ -15,7 +15,7 @@ const engine = vi.hoisted(() => ({
   seen: [] as { messages: { role: string; content: string }[]; opts: Record<string, unknown> }[],
 }));
 const search = vi.hoisted(() => ({ hits: [] as unknown[], fail: null as Error | null, calls: 0 }));
-type Scripted = { chosen: string; confidence?: number; stop?: number } | Error;
+type Scripted = { chosen: string; confidence?: number; stop?: number; scope?: string } | Error;
 const agent = vi.hoisted(() => ({
   decisions: [] as Scripted[],
   laya: false,
@@ -32,12 +32,29 @@ const agent = vi.hoisted(() => ({
   output: {} as Record<string, unknown>,
   toolFail: null as Error | null,
   toolDelayMs: 0,
+  seenChoices: [] as string[][],
+  fillFixed: [] as (Record<string, string> | undefined)[],
+  // layaChoices: the scope it picks on its own pass, or an error
+  ownPick: 'focused' as string | Error,
+  ownPasses: 0,
 }));
 
 vi.mock('../llm/decide', async (orig) => ({
   ...(await orig<typeof import('../llm/decide')>()),
   decidesWithLaya: () => agent.laya,
-  decide: async (state: string, _question: string, options: { id: string; text: string }[], _signal?: AbortSignal, extra: { stop?: string } = {}) => {
+  layaChoices: async (_state: string, choices: { id: string; tool: string; arg: string }[]) => {
+    agent.ownPasses++;
+    if (agent.ownPick instanceof Error) throw agent.ownPick;
+    return { picks: choices.map((c) => ({ ...c, value: agent.ownPick as string, probability: 0.7, scores: [] })), ms: 8, model: 'Laya Multilingual' };
+  },
+  decide: async (
+    state: string,
+    _question: string,
+    options: { id: string; text: string }[],
+    _signal?: AbortSignal,
+    extra: { stop?: string; choices?: { id: string; tool: string; arg: string }[] } = {},
+  ) => {
+    agent.seenChoices.push((extra.choices ?? []).map((c) => c.id));
     agent.seenStates.push(state);
     agent.seenOptions.push(options.map((o) => o.id));
     agent.seenStops.push(extra.stop ?? null);
@@ -59,12 +76,16 @@ vi.mock('../llm/decide', async (orig) => ({
       ms: 12,
       promptTokens: 300,
       ...(extra.stop && next.stop != null ? { stop: { statement: extra.stop, probability: next.stop } } : {}),
+      ...(next.scope && extra.choices?.length
+        ? { picks: extra.choices.map((c) => ({ ...c, value: next.scope!, probability: 0.9, scores: [] })) }
+        : {}),
     };
   },
 }));
 
 vi.mock('./tools/argfill', () => ({
-  fillArgs: async (tool: { id: string; schema: unknown }, ctx: { known?: { files?: string[]; symbols?: string[]; ranges?: string[] } }) => {
+  fillArgs: async (tool: { id: string; schema: unknown }, ctx: { known?: { files?: string[]; symbols?: string[]; ranges?: string[] }; fixed?: Record<string, string> }) => {
+    agent.fillFixed.push(ctx.fixed);
     agent.fillFiles.push(ctx.known?.files);
     agent.fillSymbols.push(ctx.known?.symbols);
     agent.fillRanges.push(ctx.known?.ranges);
@@ -186,6 +207,10 @@ beforeEach(() => {
     output: { kb_search: { items: [hit] } },
     toolFail: null,
     toolDelayMs: 0,
+    seenChoices: [],
+    fillFixed: [],
+    ownPick: 'focused',
+    ownPasses: 0,
   });
 });
 
@@ -640,11 +665,45 @@ describe('runTurn (agent mode)', () => {
     expect(steps().at(-1)!.action).toBe('answer_now');
   });
 
+  it('with Laya, asks the search scope in the decision pass and pins it for the argument fill', async () => {
+    agent.laya = true;
+    agent.decisions = [{ chosen: 'kb_search', scope: 'focused' }, { chosen: 'kb_overview', stop: 0.9 }];
+    await runTurn('Which function implements the group discount?');
+    expect(agent.seenChoices[0]).toContain('kb_search_scope');
+    expect(agent.ownPasses).toBe(0);
+    expect(agent.fillFixed[0]).toEqual({ scope: 'focused' });
+    expect(steps()[0].call!.argChoices).toEqual([{ arg: 'scope', value: 'focused', probability: 0.9, model: 'Qwen3 1.7B' }]);
+  });
+
+  it('with Laya, picks the scope in a pass of its own when the search came without a decision', async () => {
+    agent.laya = true;
+    useTools.setState({ searchFirst: true });
+    agent.decisions = [{ chosen: 'answer_now', stop: 0.9 }];
+    await runTurn('What headers does wllama need?');
+    expect(agent.ownPasses).toBe(1);
+    expect(agent.fillFixed[0]).toEqual({ scope: 'focused' });
+    expect(steps()[0].call!.argChoices?.[0]).toMatchObject({ arg: 'scope', value: 'focused', model: 'Laya Multilingual' });
+  });
+
+  it('lets the chat model write the scope when Laya can’t pick it', async () => {
+    agent.laya = true;
+    useTools.setState({ searchFirst: true });
+    agent.ownPick = new Error('No Laya model is loaded.');
+    agent.decisions = [{ chosen: 'answer_now', stop: 0.9 }];
+    await runTurn('What headers does wllama need?');
+    expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
+    expect(agent.fillFixed[0]).toEqual({});
+    expect(steps()[0].call!.argChoices).toBeUndefined();
+  });
+
   it('never asks the stop question without Laya', async () => {
     agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
     await runTurn('What headers does wllama need?');
     expect(agent.seenStops.every((s) => s === null)).toBe(true);
     expect(agent.seenOptions.at(-1)).toContain('answer_now');
+    // nor argument choices: the chat model writes the scope
+    expect(agent.seenChoices.every((c) => c.length === 0)).toBe(true);
+    expect(agent.ownPasses).toBe(0);
   });
 
   it('records a failed decision call on the trace, with its time and what was sent', async () => {

@@ -109,6 +109,15 @@ pasting in whatever one search returns:
   eval it made the prompt 23% shorter with Laya English (the first word came
   about 0.6 s sooner) and 8% shorter with Laya Multilingual, with no loss of
   answer facts, for 36–57 ms per question.
+- **Search scope (with a Laya decision model).** A knowledge search is either
+  *focused* (direct matches for a name or exact term) or *broad* (related
+  passages too). With Laya loaded, Laya picks the scope as a typed choice in
+  the same pass as the next step, and the chat model writes only the search
+  phrase; the tool call dialog says who picked it and how sure it was. Small
+  chat models chose *broad* even for function names, and a broad search
+  returns one-line fragments instead of the function. In our agent eval
+  (Qwen3 1.7B on MLX answering) answers found the expected facts in 89.7% of
+  questions, up from 75.9% with Laya Multilingual and 82.8% with Laya English.
 - **Every step is visible.** The Execution Trace lists each decision with
   its options and probabilities, and each tool call with its arguments, the
   ug command that ran, timing and what it returned. Each step shows how long
