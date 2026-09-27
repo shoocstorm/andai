@@ -1166,6 +1166,16 @@ export function ApprovalCard({ s }: { s: AgentStep }) {
 }
 
 /** Tool calls as chips under "Processing reasoning". */
+/** A tool call in one line: title, arguments, status and what it found. */
+export function callChipText(c: ToolCallRecord): string {
+  return `${c.title}${c.args ? ` (${argsInline(c.args, 48)})` : ''} · ${CALL_PILL[c.status][0].toLowerCase()}${
+    c.status === 'done' && c.observation ? ` — ${c.observation.slice(0, 60)}${c.observation.length > 60 ? '…' : ''}` : ''
+  }`;
+}
+
+/** Whether a call is still under way (writing arguments, running, or waiting for approval). */
+export const callLive = (c: ToolCallRecord) => c.status === 'running' || c.status === 'filling' || c.status === 'awaiting';
+
 export function ToolChips({ m }: { m: Message }) {
   const calls = (m.agent ?? []).filter((s) => s.call);
   if (!calls.length) return null;
@@ -1174,17 +1184,13 @@ export function ToolChips({ m }: { m: Message }) {
       {calls.map((s) => {
         const c = s.call!;
         const bad = c.status === 'error' || c.status === 'denied';
-        const live = c.status === 'running' || c.status === 'filling' || c.status === 'awaiting';
+        const live = callLive(c);
         return (
           <div key={s.id} className="cc-chip-row">
             <span className={`dot${live ? ' pulse' : ''}`} style={{ color: 'var(--violet)' }} />
             <div className="cc-chip" style={{ color: bad ? 'var(--red)' : 'var(--violet)' }}>
               {c.status === 'awaiting' ? <Hand size={14} /> : <Wrench size={14} />}
-              <span>
-                {c.title}
-                {c.args ? ` (${argsInline(c.args, 48)})` : ''} · {CALL_PILL[c.status][0].toLowerCase()}
-                {c.status === 'done' && c.observation ? ` — ${c.observation.slice(0, 60)}${c.observation.length > 60 ? '…' : ''}` : ''}
-              </span>
+              <span>{callChipText(c)}</span>
             </div>
           </div>
         );

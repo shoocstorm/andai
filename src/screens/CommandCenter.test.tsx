@@ -5,7 +5,7 @@ import { addMessage, clearChat, type AgentStep, type Message, type ToolCallRecor
 import { requestApproval } from '../state/tools';
 import { useKb } from '../state/kb';
 import { useLayout } from '../state/layout';
-import { CommandCenter } from './CommandCenter';
+import { CommandCenter, reasoningSummary } from './CommandCenter';
 
 beforeEach(() => {
   useLayout.setState({ traceOpen: true });
@@ -122,6 +122,50 @@ describe('Command Center', () => {
     expect(await screen.findByRole('complementary', { name: /execution trace/i })).toBeInTheDocument();
   });
 
+  it('folds a finished turn’s reasoning to one line that opens to every step', async () => {
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Use COOP [1].',
+      createdAt: 0,
+      kbName: 'Docs',
+      sources: [{ id: 'h1', name: 'n', node_type: 'Section', file: 'a.md', start_line: 1, end_line: 2, snippet: 's' }],
+      stats: { tokens: 10, tokPerSec: 50, promptTokens: 300, nCtx: 4096, totalMs: 1260, firstTokenMs: 900, model: 'Qwen3' },
+      steps: [
+        { kind: 'retrieve', title: 'Knowledge retrieval', detail: 'Retrieved 1 passage', status: 'done' },
+        { kind: 'generate', title: 'Generate', detail: '10 tokens', status: 'done' },
+      ],
+    });
+    render(<CommandCenter />);
+    const folded = document.querySelector('.cc-reasoning') as HTMLDetailsElement;
+    expect(folded.open).toBe(false);
+    expect(within(folded.querySelector('summary')!).getByText('Reasoned in 1.3 s · 1 passage')).toBeInTheDocument();
+    await userEvent.click(folded.querySelector('summary')!);
+    expect(folded.open).toBe(true);
+    expect(within(folded).getByText('Searching knowledge base: Retrieved 1 passage')).toBeVisible();
+  });
+
+  it('shows a running turn as one live line: a dot per step and what the current one is doing', () => {
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: '',
+      createdAt: 0,
+      streaming: true,
+      steps: [
+        { kind: 'retrieve', title: 'Knowledge retrieval', detail: 'Retrieved 1 passage', status: 'done' },
+        { kind: 'generate', title: 'Generate', detail: '12 tokens · 40 tok/s', status: 'running' },
+      ],
+    });
+    render(<CommandCenter />);
+    const live = document.querySelector('.cc-live') as HTMLElement;
+    expect(live).toHaveTextContent('Generating response: 12 tokens · 40 tok/s');
+    expect(live.querySelectorAll('.cc-live-dots i')).toHaveLength(2);
+    expect(document.querySelector('.cc-reasoning')).toBeNull();
+  });
+
   it('shows live step progress in the header while the trace is hidden', () => {
     useLayout.setState({ traceOpen: false });
     addMessage({
@@ -139,6 +183,17 @@ describe('Command Center', () => {
     });
     render(<CommandCenter />);
     expect(screen.getByRole('status')).toHaveTextContent('Step 2/4 · Knowledge retrieval');
+  });
+});
+
+describe('reasoningSummary', () => {
+  const base = { id: 'a', role: 'assistant' as const, content: '', createdAt: 0 };
+  it('says what a turn used, and flags a failed step before a claim to check', () => {
+    expect(reasoningSummary({ ...base, stats: { tokens: 1, tokPerSec: 1, promptTokens: 1, nCtx: 1, totalMs: 12_400, firstTokenMs: 1, model: 'm' }, kbName: 'Docs' })).toEqual({ text: 'Reasoned in 12 s · no passages', warn: null });
+    const flagged = { model: 'L', modelId: 'laya-en', ms: 1, modelMs: 1, flagBelow: 0.1, items: [{ sentence: 'A b.', n: 1, cites: [1], source: 's', score: 0.01, flagged: true, inputTokens: 1, truncated: false }] };
+    expect(reasoningSummary({ ...base, support: flagged }).warn).toBe('1 claim to check');
+    expect(reasoningSummary({ ...base, support: flagged, steps: [{ kind: 'verify', title: 'Claim check', detail: '', status: 'error' }] }).warn).toBe('1 step failed');
+    expect(reasoningSummary({ ...base, stopped: true }).text).toBe('Stopped');
   });
 });
 

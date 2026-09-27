@@ -40,7 +40,7 @@ import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
-import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, MatchBadge, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
+import { AgentStepCard, ApprovalCard, callChipText, callLive, CopyTraceButton, DecisionSummary, MatchBadge, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 import { shortcut } from '../lib/platform';
 
@@ -208,35 +208,7 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
   const nSources = m.sources?.length ?? 0;
   return (
     <div className={`cc-turn${focused ? ' focused' : ''}`} onClick={onFocus}>
-      <div className="cc-divider">
-        <span className="label blue">Processing reasoning</span>
-      </div>
-      <div className="cc-chips">
-        <AnimatePresence initial={false}>
-          {visibleSteps.map((s) => {
-            const st = STEP_STYLE[s.kind];
-            const Icon = st.icon;
-            return (
-              <motion.div
-                key={s.kind}
-                className="cc-chip-row"
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.2 }}
-              >
-                <span className={`dot${s.status === 'running' ? ' pulse' : ''}`} style={{ color: st.color }} />
-                <div className="cc-chip" style={{ color: s.status === 'error' ? 'var(--red)' : st.color }}>
-                  {s.status === 'running' ? <Loader2 size={14} className="spin" /> : <Icon size={14} />}
-                  <span>
-                    {chipText(s)}
-                  </span>
-                </div>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-        <ToolChips m={m} />
-      </div>
+      <ReasoningStrip m={m} steps={visibleSteps} />
       {m.agent
         ?.filter((a) => a.call?.status === 'awaiting')
         .map((a) => <ApprovalCard key={a.id} s={a} />)}
@@ -326,6 +298,94 @@ function reportFor(m: Message): string {
     agent: { agentMode: t.agentMode, maxSteps: t.maxSteps, minConfidence: t.minConfidence, policies: t.policies },
     kb,
   });
+}
+
+/** Every step as a chip, one per line, and the tool calls: the full "how it got here". */
+function StepChips({ m, steps }: { m: Message; steps: TraceStep[] }) {
+  return (
+    <div className="cc-chips">
+      <AnimatePresence initial={false}>
+        {steps.map((s) => {
+          const st = STEP_STYLE[s.kind];
+          const Icon = st.icon;
+          return (
+            <motion.div key={s.kind} className="cc-chip-row" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
+              <span className={`dot${s.status === 'running' ? ' pulse' : ''}`} style={{ color: st.color }} />
+              <div className="cc-chip" style={{ color: s.status === 'error' ? 'var(--red)' : st.color }}>
+                {s.status === 'running' ? <Loader2 size={14} className="spin" /> : <Icon size={14} />}
+                <span>{chipText(s)}</span>
+              </div>
+            </motion.div>
+          );
+        })}
+      </AnimatePresence>
+      <ToolChips m={m} />
+    </div>
+  );
+}
+
+/** One line for a finished turn's reasoning: how long, what it used, and anything worth a look. Pure. */
+export function reasoningSummary(m: Message): { text: string; warn: string | null } {
+  const calls = (m.agent ?? []).filter((a) => a.call).length;
+  const passages = m.sources?.length ?? 0;
+  const secs = m.stats?.totalMs != null ? m.stats.totalMs / 1000 : null;
+  const failed = (m.steps ?? []).filter((s) => s.status === 'error').length;
+  const flagged = new Set((m.support?.items ?? []).filter((x) => x.flagged).map((x) => x.sentence)).size;
+  const parts = [
+    m.stopped ? 'Stopped' : secs != null ? `Reasoned in ${secs < 10 ? secs.toFixed(1) : Math.round(secs)} s` : 'Reasoning',
+    calls ? `${calls} tool call${calls === 1 ? '' : 's'}` : null,
+    passages ? `${passages} passage${passages === 1 ? '' : 's'}` : m.kbName ? 'no passages' : null,
+  ].filter(Boolean);
+  const warn = failed ? `${failed} step${failed === 1 ? '' : 's'} failed` : flagged ? `${flagged} claim${flagged === 1 ? '' : 's'} to check` : null;
+  return { text: parts.join(' · '), warn };
+}
+
+/**
+ * The reasoning above an answer, at the height it deserves. While the turn
+ * runs: one live line, a dot per step and what the current one is doing (a
+ * running tool call, if any). Once it's done: folded to one line of step
+ * icons and a summary, which opens to every chip. Details live in the
+ * Execution Trace; this is only the gist.
+ */
+function ReasoningStrip({ m, steps }: { m: Message; steps: TraceStep[] }) {
+  if (!steps.length) return null;
+  const calls = (m.agent ?? []).flatMap((a) => (a.call ? [a.call] : []));
+  const busy = m.streaming || steps.some((s) => s.status === 'running');
+  if (busy) {
+    const running = [...steps].reverse().find((s) => s.status === 'running') ?? steps[steps.length - 1];
+    const liveCall = [...calls].reverse().find(callLive);
+    const st = STEP_STYLE[running.kind];
+    return (
+      <div className="cc-live">
+        <span className="cc-live-dots" aria-hidden="true">
+          {steps.map((s) => (
+            <i key={s.kind} className={s.status} style={{ color: s.status === 'error' ? 'var(--red)' : STEP_STYLE[s.kind].color }} />
+          ))}
+        </span>
+        <Loader2 size={13} className="spin" style={{ color: st.color }} />
+        <span className="cc-live-text ellipsis" style={{ color: st.color }}>
+          {running.kind === 'plan' && liveCall ? callChipText(liveCall) : chipText(running)}
+        </span>
+      </div>
+    );
+  }
+  const { text, warn } = reasoningSummary(m);
+  return (
+    <details className="cc-reasoning">
+      <summary>
+        <span className="cc-reasoning-icons" aria-hidden="true">
+          {steps.map((s) => {
+            const Icon = STEP_STYLE[s.kind].icon;
+            return <Icon key={s.kind} size={12} style={{ color: s.status === 'error' ? 'var(--red)' : STEP_STYLE[s.kind].color }} />;
+          })}
+        </span>
+        <span className="cc-reasoning-text">{text}</span>
+        {warn && <span className="cc-reasoning-warn">· {warn}</span>}
+        <ChevronDown size={13} className="cc-reasoning-chev" aria-hidden="true" />
+      </summary>
+      <StepChips m={m} steps={steps} />
+    </details>
+  );
 }
 
 function chipText(s: TraceStep) {

@@ -16,10 +16,13 @@ model download nothing leaves the machine: no account, no API key, no cloud.
 
 - **Streaming answers.** Replies render as they're generated, with Markdown,
   code blocks and tables. **Stop** (or `Esc`) halts generation at any point.
-- **Visible reasoning.** Each answer shows its steps as they happen:
-  *planning and using tools → assembling context → generating*, with a chip
-  for each tool call. Qwen3 models can also show their step-by-step thinking, folded
-  away until you open it.
+- **Visible reasoning.** While Andai works, one line above the answer shows
+  a dot per step (*planning and using tools → assembling context →
+  generating*) and what the current one is doing, such as the tool call it's
+  running. Once the answer is in, it folds to a single line (how long it
+  took, the tool calls and passages it used, and a warning if a step failed
+  or a claim needs checking) that opens to every step. Qwen3 models can also
+  show their step-by-step thinking, folded away until you open it.
 - **Cited sources.** When a knowledge base is selected, answers cite passages
   as `[1]`, `[2]`. Each citation matches a source listed under the answer, with
   its file name and line range. Click a citation, or a line of

@@ -272,19 +272,6 @@
   border-radius: var(--r-lg);
   cursor: default;
 }
-.cc-divider {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin: 2px 0 2px;
-}
-.cc-divider::before,
-.cc-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
-}
 .cc-chips {
   display: flex;
   flex-direction: column;
@@ -3023,4 +3010,97 @@ tr:hover .kn-remove {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* the reasoning above an answer: one live line while the turn runs, one folded line after */
+.cc-live,
+.cc-reasoning > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  width: fit-content;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--raised);
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.cc-live-dots {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+}
+.cc-live-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.9;
+}
+.cc-live-dots i.running {
+  animation: cc-live-pulse 1.1s ease-in-out infinite;
+}
+@keyframes cc-live-pulse {
+  50% {
+    opacity: 0.3;
+    transform: scale(0.7);
+  }
+}
+.cc-live-text {
+  min-width: 0;
+  font-weight: 500;
+}
+.cc-reasoning > summary {
+  cursor: pointer;
+  list-style: none;
+  transition: border-color 0.15s, color 0.15s;
+}
+.cc-reasoning > summary::-webkit-details-marker {
+  display: none;
+}
+.cc-reasoning > summary:hover,
+.cc-reasoning > summary:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--text-2);
+}
+.cc-reasoning-icons {
+  display: inline-flex;
+  gap: 5px;
+  flex: none;
+}
+.cc-reasoning-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-reasoning-warn {
+  color: var(--amber);
+  white-space: nowrap;
+}
+.cc-reasoning-chev {
+  flex: none;
+  transition: transform 0.2s;
+}
+.cc-reasoning[open] > summary .cc-reasoning-chev {
+  transform: rotate(180deg);
+}
+.cc-reasoning[open] > .cc-chips {
+  margin-top: 10px;
+  gap: 6px;
+}
+.cc-reasoning .cc-chip-row {
+  gap: 10px;
+}
+.cc-reasoning .cc-chip {
+  padding: 5px 12px;
+  font-size: 12.5px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-live-dots i.running {
+    animation: none;
+  }
 }
