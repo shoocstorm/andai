@@ -263,6 +263,7 @@ jobs:
             fi
             echo "> **Windows builds are unsigned.** SmartScreen may warn on first launch: choose *More info* → *Run anyway*."
             echo
+            echo "> The Apple Silicon build requires macOS 14 or newer (the native MLX models need it)."
             echo "Tested on macOS 26 (Apple Silicon); older versions are untested. The Windows build is built and unit-tested in CI. Knowledge bases need the [\`ug\`](https://github.com/shoocstorm/ug) CLI."
             echo "Each asset has a \`.sha256\` alongside it (\`shasum -a 256 -c <file>.sha256\`)."
           } > notes.md

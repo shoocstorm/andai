@@ -98,7 +98,7 @@ choice, just more slowly.
 
 | Platform | Status |
 |---|---|
-| macOS 26, Apple Silicon | Tested. Native MLX models and the Laya decision model |
+| macOS 14+ (Apple Silicon) | Tested on macOS 26. Native MLX models and the Laya decision model |
 | macOS, Intel | Built by the release pipeline, not yet tested on Intel hardware |
 | Windows 10/11 x64 | Built and unit-tested in CI, not yet tested on a Windows PC. Needs WebView2 (preinstalled on Windows 11) |
 | Browser ([andai-agent.web.app](https://andai-agent.web.app)) | Preview: chat with a local model in your browser. Knowledge bases need the desktop app |

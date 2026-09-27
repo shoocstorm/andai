@@ -343,8 +343,19 @@ level defaults to *Ask*.
   `MLX_RS_METAL_PATH` to `src-tauri/target/mlx`, which rust-cache saves, and
   the one unignored test that evaluates arrays
   (`llm::model::tests::the_kv_cache_grows_in_steps_and_trims`) is `#[ignore]`d
-  as a second guard. Release bundling is unaffected: `scripts/mlx-metallib.mjs`
-  reads the CMake install tree under `target/`, produced either way.
+   as a second guard. Release bundling is unaffected: `scripts/mlx-metallib.mjs`
+   reads the CMake install tree under `target/`, produced either way.
+- **`minimumSystemVersion` is the arm64 MLX build's deployment target**
+  (measured 2026-09-27): the Tauri CLI exports `MACOSX_DEPLOYMENT_TARGET`
+  from `bundle.macOS.minimumSystemVersion` (default `10.13`), CMake
+  initializes `CMAKE_OSX_DEPLOYMENT_TARGET` from that env var, and MLX's
+  CMakeLists refuses anything below 14.0 — the v0.1.2 arm64 release failed
+  with "MLX requires macOS >= 14.0" while the local build (env var unset)
+  passed. A failed configure poisons the CMake cache: reruns fail even with
+  the env var fixed until the build dir is deleted. The arm64 overlay
+  (`tauri.laya.conf.json`) therefore pins `minimumSystemVersion: "14.0"`
+  (every Apple Silicon Mac supports 14; Intel and Windows builds have no MLX
+  and keep the default), guarded by `tests/unit/arm64-release.test.ts`.
 - **One thread owns MLX** (`mlx.rs`): the Laya checkpoint and both native
   LLM slots live on it, and commands send it closures. Decisions queue behind
   a streaming answer, which the agent never overlaps anyway.

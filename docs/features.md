@@ -281,7 +281,9 @@ executed**; every action says it's simulated.
 
 ## Requirements & known limits
 
-- **macOS**, tested on macOS 26 (Apple Silicon). The release pipeline also
+- **macOS**, tested on macOS 26 (Apple Silicon). The Apple Silicon build
+  requires macOS 14 or newer (the native MLX models need it, and the app
+  refuses to install on older versions). The release pipeline also
   builds for Intel Macs; that build hasn't been tested on Intel hardware yet. The Laya
   decision models need Apple Silicon.
 - **Windows 10/11 (x64)**: the release pipeline builds an installer, and the
