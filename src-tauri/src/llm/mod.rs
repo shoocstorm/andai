@@ -83,9 +83,11 @@ pub struct GenParams {
     #[serde(default = "one")]
     pub top_p: f32,
     #[serde(default)]
+    #[cfg_attr(not(mlx), allow(dead_code))] // read by the MLX engine only
     pub seed: Option<u64>,
     /// Qwen3's reasoning block (`enable_thinking`).
     #[serde(default)]
+    #[cfg_attr(not(mlx), allow(dead_code))] // read by the MLX engine only
     pub thinking: bool,
     #[serde(default)]
     pub top_logprobs: u32,
@@ -94,6 +96,7 @@ pub struct GenParams {
     pub grammar: Option<String>,
     /// Reuse the KV cache of the previous prompt's shared prefix.
     #[serde(default = "yes")]
+    #[cfg_attr(not(mlx), allow(dead_code))] // read by the MLX engine only
     pub cache_prompt: bool,
 }
 
