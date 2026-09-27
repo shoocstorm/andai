@@ -81,6 +81,8 @@ bun install              # also copies the wllama wasm builds into public/wllama
 bun run tauri dev        # desktop app with hot reload
 bun run tauri build      # macOS → src-tauri/target/release/bundle/macos/Andai.app
                          # Windows: bun run tauri build --bundles nsis → bundle/nsis/*-setup.exe
+bun run deploy:web       # build + Firebase Hosting deploy → https://andai-agent.web.app
+                         # (same UI in the browser, minus the knowledge feature; needs the firebase CLI)
 ```
 
 Requirements:

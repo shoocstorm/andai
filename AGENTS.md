@@ -37,6 +37,13 @@ the product.
    cloud APIs. The only network traffic is a user-initiated model download from
    Hugging Face. Adding any other outbound request needs an explicit product
    decision recorded in this file.
+   **Recorded exception (product decision, 2026-09-27):** the *web
+   deployment* (`firebase.json`, Firebase Hosting site `andai-agent`) loads
+   Google Analytics (`src/lib/firebase.ts`, `firebase` npm package). It runs
+   only outside the desktop app — `initWebAnalytics` returns immediately when
+   `isTauri()`, the firebase packages live in lazy chunks the desktop never
+   downloads, and the desktop CSP names no Google host. Both lines are held by
+   `tests/unit/firebase-hosting.test.ts`; loosening them needs a new decision.
 5. **User data is sacred.** Never delete, overwrite, or migrate user data
    (`~/Library/Application Support/dev.andai.agent/` or
    `%APPDATA%\dev.andai.agent\` on Windows, `~/.ug/andai-*`, webview
@@ -214,6 +221,15 @@ level defaults to *Ask*.
   change never enforced it (measured: `new Function` ran). The
   `freshDocuments` plugin in `vite.config.ts` strips `If-None-Match` for
   documents. The release server sends no ETag.
+- **The web deployment is plain static hosting** (`firebase.json`, site
+  `andai-agent`, project `aldrick-ai`, `bun run deploy:web`): Vite's `dist/`
+  with the desktop isolation headers (COOP/COEP, so Chromium gets
+  SharedArrayBuffer and wllama's threaded build) and a CSP that mirrors
+  `tauri.conf.json` minus the `ipc:` sources plus the Analytics hosts. Routing
+  is hash-based, so no SPA rewrites are needed. `index.html` is served
+  `no-cache` for the same reason as the 304 fact above; `/assets/**` are
+  content-hashed and `immutable`. The nested `docs/andai-website/firebase.json`
+  is a separate site — the CLI only reads the config in the working directory.
 - **WKWebView rejects a CSP-blocked fetch with a bare "Load failed"** and
   doesn't fire `securitypolicyviolation` for `connect-src`. The e2e run proves
   the block with a canary server instead (§9).
@@ -490,7 +506,9 @@ section and FAQ (see §8).
   `@wllama/wllama-compat` **must stay on the same version**. After bumping
   them, run `bun install` (re-copies the wasm) and both e2e runs.
 - No new runtime network dependencies (§1.4). Anything with native code needs
-  a human decision (§1.10).
+  a human decision (§1.10). Exception recorded above: `firebase` (JS only,
+  no install script needed — `@firebase/util`'s and `protobufjs`'s blocked
+  postinstalls stay blocked), web-only lazy chunks.
 
 ### Git: work on `main`, share it with other agents
 - **`bun install` installs a pre-push hook** (`.githooks/pre-push` via
@@ -534,6 +552,7 @@ bun run test:ug          # Rust ↔ real ug integration (needs ug)
 bun run test:laya        # Laya port vs laya-mlx goldens + < 100 ms per decision (needs the checkpoints in the HF cache)
 bun run test:llm         # native Qwen3 port vs transformers/mlx-lm goldens + tok/s (needs the MLX checkpoints in the HF cache)
 bun run build:mac-arm64  # Apple Silicon release bundle with mlx.metallib (release.yml uses it)
+bun run deploy:web       # build + firebase deploy → https://andai-agent.web.app (web app, no knowledge feature; needs the firebase CLI)
 bun run test:e2e         # full app in WKWebView: ingest → retrieve → generate (needs ug; downloads model once)
 bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and releases run it
 bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)

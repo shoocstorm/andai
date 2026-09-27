@@ -48,14 +48,19 @@ cost is parsing and compiling, not transfer.
 
 | Metric | Baseline | What it is |
 |---|---|---|
-| `app-js` | 938 KB | All app JavaScript (React, react-markdown, zustand, motion, wllama glue) |
-| `app-css` | 104 KB | All app CSS |
+| `app-js` | 1.04 MB | All app JavaScript (React, react-markdown, zustand, motion, wllama glue) |
+| `app-css` | 113 KB | All app CSS |
 | `fonts` | 1.41 MB | Bundled `@fontsource` files (`.woff` + `.woff2`) |
 | `wllama-runtime` | 22.9 MB | wllama wasm (default + compat builds) and its JS |
-| `dist-total` | 25.3 MB | Everything the app ships in its UI |
+| `dist-total` | 25.5 MB | Everything the app ships in its UI |
 
 A deliberate bump (a new dependency, a wllama upgrade) moves these on
 purpose: update the baseline in the same change and say why.
+
+Recorded 2026-09-27: +~41 KB over 2026-09-26 for the web deployment's
+Firebase Analytics chunks (`src/lib/firebase.ts`). They are lazy chunks a
+browser session downloads; the desktop app never loads them, they only ride
+along in its bundle on disk.
 
 ### Micro: `tests/perf/hot-paths.perf.tsx`, tolerance 1.5
 

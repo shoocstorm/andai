@@ -17,8 +17,8 @@ const sources = (d: string) => new Set((csp[d] ?? '').split(/\s+/).filter(Boolea
 const CONNECT_ALLOWLIST = ["'self'", 'ipc:', 'http://ipc.localhost', 'https://huggingface.co', 'https://*.hf.co'];
 /** Plugin permissions the webview holds besides app commands (`allow-*`). */
 const PERMISSION_ALLOWLIST = ['core:default', 'core:window:allow-set-theme', 'core:window:allow-start-dragging'];
-/** The only file outside the harness that may name a remote URL. */
-const URL_ALLOWLIST = ['llm/models.ts'];
+/** The only files outside the harness that may name a remote URL. */
+const URL_ALLOWLIST = ['llm/models.ts', 'lib/firebase.ts'];
 /**
  * Files that may call a network API. GGUF models download through wllama's
  * ModelManager; Laya and MLX chat checkpoints can't, so llm/laya.ts fetches

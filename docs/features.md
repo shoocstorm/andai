@@ -243,7 +243,8 @@ executed**; every action says it's simulated.
   checked for known vulnerabilities on every build and release.
 - The full picture, including what isn't protected yet, is in
   [security.md](security.md).
-- No telemetry, analytics or accounts.
+- No telemetry, analytics or accounts. (This is about the desktop app; the
+  browser deployment loads Google Analytics — see *Run in the browser*.)
 - Your data lives in the app data folder (knowledge-base copies:
   `~/Library/Application Support/dev.andai.agent/` on macOS,
   `%APPDATA%\dev.andai.agent\` on Windows), in `.ug/andai-*` in your home
@@ -270,3 +271,32 @@ executed**; every action says it's simulated.
   `netstat -ano | findstr :14230` on Windows shows which one) and reopen Andai.
 - Small on-device models are fast and private but less capable than large
   cloud models. Grounding answers in a knowledge base helps a lot.
+
+## Run in the browser · Preview
+
+The same UI also runs as a web app at
+[andai-agent.web.app](https://andai-agent.web.app), deployed from the repo
+with `bun run deploy:web` (Firebase Hosting).
+
+- **Chat, persona, models and settings work** — inference runs in the browser,
+  on the same engines as the desktop app (WebGPU where available, a
+  WebAssembly fallback elsewhere).
+- **Knowledge bases are desktop-only**: indexing uses the local **ug** CLI,
+  which a web page can't run. The web app has no knowledge feature; the
+  Knowledge screens say so.
+- **Desktop models are desktop-only**: the native MLX engine and the Laya
+  decision models need Apple Silicon. In the browser, decisions fall back to
+  the on-device model itself.
+- **The desktop app stays analytics-free.** The web deployment loads Google
+  Analytics; the desktop app does not, by design (its content security policy
+  names no analytics host).
+
+## Requirements & known limits (web app)
+
+- A current **Chrome or Edge** (WebGPU, multi-threaded inference) or **Safari
+  16+** (slower WebAssembly fallback). Not tested on Firefox.
+- The model (~0.6–1.2 GB) is downloaded once per browser and stored in the
+  browser's cache; clearing site data removes it.
+- Everything a web page can offer: your chats live in this browser's storage
+  and follow its private-mode and quota rules.
+
