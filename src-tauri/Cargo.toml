@@ -1,6 +1,6 @@
 [package]
 name = "andai"
-version = "0.1.2"
+version = "0.1.3"
 description = "Andai — a local-first AI agent"
 edition = "2021"
 
