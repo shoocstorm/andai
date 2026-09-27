@@ -549,6 +549,12 @@ level defaults to *Ask*.
   mlx-sys, mlx-rs and tokenizers optimized in dev. `[profile.dev.build-override]`
   would reach it too, but it also changes Tauri's codegen and breaks the
   build (`missing field referenced_by`).
+- **ug search reports how each item was found** (ug 0.1.22): `matched_by`
+  is `semantic` (vector), `keyword` (full-text) or `graph` (walked `hop`
+  edges from a match), and `distance` is its Personalized PageRank score
+  negated, so lower ranks higher (items come sorted by it ascending; graph
+  neighbours last). Its absolute value means little, so the UI shows it
+  relative to the best match in the same list (`kb/match.ts`).
 - **ug's lookups fail with the useful message in stdout JSON** (`"error":
   "No symbol named …, try find_symbols"`) and exit 1 with a bare `error:` on
   stderr. `tools::run` surfaces the JSON message.

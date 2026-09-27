@@ -2968,3 +2968,59 @@ tr:hover .kn-remove {
 .dd-claims li {
   list-style: none;
 }
+
+/* how ug search found a passage: the channel, and its rank relative to the best match */
+.match {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+}
+.match-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  line-height: 1.4;
+}
+.match-semantic {
+  color: var(--violet);
+  background: var(--violet-soft);
+}
+.match-keyword {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+.match-graph {
+  color: var(--green);
+  background: var(--green-soft);
+}
+.match-bar {
+  width: 44px;
+  flex: none;
+}
+.match-bar i {
+  background: var(--text-3);
+}
+.cc-log-line.linklike {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cc-log-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dd-match {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

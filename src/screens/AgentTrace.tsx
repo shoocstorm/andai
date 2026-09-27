@@ -11,6 +11,7 @@ import { shellCommand } from '../agent/debugReport';
 import type { RelevanceRecord } from '../agent/relevance';
 import { claimState, MEASURED, SUPPORTS, type SupportItem, type SupportRecord } from '../agent/claims';
 import { LAYA_MODELS } from '../llm/models';
+import { matchOf } from '../kb/match';
 import { MEASURED_RELEVANCE, passageState, passageText, RELEVANT, type RelevanceItem } from '../agent/relevance';
 import type { SearchHit } from '../kb/api';
 import type { DecisionIO } from '../llm/decide';
@@ -265,6 +266,27 @@ export function explainCall(c: ToolCallRecord): string[] {
   return out;
 }
 
+/**
+ * How ug search found a passage: the channel as a tag (semantic, keyword, or
+ * a graph walk) and its ranking score as a bar, relative to the best match
+ * among `peers`. Nothing for a passage no search returned (Read lines, …).
+ */
+export function MatchBadge({ h, peers, compact = false }: { h: SearchHit; peers: SearchHit[]; compact?: boolean }) {
+  const m = matchOf(h, peers);
+  if (!m) return null;
+  const tip = `${m.help}${m.score != null ? ` ug rank score ${m.score.toFixed(4)} (lower ranks higher); ${pct(m.strength ?? 1)} of the best match here.` : ''}`;
+  return (
+    <span className="match" title={tip} aria-label={[m.label, m.strength != null ? `${pct(m.strength)} of the best match` : ''].filter(Boolean).join(', ')}>
+      {m.how && <span className={`match-tag match-${m.how}`}>{m.label}</span>}
+      {m.strength != null && !compact && (
+        <span className="ag-bar-track match-bar" aria-hidden="true">
+          <i style={{ width: `${Math.max(4, m.strength * 100)}%` }} />
+        </span>
+      )}
+    </span>
+  );
+}
+
 function ResultList({ hits }: { hits: SearchHit[] }) {
   if (!hits.length) return <div className="ag-small faint">No passages in the output.</div>;
   return (
@@ -280,6 +302,7 @@ function ResultList({ hits }: { hits: SearchHit[] }) {
               {h.name && h.name !== h.file ? `${h.name} · ` : ''}
               {h.node_type}
             </span>
+            <MatchBadge h={h} peers={hits} />
           </div>
           {h.snippet && <pre className="tc-hit-snippet selectable">{h.snippet}</pre>}
         </li>
@@ -1059,6 +1082,11 @@ export function SourceDialog({ m, n, onClose }: { m: Message; n: number; onClose
             {h?.node_type ? ` · ${h.node_type}` : ''}
             {m.kbName ? ` · from “${m.kbName}”` : ''}
           </div>
+          {h && matchOf(h) && (
+            <div className="ag-small dd-match">
+              <MatchBadge h={h} peers={m.sources ?? []} /> <span className="faint">{matchOf(h)!.help}</span>
+            </div>
+          )}
         </div>
         <button className="btn ghost sm" aria-label="Close dialog" onClick={onClose}>
           <X size={15} />

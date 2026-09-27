@@ -138,7 +138,12 @@ export const UG_TOOLS: ToolDef[] = [
     observe: (out) => {
       const items = arr(obj(out).items).map((v) => {
         const n = node(v);
-        return { ...hit(n, n.snippet || n.description || '', 'search'), distance: num(obj(v).distance), matched_by: str(obj(v).matched_by) || undefined };
+        return {
+          ...hit(n, n.snippet || n.description || '', 'search'),
+          distance: num(obj(v).distance),
+          hop: num(obj(v).hop),
+          matched_by: str(obj(v).matched_by) || undefined,
+        };
       });
       return evidence(dedupeHits(items), 'passage(s)');
     },

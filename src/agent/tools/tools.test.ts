@@ -217,6 +217,19 @@ describe('ug output readers', () => {
     expect(ev.summary).toBe('1 passage(s): Isolation @ a.md:3-9');
   });
 
+  it('search: keeps how ug found each passage (channel, graph hops, rank score)', () => {
+    const ev = tool('kb_search').observe({
+      items: [
+        { id: 'a', name: 'Processing', node_type: 'Concept', file: 'r.md', start_line: 17, end_line: 20, snippet: 'cash', distance: -0.0647, hop: 0, matched_by: 'semantic' },
+        { id: 'b', name: 'Handbook', node_type: 'Concept', file: 'o.md', start_line: 1, end_line: 25, snippet: 'ops', distance: -0.0443, hop: 1, matched_by: 'graph' },
+      ],
+    });
+    expect(ev.hits.map(({ distance, hop, matched_by }) => ({ distance, hop, matched_by }))).toEqual([
+      { distance: -0.0647, hop: 0, matched_by: 'semantic' },
+      { distance: -0.0443, hop: 1, matched_by: 'graph' },
+    ]);
+  });
+
   it('find_symbols, context, get_code, usages, file context, overview', () => {
     const syms = tool('kb_find_symbols').observe({
       queries: [{ query: 'build*', items: [{ id: 'f:p:buildSystem', name: 'buildSystem', node_type: 'Function', file: 'prompt.ts', start_line: 49, end_line: 78, doc: 'System prompt.' }] }],

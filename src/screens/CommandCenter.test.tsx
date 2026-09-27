@@ -565,6 +565,27 @@ describe('Command Center (agent mode)', () => {
     expect(dialog.getByText(/82% of the time/)).toBeInTheDocument();
   });
 
+  it('shows in retrieval.log how ug found each passage, and nothing for one no search returned', () => {
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'A [1].',
+      createdAt: 0,
+      kbName: 'Docs',
+      sources: [
+        { id: 'h1', name: 'Processing', node_type: 'Concept', file: 'refund-policy.md', start_line: 17, end_line: 20, snippet: 'cash', distance: -0.08, matched_by: 'semantic' },
+        { id: 'h2', name: 'Handbook', node_type: 'Concept', file: 'operations.md', start_line: 1, end_line: 25, snippet: 'ops', distance: -0.04, hop: 1, matched_by: 'graph' },
+        { id: 'h3', name: 'booking.ts', node_type: 'File', file: 'booking.ts', start_line: 15, end_line: 60, snippet: 'lines read' },
+      ],
+    });
+    render(<CommandCenter />);
+    const log = within(document.querySelector('.cc-log') as HTMLElement);
+    expect(log.getByLabelText('semantic, 100% of the best match')).toBeInTheDocument();
+    expect(log.getByLabelText('graph · 1 hop, 50% of the best match')).toHaveAttribute('title', expect.stringMatching(/following links.*ug rank score -0\.0400/));
+    expect(within(log.getByRole('button', { name: /^Source 3/ })).queryByText(/semantic|keyword|graph/)).toBeNull();
+  });
+
   it('makes each citation in the answer and each retrieval.log line open that source, with what the checks said', async () => {
     const user = userEvent.setup();
     addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });

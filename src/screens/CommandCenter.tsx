@@ -40,7 +40,7 @@ import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
-import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
+import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, MatchBadge, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 import { shortcut } from '../lib/platform';
 
@@ -270,11 +270,14 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
               </summary>
               {m.sources.map((h, i) => (
                 <button key={h.id + i} type="button" className="cc-log-line linklike" aria-haspopup="dialog" aria-label={`Source ${i + 1}: ${h.file}:${h.start_line}-${h.end_line}`} onClick={() => setSource(i + 1)}>
-                  <span className="log-violet">[{i + 1}]</span> <span className="log-info">{h.file}</span>
-                  <span className="faint">
-                    :{h.start_line}-{h.end_line}
-                  </span>{' '}
-                  <span className="faint">{h.name !== h.file ? `— ${h.name}` : ''}</span>
+                  <span className="cc-log-main">
+                    <span className="log-violet">[{i + 1}]</span> <span className="log-info">{h.file}</span>
+                    <span className="faint">
+                      :{h.start_line}-{h.end_line}
+                    </span>{' '}
+                    <span className="faint">{h.name !== h.file ? `— ${h.name}` : ''}</span>
+                  </span>
+                  <MatchBadge h={h} peers={m.sources!} />
                 </button>
               ))}
             </details>
@@ -759,6 +762,8 @@ function TracePanel({ msg }: { msg?: Message }) {
                             :{h.start_line}-{h.end_line}
                           </span>
                         </span>
+                        {/* the narrow trace keeps room for the file name: the tag only, its score in the tooltip */}
+                        <MatchBadge h={h} peers={msg.sources!} compact />
                         <Check size={14} color="var(--violet)" />
                       </div>
                     ))}
