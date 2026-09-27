@@ -132,6 +132,30 @@
     .section-head h2 { font: 700 clamp(30px, 4vw, 46px)/1.08 var(--font-display); letter-spacing: -0.035em; margin: 14px 0 14px; color: var(--text-strong); }
     .section-head p { margin: 0; color: var(--text-2); font-size: 18px; }
 
+    /* demo video: a local poster until clicked, then YouTube (nocookie) */
+    .demo-stage { position: relative; max-width: 1040px; margin: 0 auto; }
+    .demo-stage::before { content: ''; position: absolute; inset: 10% 4% -6%; background: radial-gradient(closest-side, color-mix(in srgb, var(--violet) 30%, transparent), transparent); filter: blur(40px); z-index: -1; }
+    .player { position: relative; display: block; aspect-ratio: 16 / 9; background: #000; /* theme-literal: video letterbox */ color: inherit; text-decoration: none; cursor: pointer; }
+    .player img, .player iframe { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; object-fit: cover; border: 0; }
+    .player img { transition: transform 0.6s var(--ease), filter 0.3s; }
+    .player::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, #000a); /* theme-literal: scrim over the dark video */ transition: opacity 0.3s; }
+    .player:hover img { transform: scale(1.015); filter: brightness(0.92); }
+    .play { position: absolute; z-index: 1; left: 50%; top: 50%; width: 92px; height: 92px; margin: -46px 0 0 -46px; border-radius: 50%; display: grid; place-items: center; background: var(--grad-orb); box-shadow: 0 20px 50px -12px #8ec1ffaa, 0 0 0 1px #ffffff55 inset, 0 0 0 10px color-mix(in srgb, var(--blue) 18%, transparent); transition: transform 0.25s var(--ease), box-shadow 0.25s; }
+    .play svg { width: 34px; height: 34px; margin-left: 5px; fill: #141a26; }
+    .player:hover .play, .player:focus-visible .play { transform: scale(1.07); box-shadow: 0 24px 60px -12px #8ec1ffcc, 0 0 0 1px #ffffff55 inset, 0 0 0 16px color-mix(in srgb, var(--blue) 14%, transparent); }
+    .player-meta { position: absolute; z-index: 1; left: 22px; right: 22px; bottom: 18px; display: flex; align-items: center; gap: 12px; color: #fff; /* theme-literal: text on the video scrim */ font: 600 12px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; }
+    .player-meta .spacer { flex: 1; }
+    .chip { padding: 7px 10px; border-radius: 7px; background: #0009; border: 1px solid #ffffff26; backdrop-filter: blur(8px); /* theme-literal: chips on the video */ }
+    .player.playing::after, .player.playing .play, .player.playing .player-meta { display: none; }
+    .chapters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 26px; }
+    .chapters.demo-stage::before { content: none; }
+    .chapter { display: flex; gap: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; }
+    .chapter .n { font: 700 12px/1 var(--font-mono); color: var(--violet); letter-spacing: 0.14em; padding-top: 4px; }
+    .chapter h3 { font: 600 17px/1.25 var(--font-display); margin: 0 0 4px; }
+    .chapter p { margin: 0; color: var(--text-2); font-size: 14.5px; line-height: 1.5; }
+    .chapter b { color: var(--text); }
+    .demo-note { text-align: center; margin: 18px 0 0; font-size: 13.5px; color: var(--text-3); }
+
     /* features */
     .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
     .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px 26px 24px; transition: border-color 0.2s, transform 0.2s var(--ease); }
@@ -198,6 +222,7 @@
       .row.flip .copy { order: 0; }
       .row .window, .row.flip .window { transform: none; }
       .privacy { grid-template-columns: 1fr; padding: 32px; }
+      .chapters { grid-template-columns: 1fr; }
     }
     @media (max-width: 640px) {
       body { font-size: 16px; }
@@ -207,6 +232,10 @@
       .eyebrow { font-size: 10px; letter-spacing: 0.08em; padding: 7px 12px; }
       section { padding-top: 80px; }
       .privacy { padding: 24px; }
+      .play { width: 68px; height: 68px; margin: -34px 0 0 -34px; }
+      .play svg { width: 26px; height: 26px; }
+      .player-meta { left: 12px; right: 12px; bottom: 10px; font-size: 10px; }
+      .player-meta .hide-sm { display: none; }
     }
   </style>
 </head>
@@ -232,6 +261,7 @@
     <div class="wrap">
       <a class="brand" href="#top" aria-label="Andai home"><img src="img/andai-icon.svg" alt="" width="32" height="32" /><b class="grad">ANDAI</b></a>
       <nav class="nav-links" aria-label="Sections">
+        <a href="#demo">Demo</a>
         <a href="#features">Features</a>
         <a href="#how">How it works</a>
         <a href="agent-loop.html">Agent loop</a>
@@ -255,7 +285,7 @@
       <div class="ctas">
         <a class="btn primary" href="https://github.com/shoocstorm/andai/releases/latest"><svg class="icon"><use href="#i-download"/></svg>Download for macOS or Windows</a>
         <a class="btn ghost" href="https://andai-agent.web.app">Try the web demo <svg class="icon"><use href="#i-arrow"/></svg></a>
-        <a class="btn ghost" href="#how">See how it works <svg class="icon"><use href="#i-arrow"/></svg></a>
+        <a class="btn ghost" href="#demo">Watch the demo <svg class="icon"><use href="#i-arrow"/></svg></a>
       </div>
       <p class="fine">macOS (Apple Silicon and Intel) · Windows 10/11 x64 · Tested on macOS 26<br />The web demo runs the chat in your browser; knowledge bases are desktop-only.</p>
 
@@ -274,6 +304,31 @@
         <div class="stat"><div class="label">Grounding</div><div class="v">[1] [2]<small>cited</small></div><p>Answers cite the exact file and lines they came from.</p></div>
       </div>
     </div>
+
+    <section id="demo">
+      <div class="wrap">
+        <div class="section-head" style="margin-left:auto;margin-right:auto;text-align:center">
+          <span class="label violet">See it in action</span>
+          <h2>Watch Laya pick <span class="grad">every step.</span></h2>
+          <p>43 seconds, recorded in the real app on a Mac: a question about code, the search behind the answer, and the decision model choosing the next tool in 26 ms.</p>
+        </div>
+        <div class="demo-stage">
+          <div class="window">
+            <a class="player" id="player" href="https://youtu.be/qMpJKQpqF8Q" data-video="qMpJKQpqF8Q" aria-label="Play the Andai demo video (43 seconds)">
+              <img src="img/demo-poster.webp" width="1600" height="900" loading="lazy" alt="Andai answering “Which functions call computeFare?” from the Tidewater Ferries code sample, with the Execution Trace showing two tool calls chosen by Laya" />
+              <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z"/></svg></span>
+              <span class="player-meta" aria-hidden="true"><span class="chip">▶ Demo</span><span class="chip hide-sm">Qwen3 1.7B + Laya · MLX</span><span class="spacer"></span><span class="chip">0:43</span></span>
+            </a>
+          </div>
+        </div>
+        <div class="chapters demo-stage">
+          <div class="chapter"><span class="n">01</span><div><h3>Ask about your code</h3><p>A knowledge search returns 6 passages, and Laya picks <b>Find usages</b> next. The answer cites the exact call.</p></div></div>
+          <div class="chapter"><span class="n">02</span><div><h3>Open the tool call</h3><p>The exact <code>ug search</code> command it ran, how long it took, and every passage that came back.</p></div></div>
+          <div class="chapter"><span class="n">03</span><div><h3>Ask “Why this step?”</h3><p>Laya scored 8 options in <b>26 ms</b> and chose Find usages at <b>96%</b>, with what it saw laid out beside the bars.</p></div></div>
+        </div>
+        <p class="demo-note">The video plays from YouTube (privacy-enhanced mode), and nothing loads from YouTube until you press play.</p>
+      </div>
+    </section>
 
     <section id="features">
       <div class="wrap">
@@ -454,6 +509,21 @@
   </footer>
 
   <script>
+    // Swap the poster for the player only on click, so YouTube loads nothing before then.
+    document.getElementById('player').addEventListener('click', function (e) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey) return; // let modified clicks open YouTube
+      e.preventDefault();
+      if (this.classList.contains('playing')) return;
+      var f = document.createElement('iframe');
+      f.src = 'https://www.youtube-nocookie.com/embed/' + this.dataset.video + '?autoplay=1&rel=0&modestbranding=1&playsinline=1';
+      f.title = 'Andai demo video';
+      f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+      f.allowFullscreen = true;
+      f.referrerPolicy = 'strict-origin-when-cross-origin';
+      this.classList.add('playing');
+      this.removeAttribute('href');
+      this.appendChild(f);
+    });
     document.getElementById('theme').addEventListener('click', function () {
       var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
       document.documentElement.dataset.theme = next;
