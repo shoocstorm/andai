@@ -9,7 +9,7 @@ import { shortcut } from '../lib/platform';
 
 beforeEach(() => {
   useLayout.setState({ navCollapsed: false, traceOpen: true });
-  useTheme.getState().setMode('system');
+  useTheme.getState().setTheme('dark');
   useUi.setState({ route: 'command' });
   initTheme();
 });
@@ -20,11 +20,11 @@ describe('TopBar', () => {
     expect(screen.getByText(/core standby/i)).toBeInTheDocument();
   });
 
-  it('cycles appearance system → light → dark and applies it to <html>', async () => {
+  it('toggles appearance dark ↔ light and applies it to <html>', async () => {
     const user = userEvent.setup();
     render(<TopBar />);
-    await user.click(screen.getByRole('button', { name: /appearance: match system/i }));
-    expect(useTheme.getState().mode).toBe('light');
+    await user.click(screen.getByRole('button', { name: /appearance: dark/i }));
+    expect(useTheme.getState().theme).toBe('light');
     expect(document.documentElement.dataset.theme).toBe('light');
     await user.click(screen.getByRole('button', { name: /appearance: light/i }));
     expect(document.documentElement.dataset.theme).toBe('dark');

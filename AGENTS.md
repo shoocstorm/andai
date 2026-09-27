@@ -248,6 +248,12 @@ level defaults to *Ask*.
   `no-cache` for the same reason as the 304 fact above; `/assets/**` are
   content-hashed and `immutable`. The nested `docs/andai-website/firebase.json`
   is a separate site — the CLI only reads the config in the working directory.
+- **The window's theme overrides `prefers-color-scheme`.** After
+  `getCurrentWindow().setTheme('dark')`, the webview's media query reports
+  dark even with macOS in light mode (seen 2026-09-27: a "system" appearance
+  stayed dark until relaunch). So there are only Light and Dark;
+  `state/theme.ts` reads the OS preference once, for the first-run default,
+  before anything sets the window's theme.
 - **WKWebView rejects a CSP-blocked fetch with a bare "Load failed"** and
   doesn't fire `securitypolicyviolation` for `connect-src`. The e2e run proves
   the block with a canary server instead (§9).
@@ -500,7 +506,7 @@ level defaults to *Ask*.
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |
 | Native MLX chat models (download, verify, load, stream, stop, decide; Apple Silicon) | Real | `src-tauri/src/llm/`, `src-tauri/src/mlx.rs`, `llm/native.ts` |
 | Add a model from Hugging Face (search, compatibility check, pin, verified download; GGUF anywhere, MLX Qwen3 on Apple Silicon) | Real | `llm/hub.ts`, `llm/custom.ts`, `screens/HubModels.tsx`, `src-tauri/src/llm/custom.rs` |
-| Appearance (system / light / dark) | Real | `state/theme.ts` |
+| Appearance (light / dark; first run follows the OS) | Real | `state/theme.ts` |
 | Layout: collapsible nav (⌘B), Execution Trace on/off (⌘J) | Real, persisted | `state/layout.ts` |
 | Workflows, approvals, tool library, node editor, run | **Simulated** | `mock/workflows.ts`, `screens/Workflow*.tsx` |
 | "Choose tool" menu: the tools offered for the selected KB, with their policy | Real | `screens/CommandCenter.tsx` (registry) |

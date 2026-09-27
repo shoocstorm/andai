@@ -87,12 +87,18 @@ describe('Settings', () => {
     act(() => useEngine.setState({ laya: { supported: false, loaded: null, checkpoints: [] } }));
   });
 
-  it('switches appearance from the picker', async () => {
+  it('switches appearance from the picker, which offers light and dark only', async () => {
     const user = userEvent.setup();
+    useTheme.getState().setTheme('dark');
     render(<Settings />);
-    await user.click(screen.getByRole('radio', { name: /light/i }));
-    expect(useTheme.getState().mode).toBe('light');
-    expect(screen.getByRole('radio', { name: /light/i })).toHaveAttribute('aria-checked', 'true');
+    const group = within(screen.getByRole('radiogroup', { name: /appearance/i }));
+    const radios = group.getAllByRole('radio');
+    expect(radios).toHaveLength(2);
+    expect(radios[0]).toHaveTextContent(/light/i);
+    expect(radios[1]).toHaveTextContent(/dark/i);
+    await user.click(group.getByRole('radio', { name: /light/i }));
+    expect(useTheme.getState().theme).toBe('light');
+    expect(group.getByRole('radio', { name: /light/i })).toHaveAttribute('aria-checked', 'true');
   });
 
   // Pinning changed the download URLs (AGENTS.md §9); copies cached under the

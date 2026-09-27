@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CheckCircle2, Cpu, Download, GitFork, HardDrive, Loader2, Monitor, Moon, Palette, Plus, Power, Radio, Sun, Trash2, X, Zap } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Cpu, Download, GitFork, HardDrive, Loader2, Moon, Palette, Plus, Power, Radio, Sun, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, Modal, fmtBytes } from '../components/ui';
 import { evictModel, loadDecider, loadModel, refreshLaya, refreshNative, removeLaya, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
@@ -6,7 +6,7 @@ import { removeCustomModel } from '../llm/custom';
 import { availableModels, isMlx, LAYA_MODELS, layaById, memoryFit, modelById, type LayaDef, type ModelDef } from '../llm/models';
 import { clearChat } from '../state/chat';
 import { useKb } from '../state/kb';
-import { useTheme, type ThemeMode } from '../state/theme';
+import { useTheme, type Theme } from '../state/theme';
 import { toast } from '../state/ui';
 import { HubModels } from './HubModels';
 import { GetUltraGraph } from './Knowledge';
@@ -450,32 +450,30 @@ function Cap({ on, label }: { on: boolean; label: string }) {
   );
 }
 
-const APPEARANCE: { mode: ThemeMode; label: string; icon: typeof Sun; blurb: string }[] = [
-  { mode: 'system', label: 'System', icon: Monitor, blurb: 'Follow the system' },
-  { mode: 'light', label: 'Light', icon: Sun, blurb: 'Bright workspace' },
-  { mode: 'dark', label: 'Dark', icon: Moon, blurb: 'Command deck' },
+const APPEARANCE: { theme: Theme; label: string; icon: typeof Sun; blurb: string }[] = [
+  { theme: 'light', label: 'Light', icon: Sun, blurb: 'Bright workspace' },
+  { theme: 'dark', label: 'Dark', icon: Moon, blurb: 'Command deck' },
 ];
 
 function Appearance() {
-  const { mode, resolved, setMode } = useTheme();
+  const { theme, setTheme } = useTheme();
   return (
     <div className="panel pad">
       <div className="panel-head">
         <Palette size={20} color="var(--blue)" />
         <h3>Appearance</h3>
-        <span className="right pill">{resolved}</span>
       </div>
       <div className="st-themes" role="radiogroup" aria-label="Appearance">
         {APPEARANCE.map((a) => (
           <button
-            key={a.mode}
+            key={a.theme}
             role="radio"
-            aria-checked={mode === a.mode}
+            aria-checked={theme === a.theme}
             className="st-theme"
-            data-preview={a.mode}
-            onClick={() => setMode(a.mode)}
+            data-preview={a.theme}
+            onClick={() => setTheme(a.theme)}
           >
-            <span className="st-theme-swatch" data-preview={a.mode}>
+            <span className="st-theme-swatch" data-preview={a.theme}>
               <i />
               <i />
               <i />

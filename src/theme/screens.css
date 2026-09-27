@@ -2751,7 +2751,7 @@ tr:hover .kn-remove {
 /* theme-literal: start */
 .st-themes {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 10px;
 }
 .st-theme {
@@ -2815,15 +2815,6 @@ tr:hover .kn-remove {
 }
 .st-theme-swatch[data-preview='light'] i:last-child {
   background: #2f6fe0;
-}
-.st-theme-swatch[data-preview='system'] {
-  background: linear-gradient(135deg, #f3f5f9 50%, #0e1116 50%);
-}
-.st-theme-swatch[data-preview='system'] i {
-  background: color-mix(in srgb, #7f8898 45%, transparent);
-}
-.st-theme-swatch[data-preview='system'] i:last-child {
-  background: linear-gradient(135deg, #2f6fe0 50%, #7db4ff 50%);
 }
 /* theme-literal: end */
 

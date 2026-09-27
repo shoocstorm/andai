@@ -1,35 +1,65 @@
-import { describe, expect, it } from 'vitest';
-import { initTheme, nextMode, resolveTheme, useTheme } from './theme';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { initTheme, otherTheme, useTheme } from './theme';
 
-describe('resolveTheme', () => {
-  it('follows the OS in system mode', () => {
-    expect(resolveTheme('system', true)).toBe('dark');
-    expect(resolveTheme('system', false)).toBe('light');
-  });
-  it('explicit modes ignore the OS', () => {
-    expect(resolveTheme('light', true)).toBe('light');
-    expect(resolveTheme('dark', false)).toBe('dark');
+/** A fresh copy of the store module, as on app start, with the OS reporting `dark`. */
+async function freshStore(dark: boolean) {
+  vi.resetModules();
+  vi.stubGlobal('matchMedia', (q: string) => ({ matches: dark && q.includes('dark'), addEventListener() {} }));
+  return (await import('./theme')).useTheme;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.removeItem('andai.theme');
+});
+
+describe('otherTheme', () => {
+  it('toggles between the two themes', () => {
+    expect(otherTheme('light')).toBe('dark');
+    expect(otherTheme('dark')).toBe('light');
   });
 });
 
-describe('nextMode', () => {
-  it('cycles system → light → dark → system', () => {
-    expect(nextMode('system')).toBe('light');
-    expect(nextMode('light')).toBe('dark');
-    expect(nextMode('dark')).toBe('system');
+describe('the first-run theme', () => {
+  it("is the OS's when nothing was chosen yet", async () => {
+    expect((await freshStore(true)).getState().theme).toBe('dark');
+    expect((await freshStore(false)).getState().theme).toBe('light');
+  });
+
+  it('is the chosen one afterwards, whatever the OS says', async () => {
+    localStorage.setItem('andai.theme', JSON.stringify({ state: { theme: 'light' }, version: 0 }));
+    expect((await freshStore(true)).getState().theme).toBe('light');
+  });
+
+  it('ignores a stored value that is not a theme (the old system mode)', async () => {
+    localStorage.setItem('andai.theme', JSON.stringify({ state: { mode: 'system' }, version: 0 }));
+    expect((await freshStore(false)).getState().theme).toBe('light');
   });
 });
 
 describe('applying the theme', () => {
-  it('writes data-theme on <html> and follows mode changes', () => {
+  it('writes data-theme on <html> and follows changes', () => {
     initTheme();
-    useTheme.getState().setMode('light');
+    useTheme.getState().setTheme('light');
     expect(document.documentElement.dataset.theme).toBe('light');
-    useTheme.getState().setMode('dark');
+    useTheme.getState().setTheme('dark');
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
-  it('persists only the mode, not the resolved value', () => {
-    useTheme.getState().setMode('light');
-    expect(JSON.parse(localStorage.getItem('andai.theme')!).state).toEqual({ mode: 'light' });
+
+  // Regression: a "system" mode read prefers-color-scheme, which in the app
+  // reports the window's forced theme, so it stayed on the last one picked.
+  it('never reads prefers-color-scheme after startup', () => {
+    const matchMedia = vi.fn(() => ({ matches: true, addEventListener() {} }));
+    vi.stubGlobal('matchMedia', matchMedia);
+    initTheme();
+    useTheme.getState().setTheme('dark');
+    useTheme.getState().setTheme('light');
+    expect(matchMedia).not.toHaveBeenCalled();
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('persists the theme', () => {
+    useTheme.getState().setTheme('light');
+    expect(JSON.parse(localStorage.getItem('andai.theme')!).state).toEqual({ theme: 'light' });
   });
 });

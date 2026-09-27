@@ -226,8 +226,9 @@ pasting in whatever one search returns:
 
 ## Workspace
 
-- **Appearance:** Light, Dark, or follow the system (`Settings → Appearance`, or the
-  sun/moon button in the top bar).
+- **Appearance:** Light or Dark (`Settings → Appearance`, or the sun/moon
+  button in the top bar). The first launch starts in whichever your system
+  uses; after that, Andai keeps your choice.
 - **Collapsible sidebar** (`⌘B`) and **hideable Execution Trace** (`⌘J`),
   both remembered.
 - **Keyboard shortcuts:** `⌘K` focus the input · `⌘1–5` switch screens ·

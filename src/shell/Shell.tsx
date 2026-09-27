@@ -2,7 +2,6 @@ import {
   BookOpen,
   PanelLeftClose,
   PanelLeftOpen,
-  Monitor,
   Moon,
   Sun,
   Cpu,
@@ -28,7 +27,7 @@ import { modelById } from '../llm/models';
 import { useKb } from '../state/kb';
 import { usePersona } from '../state/persona';
 import { useLayout } from '../state/layout';
-import { nextMode, useTheme } from '../state/theme';
+import { otherTheme, useTheme } from '../state/theme';
 import { useUi, type Route } from '../state/ui';
 import { Modal } from '../components/ui';
 import { shortcut } from '../lib/platform';
@@ -96,19 +95,18 @@ export function TopBar() {
   );
 }
 
-const THEME_ICON = { system: Monitor, light: Sun, dark: Moon };
-const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' };
+const THEME_LABEL = { light: 'Light', dark: 'Dark' };
 
 function ThemeButton() {
-  const { mode, setMode } = useTheme();
-  const Icon = THEME_ICON[mode];
-  const next = nextMode(mode);
+  const { theme, setTheme } = useTheme();
+  const Icon = theme === 'light' ? Sun : Moon;
+  const next = otherTheme(theme);
   return (
     <button
       className="icon-btn"
-      title={`Appearance: ${THEME_LABEL[mode]} — click for ${THEME_LABEL[next]}`}
-      aria-label={`Appearance: ${THEME_LABEL[mode]}`}
-      onClick={() => setMode(next)}
+      title={`Appearance: ${THEME_LABEL[theme]} — click for ${THEME_LABEL[next]}`}
+      aria-label={`Appearance: ${THEME_LABEL[theme]}`}
+      onClick={() => setTheme(next)}
     >
       <Icon size={19} />
     </button>
