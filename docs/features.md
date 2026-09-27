@@ -116,7 +116,8 @@ pasting in whatever one search returns:
   with its score. **Why?** on any of them opens the check itself: the
   sentence, the passage it was compared with, Laya's answer, and why it
   counts as a flag. The answer itself is never changed. It takes about
-  15 ms (Laya Multilingual) to 41 ms (Laya English) per answer.
+  15–30 ms per answer (median 14 ms with Laya Multilingual, 27 ms with
+  Laya English).
   *How far to trust it:* treat a flag as "read this source", not "this is
   wrong". On our small test set (60 cited sentences, not hand-checked),
   Laya ranked a sentence's own passage above an unrelated one 67%

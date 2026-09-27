@@ -30,7 +30,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 10 | [Robust to the search scope](#10-robust-to-the-search-scope) | done 2026-09-27 with Laya · facts 75.9% → 89.7% (Multilingual), 82.8% → 89.7% (English); Qwen deciders unchanged |
 | 11 | [Rerank kept passages by relevance](#11-rerank-kept-passages-by-relevance) | measured 2026-09-27 · one fact lost per checkpoint, none gained; not shipped |
 | 12 | [Intent gate with Laya](#12-intent-gate-with-laya) | probed 2026-09-27 · fails the bar on both checkpoints; not shipped |
-| 13 | [Answer claim check](#13-answer-claim-check) | done 2026-09-27 · AUC 0.67 / 0.82; flags 1 of 32 and 4 of 33 cited sentences on the eval, 15 / 41 ms |
+| 13 | [Answer claim check](#13-answer-claim-check) | done 2026-09-27 · AUC 0.67 / 0.82; flags 3 of 42 and 8 of 41 cited sentences on the eval, 14 / 27 ms |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
 not shipped: 4, 9; 8 changed the recommendation (a small decision model with
@@ -570,6 +570,25 @@ junk sentences, the surcharge one, and the `refundFraction` false alarm),
 41 ms median. `bun run test:e2e` and `test:e2e:release` pass; their step
 checks now accept the Laya-only relevance and claim steps as skipped, which
 they are when there's nothing to check.
+
+**Fixed (2026-09-27): citations after the full stop.** Reported from the
+app ("the claim check step is skipped but I do see cites", Qwen3 8B
+answering): an answer ending "… at the terminal. [6]" split into the
+sentence and a bare "[6]", which had no words to check and was dropped, so
+the step said "The answer cites no passages". `citedClaims` now gives a
+citation-only fragment to the uncited sentences just before it (up to 3),
+and the skip message says when citations exist but can't be checked.
+Re-run (`eval/laya13b-*`, no answer changed): Multilingual checked 28
+answers instead of 20, English 24 instead of 17, so about a third of cited
+answers had been skipped. Of the new flags, two are real miscitations the
+old split hid: `doc-checkin-cars` cites `[2]`, the knowledge-base overview,
+for the check-in rule that is in `[1]`, and `doc-group` cites `[2]`,
+`operations.md`, for the discount in the release notes (`[1]`). Four were
+sentences about what the sources lack ("The information provided does not
+mention the CEO [1][2][3]"), which no passage can support; `aboutMissing`
+now leaves those out (checked on the eval's 68 sentences: it drops exactly
+those two sentences). With that, Multilingual flags 3 of 42 cited sentences
+(14 ms median) and English 8 of 41 (27 ms).
 
 **Claim dialog (2026-09-27).** Every checked sentence opens a dialog like
 *Why this step?*: the sentence, the passage it was compared with (from the

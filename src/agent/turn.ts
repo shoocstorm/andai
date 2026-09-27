@@ -23,7 +23,7 @@ import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { runAgent } from './loop';
 import { checkRelevance, KEEP_TOP } from './relevance';
-import { checkClaims } from './claims';
+import { checkClaims, supportSummary } from './claims';
 import { decidesWithLaya } from '../llm/decide';
 
 let controller: AbortController | null = null;
@@ -234,16 +234,18 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
       const sources = useChat.getState().messages.find((m) => m.id === id)?.sources ?? [];
       patchStep(id, 'verify', { status: 'running', detail: 'Checking cited sentences against their passages…' });
       try {
-        const r = await checkClaims(splitThink(reply).answer, sources);
+        const answer = splitThink(reply).answer;
+        const r = await checkClaims(answer, sources);
         if (!r) {
-          patchStep(id, 'verify', { status: 'skipped', detail: 'The answer cites no passages' });
-        } else {
-          const flagged = r.items.filter((x) => x.flagged).length;
-          patchMessage(id, { support: r });
           patchStep(id, 'verify', {
-            status: 'done',
-            detail: `${flagged ? `${flagged} of ${r.items.length}` : `All ${r.items.length}`} cited sentence${r.items.length === 1 ? '' : 's'} ${flagged ? 'may not be supported by their source' : 'look supported'} · ${r.ms} ms`,
+            status: 'skipped',
+            detail: /\[\d+(?:\s*,\s*\d+)*\]/.test(answer)
+              ? `The answer’s citations name no listed source, or no sentence to check against it (${sources.length} source${sources.length === 1 ? '' : 's'})`
+              : 'The answer cites no passages',
           });
+        } else {
+          patchMessage(id, { support: r });
+          patchStep(id, 'verify', { status: 'done', detail: `${supportSummary(r.items)} · ${r.ms} ms` });
         }
       } catch (e) {
         // A failed or stopped check never touches the answer, which is complete.

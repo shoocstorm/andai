@@ -794,7 +794,11 @@ export function ClaimDialog({ x, r, passage, open, onClose }: { x: SupportItem; 
   );
 }
 
-/** A claim's "Why?" button and its dialog. */
+/**
+ * A claim's "Why?" button and its dialog. The dialog is built only while
+ * open: an answer can list 24 claims, and a closed dialog would still run its
+ * explanation on every render (one that threw blanked the whole app).
+ */
 function ClaimWhy({ x, r, sources, label }: { x: SupportItem; r: SupportRecord; sources: SearchHit[]; label: string }) {
   const [open, setOpen] = useState(false);
   const h = sources[x.n - 1];
@@ -803,7 +807,7 @@ function ClaimWhy({ x, r, sources, label }: { x: SupportItem; r: SupportRecord; 
       <button className="btn ghost sm ag-toggle ag-claim-why" aria-haspopup="dialog" aria-label={`Why: [${x.n}] ${x.sentence}`} onClick={() => setOpen(true)}>
         <HelpCircle size={12} /> <span>{label}</span>
       </button>
-      <ClaimDialog x={x} r={r} passage={h ? passageText(h) : ''} open={open} onClose={() => setOpen(false)} />
+      {open && <ClaimDialog x={x} r={r} passage={h ? passageText(h) : ''} open onClose={() => setOpen(false)} />}
     </>
   );
 }

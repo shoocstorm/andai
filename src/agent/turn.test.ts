@@ -246,7 +246,7 @@ describe('claim check (with a Laya decision model)', () => {
     ]);
     expect(assistant().support!.items.map((x) => x.flagged)).toEqual([false, true]);
     expect(statuses().verify).toBe('done');
-    expect(assistant().steps!.find((s) => s.kind === 'verify')!.detail).toMatch(/^1 of 2 cited sentences may not be supported/);
+    expect(assistant().steps!.find((s) => s.kind === 'verify')!.detail).toMatch(/^1 of 2 cited sentences may not be supported by its source · \d+ ms$/);
     expect(assistant().content).toBe('Use COOP [1]. It needs COEP too [1].');
   });
 
@@ -259,6 +259,23 @@ describe('claim check (with a Laya decision model)', () => {
     expect(assistant()).toMatchObject({ content: 'Use COOP [1].', streaming: false });
     expect(assistant().stopped).toBeUndefined();
     expect(assistant().support).toBeUndefined();
+  });
+
+  it('says so when the answer cites, but nothing it cites can be checked', async () => {
+    agent.laya = true;
+    engine.deltas = ['Use COOP [9].'];
+    await runTurn('What headers does wllama need?');
+    expect(statuses().verify).toBe('skipped');
+    expect(assistant().steps!.find((s) => s.kind === 'verify')!.detail).toMatch(/^The answer’s citations name no listed source/);
+    expect(rel.claims).toEqual([]);
+  });
+
+  it('checks a sentence whose citation comes after its full stop', async () => {
+    agent.laya = true;
+    engine.deltas = ['Use COOP and COEP. [1]'];
+    await runTurn('What headers does wllama need?');
+    expect(statuses().verify).toBe('done');
+    expect(rel.claims[0]).toEqual([expect.objectContaining({ statement: 'Use COOP and COEP.' })]);
   });
 
   it('skips the check when the answer cites nothing, and never runs it without Laya', async () => {

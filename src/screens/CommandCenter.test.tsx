@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { addMessage, clearChat, type AgentStep, type ToolCallRecord } from '../state/chat';
+import { addMessage, clearChat, type AgentStep, type Message, type ToolCallRecord } from '../state/chat';
 import { requestApproval } from '../state/tools';
 import { useKb } from '../state/kb';
 import { useLayout } from '../state/layout';
@@ -505,6 +505,32 @@ describe('Command Center (agent mode)', () => {
       '[1] Use COOP.: 93%, supported',
       '[2] Cars pay 18.5.: 4.0%, may not be supported',
     ]);
+  });
+
+  it('builds a claim’s dialog only when it is opened, so a closed one never costs or breaks the chat', () => {
+    // A claim check saved by an earlier build (before `cites`, `source` and
+    // `inputTokens`) blanked the whole app on launch: every closed dialog ran
+    // its explanation on render.
+    const support = {
+      model: 'Laya English',
+      ms: 60,
+      modelMs: 52,
+      flagBelow: 0.1,
+      items: [{ sentence: 'Cars pay 18.5.', n: 1, score: 0.04, flagged: true }],
+    } as unknown as NonNullable<Message['support']>;
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Cars pay 18.5 [1].',
+      createdAt: 0,
+      sources: [{ id: 'h1', name: 'fares', node_type: 'Code', file: 'fares.ts', start_line: 12, end_line: 12, snippet: 'export const VEHICLE_SURCHARGE = 18.5;' }],
+      support,
+      steps: [{ kind: 'verify', title: 'Claim check', detail: '', status: 'done' }],
+    });
+    render(<CommandCenter />);
+    expect(screen.getByRole('region', { name: 'Claim check' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('opens a claim’s check from the note: the passage it was checked against, Laya’s answer and why', async () => {

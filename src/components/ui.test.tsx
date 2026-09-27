@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { Markdown } from './ui';
+import { Markdown, ScreenBoundary } from './ui';
 
 // Model output can be steered by a poisoned document (prompt injection), so
 // rendering it must never make a network request or navigate (AGENTS.md §9).
@@ -37,5 +37,30 @@ describe('Markdown', () => {
   it('does not render raw HTML from the model', () => {
     const { container } = render(<Markdown text={'<img src="https://evil.example/x.png"><b>hi</b>'} />);
     expect(container.querySelector('img, b')).toBeNull();
+  });
+});
+
+describe('ScreenBoundary', () => {
+  it('shows a render error in place of the screen instead of blanking the window, and retries', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let broken = true;
+    const Screen = () => {
+      if (broken) throw new Error('x.cites is undefined');
+      return <p>Chat</p>;
+    };
+    render(
+      <>
+        <nav>Sidebar</nav>
+        <ScreenBoundary>
+          <Screen />
+        </ScreenBoundary>
+      </>,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('x.cites is undefined');
+    expect(screen.getByText('Sidebar')).toBeInTheDocument();
+    broken = false;
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(screen.getByText('Chat')).toBeInTheDocument();
+    vi.restoreAllMocks();
   });
 });

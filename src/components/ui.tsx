@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import type { CSSProperties, ReactNode } from 'react';
+import { Component, type CSSProperties, type ErrorInfo, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, Copy } from 'lucide-react';
@@ -224,6 +224,38 @@ export function Modal({ open, onClose, children, wide, label }: { open: boolean;
     </AnimatePresence>,
     document.body,
   );
+}
+
+/**
+ * Keeps a render error inside the screen it happened on. Without it React
+ * unmounts the whole tree and the window goes blank, with the cause only in
+ * the devtools console (seen 2026-09-27: a stored claim check the trace
+ * couldn't read). App keys it by route, so moving to another screen retries.
+ */
+export class ScreenBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Screen failed to render', error, info.componentStack);
+  }
+
+  render() {
+    const { error } = this.state;
+    if (!error) return this.props.children;
+    return (
+      <div className="empty" role="alert">
+        <h3>This screen couldn’t be shown</h3>
+        <div className="mono selectable">{error.message}</div>
+        <button className="btn sm" onClick={() => this.setState({ error: null })}>
+          Try again
+        </button>
+      </div>
+    );
+  }
 }
 
 export const fmtBytes = (n: number) => {

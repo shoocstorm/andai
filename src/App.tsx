@@ -13,6 +13,7 @@ import { Settings } from './screens/Settings';
 import { Tools } from './screens/Tools';
 import { WorkflowDetail } from './screens/WorkflowDetail';
 import { Workflows } from './screens/Workflows';
+import { ScreenBoundary } from './components/ui';
 import { AboutModal, Sidebar, StatusBar, Toasts, TopBar } from './shell/Shell';
 import { useLayout } from './state/layout';
 import { addFiles, createKb, refreshKbs, startKbEvents, useKb } from './state/kb';
@@ -116,7 +117,9 @@ export function App() {
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.16, ease: [0.2, 0.7, 0.2, 1] }}
           >
-            <Screen />
+            <ScreenBoundary key={route}>
+              <Screen />
+            </ScreenBoundary>
           </motion.div>
         </AnimatePresence>
       </main>

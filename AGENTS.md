@@ -512,8 +512,14 @@ level defaults to *Ask*.
   another question: AUC 0.67 (multilingual), 0.82 (English). Below 0.10,
   1–2 of 60 own citations were clear false alarms and the rest real gaps,
   so it flags "may not be supported" and never changes the answer. In the
-  eval it flagged 1 of 32 (multilingual, 15 ms) and 4 of 33 (English, 41 ms)
-  cited sentences (tracker item 13). The probe's labels are a proxy (own
+  eval it flagged 3 of 42 (multilingual, 14 ms) and 8 of 41 (English, 27 ms)
+  cited sentences, including two real miscitations (right fact, wrong
+  `[n]`) (tracker item 13). Models often cite after the full stop ("…
+  terminal. [6]"), which split into a word-less "[6]": about a third of
+  cited answers were skipped until `citedClaims` let a bare citation reach
+  back to the ≤ 3 uncited sentences before it (reported from the app,
+  2026-09-27). Sentences about what the sources lack (`aboutMissing`) are
+  not checked. The probe's labels are a proxy (own
   passage vs. a random one, not hand-checked), and random negatives are
   easier than real miscitations, so treat its numbers as an upper bound;
   `claims.ts` `MEASURED` shows them in the claim dialog. Its input is

@@ -11,7 +11,7 @@ vi.mock('../llm/laya', () => ({
   },
 }));
 
-const { checkClaims, citedClaims, claimState, FLAG_BELOW, MAX_CLAIMS } = await import('./claims');
+const { checkClaims, citedClaims, claimState, FLAG_BELOW, MAX_CLAIMS, supportSummary } = await import('./claims');
 
 const hit = (i: number): SearchHit => ({ id: `h${i}`, name: `n${i}`, node_type: 'Section', file: `f${i}.md`, start_line: i, end_line: i + 4, snippet: ` passage ${i} ` });
 
@@ -36,10 +36,52 @@ describe('citedClaims', () => {
     expect(citedClaims(answer, 3)).toEqual([{ sentence: 'It is 48 hours.', n: 1, cites: [1] }]);
   });
 
+  it('gives a citation standing after the full stop to the sentence before it (reported: the check skipped)', () => {
+    const answer = 'No, refunds only go to the original payment method. Tidewater never refunds in cash at the terminal. [6]';
+    expect(citedClaims(answer, 10)).toEqual([
+      { sentence: 'No, refunds only go to the original payment method.', n: 6, cites: [6] },
+      { sentence: 'Tidewater never refunds in cash at the terminal.', n: 6, cites: [6] },
+    ]);
+  });
+
+  it('gives a line of citations after a list to the list’s last few items, not to sentences already cited', () => {
+    const answer = 'The fare is set in code [1].\n\n- Cars pay 18.5.\n- Bikes pay 2.\n- Dogs ride free.\n- Peak days cost more.\n\n[2], [3]';
+    expect(citedClaims(answer, 3).map((c) => [c.sentence, c.n])).toEqual([
+      ['The fare is set in code.', 1],
+      ['Bikes pay 2.', 2],
+      ['Bikes pay 2.', 3],
+      ['Dogs ride free.', 2],
+      ['Dogs ride free.', 3],
+      ['Peak days cost more.', 2],
+      ['Peak days cost more.', 3],
+    ]);
+  });
+
+  it('doesn’t check a sentence about what the sources lack, which no passage can support', () => {
+    const answer = 'The information provided does not mention the CEO of Tidewater Ferries [1][2]. The context focuses on refunds and has no details about leadership [1]. Refunds take 5 days [1].';
+    expect(citedClaims(answer, 2)).toEqual([{ sentence: 'Refunds take 5 days.', n: 1, cites: [1] }]);
+    // a claim that merely uses one of the words is still checked
+    expect(citedClaims('Canceling less than 6 hours before departure results in no refund [1].', 1)).toHaveLength(1);
+  });
+
+  it('leaves a cited sentence’s own citation alone, and a bare citation with nothing uncited before it', () => {
+    expect(citedClaims('It is 48 hours [1]. [2]', 2)).toEqual([{ sentence: 'It is 48 hours.', n: 1, cites: [1] }]);
+  });
+
   it('checks at most MAX_CLAIMS, and cuts a very long sentence', () => {
     const many = Array.from({ length: MAX_CLAIMS + 5 }, (_, i) => `Fact number ${i} holds [1].`).join(' ');
     expect(citedClaims(many, 1)).toHaveLength(MAX_CLAIMS);
     expect(citedClaims(`${'word '.repeat(300)}[1].`, 1)[0].sentence.length).toBeLessThanOrEqual(500);
+  });
+});
+
+describe('supportSummary', () => {
+  const item = (sentence: string, flagged: boolean) => ({ sentence, n: 1, cites: [1], source: 'a:1-2', score: flagged ? 0.01 : 0.9, flagged, inputTokens: 9, truncated: false });
+
+  it('counts sentences, not sentence–source pairs, and reads right for one', () => {
+    expect(supportSummary([item('A b.', false)])).toBe('The cited sentence looks supported by its source');
+    expect(supportSummary([item('A b.', false), item('C d.', false)])).toBe('All 2 cited sentences look supported by their sources');
+    expect(supportSummary([item('A b.', true), { ...item('A b.', false), n: 2 }, item('C d.', false)])).toBe('1 of 2 cited sentences may not be supported by its source');
   });
 });
 

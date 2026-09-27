@@ -72,28 +72,63 @@ export type SupportRecord = {
 const CITE = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
 
 /**
+ * Uncited sentences a citation-only fragment reaches back to: "… terminal. [6]"
+ * splits into a sentence and a bare "[6]", and a list often ends in a line of
+ * citations; either way they cite what comes just before them.
+ */
+const REACH_BACK = 3;
+
+/** A sentence without Markdown, inline-code or citation marks. */
+const plain = (raw: string) =>
+  raw
+    .replace(CITE, '')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/^\s*(?:[-*+]|\d+\.|#+|>)\s+/, '')
+    .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, '$1')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_SENTENCE);
+
+/**
+ * A sentence about what the sources lack ("The information provided does not
+ * mention the CEO [1][2]") can't be supported by any one passage, so it isn't
+ * checked: in the eval every such sentence scored ~0 and read as a false
+ * alarm, although the answer was right to say so.
+ */
+export const aboutMissing = (sentence: string) =>
+  /\b(the|these|this|provided|given|available)\s+(information|context|passages?|sources?|documents?|knowledge base|search results)\b/i.test(sentence) &&
+  /\b(not|no|nothing|doesn['’]t|don['’]t|isn['’]t|aren['’]t|lacks?|without)\b/i.test(sentence);
+
+/** Two words at least: ", , and [2]." or a bare "[6]" leaves nothing to check. */
+const checkable = (sentence: string) => (sentence.match(/[\p{L}\p{N}]+/gu) ?? []).length >= 2;
+
+/**
  * The cited sentences of an answer, one per sentence and source it cites, in
- * order, for sources 1…`sources`. Code blocks are skipped, and Markdown and
- * inline-code marks removed. Pure.
+ * order, for sources 1…`sources`. A citation standing on its own after a
+ * sentence or list ("… terminal. [6]") cites the uncited sentences just
+ * before it. Code blocks are skipped. Pure.
  */
 export function citedClaims(answer: string, sources: number): Claim[] {
   const text = answer.replace(/```[\s\S]*?(```|$)/g, '\n');
-  const out: Claim[] = [];
-  const seen = new Set<string>();
+  const cited: { sentence: string; ns: number[] }[] = [];
+  let pending: { sentence: string; ns: number[] }[] = [];
   for (const raw of text.split(/(?<=[.!?])\s+|\n+/)) {
     const ns = [...raw.matchAll(CITE)].flatMap((m) => m[1].split(',').map((x) => Number(x.trim())));
-    if (!ns.length) continue;
-    const sentence = raw
-      .replace(CITE, '')
-      .replace(/`([^`]*)`/g, '$1')
-      .replace(/^\s*(?:[-*+]|\d+\.|#+|>)\s+/, '')
-      .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, '$1')
-      .replace(/\s+([.,;:!?])/g, '$1')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, MAX_SENTENCE);
-    // A sentence left with fewer than two words once the citations are removed (", , and [2].") can't be checked.
-    if ((sentence.match(/[\p{L}\p{N}]+/gu) ?? []).length < 2) continue;
+    const sentence = plain(raw);
+    if (checkable(sentence)) {
+      const item = { sentence, ns };
+      cited.push(item);
+      pending = ns.length ? [] : [...pending, item].slice(-REACH_BACK);
+    } else if (ns.length) {
+      for (const p of pending) p.ns.push(...ns);
+      pending = [];
+    }
+  }
+  const out: Claim[] = [];
+  const seen = new Set<string>();
+  for (const { sentence, ns } of cited) {
+    if (aboutMissing(sentence)) continue;
     const cites = [...new Set(ns.filter((n) => n >= 1 && n <= sources))];
     for (const n of cites) {
       const key = `${n} ${sentence}`;
@@ -103,6 +138,15 @@ export function citedClaims(answer: string, sources: number): Claim[] {
     }
   }
   return out.slice(0, MAX_CLAIMS);
+}
+
+/** One line for the trace step: how many cited sentences were checked, and how many may not be supported. */
+export function supportSummary(items: SupportItem[]): string {
+  // A sentence citing two sources is two items; count sentences.
+  const n = new Set(items.map((x) => x.sentence)).size;
+  const flagged = new Set(items.filter((x) => x.flagged).map((x) => x.sentence)).size;
+  if (flagged) return `${flagged} of ${n} cited sentence${n === 1 ? '' : 's'} may not be supported by ${flagged === 1 ? 'its' : 'their'} source`;
+  return n === 1 ? 'The cited sentence looks supported by its source' : `All ${n} cited sentences look supported by their sources`;
 }
 
 export const sourceOf = (h: SearchHit) => `${h.file}:${h.start_line}-${h.end_line}`;
