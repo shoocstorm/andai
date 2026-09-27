@@ -59,7 +59,7 @@ export const layaRelevance = (request: string, passages: { source: string; text:
 
 /** How likely each cited passage supports the sentence that cites it (one yes/no row per claim, batched in Rust). */
 export const layaSupport = (claims: { statement: string; source: string; text: string }[]) =>
-  invoke<{ scores: number[]; ms: number; model: string }>('laya_support', { claims });
+  invoke<{ scores: number[]; inputTokens: number[]; truncated: boolean[]; ms: number; model: string }>('laya_support', { claims });
 
 /** Bytes per IPC call; Rust accepts up to 16 MiB. */
 export const CHUNK = 8 * 1024 * 1024;

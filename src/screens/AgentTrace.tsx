@@ -9,7 +9,8 @@ import { toolById } from '../agent/tools/registry';
 import { CopyButton, Modal, fmtTime } from '../components/ui';
 import { shellCommand } from '../agent/debugReport';
 import type { RelevanceRecord } from '../agent/relevance';
-import type { SupportRecord } from '../agent/claims';
+import { claimState, MEASURED, SUPPORTS, type SupportItem, type SupportRecord } from '../agent/claims';
+import { passageText } from '../agent/relevance';
 import type { SearchHit } from '../kb/api';
 import type { DecisionIO } from '../llm/decide';
 import type { AgentStep, CallStatus, DecisionRecord, Message, ToolCallRecord } from '../state/chat';
@@ -675,10 +676,143 @@ export function RelevanceList({ r }: { r: RelevanceRecord }) {
 }
 
 /**
- * The claim check under its trace step: every cited sentence, the source it
- * cites, and how likely that passage supports it.
+ * Why a claim got its verdict, in plain sentences: what Laya was asked, what
+ * it answered against the cut, what may have skewed it (other citations,
+ * input cut to fit), and how far the check can be trusted at all. Pure, for
+ * the claim dialog and its tests.
  */
-export function SupportList({ r }: { r: SupportRecord }) {
+export function explainClaim(x: SupportItem, r: SupportRecord): string[] {
+  const out = [
+    `The agent asked ${r.model} whether passage [${x.n}] (${x.source}) supports the sentence, as a yes/no question: “${SUPPORTS}”`,
+    x.flagged
+      ? `It answered ${pct(x.score)} yes, below the ${pct(r.flagBelow)} cut, so the sentence is marked as possibly unsupported by [${x.n}].`
+      : `It answered ${pct(x.score)} yes, at or above the ${pct(r.flagBelow)} cut, so nothing is marked.`,
+  ];
+  const others = x.cites.filter((n) => n !== x.n);
+  if (others.length) {
+    out.push(
+      `The sentence also cites ${others.map((n) => `[${n}]`).join(', ')}, and each source is checked on its own: a sentence that combines facts from several can score low against each.`,
+    );
+  }
+  if (x.truncated) out.push('The sentence or the passage was cut to fit the model’s input, so part of it wasn’t read.');
+  const m = MEASURED[r.modelId];
+  out.push(
+    m
+      ? `How far to trust it: on our test set ${r.model} scored a sentence’s own passage above a passage from another answer ${Math.round(m.auc * 100)}% of the time; at this cut it flagged about ${Math.round(m.caught * 100)}% of those wrong pairings and wrongly flagged ${m.falseAlarms} right ones. It’s a hint to read the source, not a verdict.`
+      : 'How far to trust it: this checkpoint wasn’t measured on the claim check. It’s a hint to read the source, not a verdict.',
+  );
+  return out;
+}
+
+/** One claim's check: the sentence, the passage it was checked against, Laya's answer and why, and the exact call. */
+export function ClaimDialog({ x, r, passage, open, onClose }: { x: SupportItem; r: SupportRecord; passage: string; open: boolean; onClose: () => void }) {
+  const state = claimState(x.sentence, x.source, passage);
+  return (
+    <Modal open={open} onClose={onClose} wide label={`Claim check for source ${x.n}`}>
+      <div className="dd-head">
+        <div>
+          <div className="label violet">Claim check · source [{x.n}]</div>
+          <h3>{x.flagged ? 'May not be supported by its source' : 'Looks supported by its source'}</h3>
+          <div className="faint ag-small">
+            {r.model} · decision model · {x.inputTokens} input tokens · the check took {fmtMs(r.ms)} for {r.items.length} claim{r.items.length === 1 ? '' : 's'} (model{' '}
+            {fmtMs(r.modelMs)})
+            {x.truncated && <span className="ag-note"> · input cut to fit the model</span>}
+          </div>
+        </div>
+        <button className="btn ghost sm" aria-label="Close dialog" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+
+      <section className="dd-section" aria-label="Why this verdict">
+        <h4 className="label">Why this verdict</h4>
+        <ol className="dd-why">
+          {explainClaim(x, r).map((line, i) => (
+            <li key={i} className="selectable">
+              {line}
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <div className="dd-grid">
+        <section className="dd-section" aria-label="What the model saw">
+          <h4 className="label">What the model saw</h4>
+          <Field k="Sentence (from the answer)" copy={x.sentence}>
+            <div className="ag-small selectable">{x.sentence}</div>
+          </Field>
+          <Field k={`Passage [${x.n}] · ${x.source}`} copy={passage}>
+            <pre className="ag-pre selectable dd-state">{passage || '(empty)'}</pre>
+          </Field>
+          <Field k="Yes/no question">
+            <div className="ag-small selectable">{SUPPORTS}</div>
+          </Field>
+        </section>
+        <section className="dd-section" aria-label="What it returned">
+          <h4 className="label">What it returned</h4>
+          <ul className="ag-bars" aria-label="Laya's answer">
+            {[
+              ['Supported', x.score],
+              ['Not supported', 1 - x.score],
+            ].map(([label, p]) => (
+              <li key={label} className={(label === 'Supported') === !x.flagged ? 'chosen' : undefined}>
+                <span className="ag-bar-label">{label}</span>
+                <span className="ag-bar-track">
+                  <i style={{ width: `${Math.max(1, (p as number) * 100)}%` }} />
+                </span>
+                <span className="ag-bar-value mono">{pct(p as number)}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="faint ag-seed">
+            Flagged below {pct(r.flagBelow)} “supported” · calibrated probabilities, but only checked on a small test set
+          </div>
+        </section>
+      </div>
+
+      <details className="ag-raw dd-raw">
+        <summary>Exact call: Laya’s input for this claim</summary>
+        <Field k="Input: state" copy={state}>
+          <pre className="ag-pre selectable">{state}</pre>
+        </Field>
+        <Field k="Input: question">
+          <pre className="ag-pre selectable">{`noul · ${SUPPORTS}`}</pre>
+        </Field>
+        <Field k="Output">
+          <pre className="ag-pre selectable">{JSON.stringify({ probabilities: [1 - x.score, x.score], inputTokens: x.inputTokens, truncated: x.truncated }, null, 2)}</pre>
+        </Field>
+      </details>
+      <div className="dd-foot">
+        <CopyButton text={JSON.stringify({ model: r.model, question: SUPPORTS, state, score: x.score, flagged: x.flagged, flagBelow: r.flagBelow, inputTokens: x.inputTokens, truncated: x.truncated }, null, 2)} label="Copy claim check call">
+          Copy claim check call
+        </CopyButton>
+        <button className="btn primary sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** A claim's "Why?" button and its dialog. */
+function ClaimWhy({ x, r, sources, label }: { x: SupportItem; r: SupportRecord; sources: SearchHit[]; label: string }) {
+  const [open, setOpen] = useState(false);
+  const h = sources[x.n - 1];
+  return (
+    <>
+      <button className="btn ghost sm ag-toggle ag-claim-why" aria-haspopup="dialog" aria-label={`Why: [${x.n}] ${x.sentence}`} onClick={() => setOpen(true)}>
+        <HelpCircle size={12} /> <span>{label}</span>
+      </button>
+      <ClaimDialog x={x} r={r} passage={h ? passageText(h) : ''} open={open} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
+/**
+ * The claim check under its trace step: every cited sentence, the source it
+ * cites, and how likely that passage supports it; each opens its dialog.
+ */
+export function SupportList({ r, sources }: { r: SupportRecord; sources: SearchHit[] }) {
   return (
     <section className="trace-subs ag-rel" aria-label="Claim check">
       <div className="faint ag-small">
@@ -697,7 +831,7 @@ export function SupportList({ r }: { r: SupportRecord }) {
               <i style={{ width: `${Math.max(1, x.score * 100)}%` }} />
             </span>
             <span className="ag-bar-value mono">{pct(x.score)}</span>
-            <span className="ag-rel-why faint">{x.flagged ? 'unsupported?' : 'supported'}</span>
+            <ClaimWhy x={x} r={r} sources={sources} label={x.flagged ? 'Why?' : 'Details'} />
           </li>
         ))}
       </ul>
@@ -710,7 +844,7 @@ export function SupportList({ r }: { r: SupportRecord }) {
  * Under an answer, only when the claim check flagged something: which cited
  * sentences may not be supported by the source they cite. Plain text.
  */
-export function SupportNote({ r }: { r: SupportRecord }) {
+export function SupportNote({ r, sources }: { r: SupportRecord; sources: SearchHit[] }) {
   const flagged = r.items.filter((x) => x.flagged);
   if (!flagged.length) return null;
   return (
@@ -720,12 +854,18 @@ export function SupportNote({ r }: { r: SupportRecord }) {
       </summary>
       <ul>
         {flagged.map((x, i) => (
-          <li key={i} className="selectable">
-            <span className="mono">[{x.n}]</span> {x.sentence} <span className="faint mono">({pct(x.score)})</span>
+          <li key={i}>
+            <span className="selectable">
+              <span className="mono">[{x.n}]</span> {x.sentence} <span className="faint mono">({pct(x.score)} supported)</span>
+            </span>{' '}
+            <ClaimWhy x={x} r={r} sources={sources} label="Why?" />
           </li>
         ))}
       </ul>
-      <div className="faint">Checked by {r.model}. It can be wrong both ways: read the source to be sure.</div>
+      <div className="faint">
+        Checked by {r.model}, which compares each sentence with the one passage it cites. It misses some unsupported sentences and flags a few
+        supported ones: open “Why?” to read the passage.
+      </div>
     </details>
   );
 }

@@ -2905,3 +2905,16 @@ tr:hover .kn-remove {
 .ag-rel-list.ag-claims li.dropped .ag-rel-file {
   text-decoration: none;
 }
+.ag-rel-list.ag-claims li {
+  grid-template-columns: 14px minmax(0, 1fr) minmax(24px, 0.3fr) 42px auto;
+}
+.ag-claim-why.btn.sm {
+  display: inline-flex;
+  padding: 2px 8px;
+  min-height: 0;
+  font-size: 10px;
+  vertical-align: middle;
+}
+.cc-support .ag-claim-why {
+  margin-left: 4px;
+}

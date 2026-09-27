@@ -276,7 +276,7 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
               ))}
             </details>
           )}
-          {m.support && <SupportNote r={m.support} />}
+          {m.support && <SupportNote r={m.support} sources={m.sources ?? []} />}
           <div className="cc-answer-meta">
             {fmtTime(m.createdAt)} · {m.stats?.model ?? 'Andai'}
             {m.stats && ` · ${m.stats.tokens} tok · ${m.stats.tokPerSec.toFixed(1)} tok/s`}
@@ -742,7 +742,7 @@ function TracePanel({ msg }: { msg?: Message }) {
                   </div>
                 )}
                 {s.kind === 'filter' && msg.relevance && <RelevanceList r={msg.relevance} />}
-                {s.kind === 'verify' && msg.support && <SupportList r={msg.support} />}
+                {s.kind === 'verify' && msg.support && <SupportList r={msg.support} sources={msg.sources ?? []} />}
                 {(s.kind === 'retrieve' || s.kind === 'plan') && !!msg.sources?.length && (
                   <div className="trace-subs">
                     {msg.sources.slice(0, 5).map((h, j) => (

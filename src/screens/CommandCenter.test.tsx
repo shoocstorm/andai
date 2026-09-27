@@ -472,21 +472,26 @@ describe('Command Center (agent mode)', () => {
   it('notes under the answer which cited sentences may not be supported, and lists every claim in the trace', () => {
     const support = {
       model: 'Laya English',
+      modelId: 'laya-en',
       ms: 60,
       modelMs: 52,
       flagBelow: 0.1,
       items: [
-        { sentence: 'Use COOP.', n: 1, score: 0.93, flagged: false },
-        { sentence: 'Cars pay 18.5.', n: 2, score: 0.04, flagged: true },
+        { sentence: 'Use COOP.', n: 1, cites: [1], source: 'README.md:1-9', score: 0.93, flagged: false, inputTokens: 60, truncated: false },
+        { sentence: 'Cars pay 18.5.', n: 2, cites: [1, 2], source: 'fares.ts:12-12', score: 0.04, flagged: true, inputTokens: 44, truncated: false },
       ],
     };
     addMessage({ id: 'u', role: 'user', content: 'What headers?', createdAt: 0 });
     addMessage({
       id: 'a',
       role: 'assistant',
-      content: 'Use COOP [1]. Cars pay 18.5 [2].',
+      content: 'Use COOP [1]. Cars pay 18.5 [1][2].',
       createdAt: 0,
       kbName: 'Docs',
+      sources: [
+        { id: 'h1', name: 'README', node_type: 'Section', file: 'README.md', start_line: 1, end_line: 9, snippet: 'Set COOP and COEP.' },
+        { id: 'h2', name: 'fares', node_type: 'Code', file: 'fares.ts', start_line: 12, end_line: 12, snippet: 'export const VEHICLE_SURCHARGE = 18.5;' },
+      ],
       support,
       steps: [
         { kind: 'generate', title: 'Generate', detail: '', status: 'done' },
@@ -502,6 +507,39 @@ describe('Command Center (agent mode)', () => {
     ]);
   });
 
+  it('opens a claim’s check from the note: the passage it was checked against, Laya’s answer and why', async () => {
+    const support = {
+      model: 'Laya English',
+      modelId: 'laya-en',
+      ms: 60,
+      modelMs: 52,
+      flagBelow: 0.1,
+      items: [{ sentence: 'Cars pay 18.5.', n: 2, cites: [1, 2], source: 'fares.ts:12-12', score: 0.04, flagged: true, inputTokens: 44, truncated: true }],
+    };
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Cars pay 18.5 [1][2].',
+      createdAt: 0,
+      sources: [
+        { id: 'h1', name: 'README', node_type: 'Section', file: 'README.md', start_line: 1, end_line: 9, snippet: 'Set COOP.' },
+        { id: 'h2', name: 'fares', node_type: 'Code', file: 'fares.ts', start_line: 12, end_line: 12, snippet: 'export const VEHICLE_SURCHARGE = 18.5;' },
+      ],
+      support,
+    });
+    render(<CommandCenter />);
+    await userEvent.click(within(document.querySelector('.cc-support') as HTMLElement).getByRole('button', { name: 'Why: [2] Cars pay 18.5.' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Claim check for source 2' }));
+    expect(dialog.getByText('May not be supported by its source')).toBeInTheDocument();
+    expect(dialog.getAllByText('export const VEHICLE_SURCHARGE = 18.5;').length).toBeGreaterThan(0);
+    const why = within(dialog.getByRole('region', { name: 'Why this verdict' }));
+    expect(why.getByText(/answered 4\.0% yes, below the 10% cut/)).toBeInTheDocument();
+    expect(why.getByText(/also cites \[1\], and each source is checked on its own/)).toBeInTheDocument();
+    expect(why.getByText(/cut to fit the model’s input/)).toBeInTheDocument();
+    expect(why.getByText(/82% of the time.*a hint to read the source, not a verdict/)).toBeInTheDocument();
+  });
+
   it('says nothing under the answer when every cited sentence looks supported', () => {
     addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
     addMessage({
@@ -509,7 +547,14 @@ describe('Command Center (agent mode)', () => {
       role: 'assistant',
       content: 'Use COOP [1].',
       createdAt: 0,
-      support: { model: 'Laya English', ms: 30, modelMs: 25, flagBelow: 0.1, items: [{ sentence: 'Use COOP.', n: 1, score: 0.9, flagged: false }] },
+      support: {
+        model: 'Laya English',
+        modelId: 'laya-en',
+        ms: 30,
+        modelMs: 25,
+        flagBelow: 0.1,
+        items: [{ sentence: 'Use COOP.', n: 1, cites: [1], source: 'README.md:1-9', score: 0.9, flagged: false, inputTokens: 30, truncated: false }],
+      },
     });
     render(<CommandCenter />);
     expect(screen.queryByText(/may not be supported/)).toBeNull();

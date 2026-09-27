@@ -17,6 +17,22 @@ import { passageText } from './relevance';
 
 /** Below this likelihood of support, a cited sentence is flagged. */
 export const FLAG_BELOW = 0.1;
+/** What Laya is asked of each claim; a Rust constant (src-tauri/src/laya/mod.rs `SUPPORTS`), repeated here for the trace. */
+export const SUPPORTS = 'The passage supports this statement.';
+
+/**
+ * What the probe measured per checkpoint (docs/agentic-rag-improvements.md,
+ * item 13), shown with each verdict so a user can weigh it: how often the
+ * sentence's own passage outscored another question's (AUC), the share of
+ * such wrong pairings flagged at `FLAG_BELOW`, and the clear false alarms.
+ */
+export const MEASURED: Record<string, { auc: number; caught: number; falseAlarms: string }> = {
+  'laya-multilingual': { auc: 0.67, caught: 0.4, falseAlarms: '1 of 60' },
+  'laya-en': { auc: 0.82, caught: 0.6, falseAlarms: '2 of 60' },
+};
+
+/** The input one claim is judged in, as Rust builds it (`claim_state`). */
+export const claimState = (statement: string, source: string, text: string) => `Statement:\n${statement.trim()}\n\nPassage from ${source}:\n${text.trim()}`;
 /** Claims per check; Rust accepts up to 24 (src-tauri/src/laya/mod.rs `MAX_CLAIMS`). */
 export const MAX_CLAIMS = 24;
 /** Longer sentences are cut: 500 characters are at most 2 KB in UTF-8, Rust's bound (`MAX_STATEMENT`). */
@@ -25,18 +41,27 @@ const MAX_SENTENCE = 500;
 export type Claim = {
   /** The sentence as the model wrote it, without Markdown or citation marks. */
   sentence: string;
-  /** The source number it cites, `[n]`. */
+  /** The source number checked here, `[n]`. */
   n: number;
+  /** Every source the sentence cites; each is checked on its own. */
+  cites: number[];
 };
 
 export type SupportItem = Claim & {
+  /** `file:start-end` of the passage it was checked against. */
+  source: string;
   /** P(the cited passage supports the sentence). */
   score: number;
   flagged: boolean;
+  /** Laya's input for this claim, in tokens, and whether it was cut to fit. */
+  inputTokens: number;
+  truncated: boolean;
 };
 
 export type SupportRecord = {
   model: string;
+  /** Checkpoint id, for what was measured of it (`MEASURED`). */
+  modelId: string;
   /** Wall time, IPC included; `modelMs` is Rust's own. */
   ms: number;
   modelMs: number;
@@ -69,15 +94,18 @@ export function citedClaims(answer: string, sources: number): Claim[] {
       .slice(0, MAX_SENTENCE);
     // A sentence left with fewer than two words once the citations are removed (", , and [2].") can't be checked.
     if ((sentence.match(/[\p{L}\p{N}]+/gu) ?? []).length < 2) continue;
-    for (const n of ns) {
+    const cites = [...new Set(ns.filter((n) => n >= 1 && n <= sources))];
+    for (const n of cites) {
       const key = `${n} ${sentence}`;
-      if (n < 1 || n > sources || seen.has(key)) continue;
+      if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ sentence, n });
+      out.push({ sentence, n, cites });
     }
   }
   return out.slice(0, MAX_CLAIMS);
 }
+
+export const sourceOf = (h: SearchHit) => `${h.file}:${h.start_line}-${h.end_line}`;
 
 /**
  * Scores the answer's cited sentences against `sources` (numbered as the
@@ -87,18 +115,25 @@ export async function checkClaims(answer: string, sources: SearchHit[]): Promise
   const claims = citedClaims(answer, sources.length);
   if (!claims.length) return null;
   const started = performance.now();
-  const r = await layaSupport(
-    claims.map((c) => {
-      const h = sources[c.n - 1];
-      return { statement: c.sentence, source: `${h.file}:${h.start_line}-${h.end_line}`, text: passageText(h) };
-    }),
-  );
+  const sent = claims.map((c) => {
+    const h = sources[c.n - 1];
+    return { statement: c.sentence, source: sourceOf(h), text: passageText(h) };
+  });
+  const r = await layaSupport(sent);
   if (r.scores.length !== claims.length || !r.scores.every(Number.isFinite)) throw new Error(`${r.model} returned ${r.scores.length} scores for ${claims.length} claims.`);
   return {
     model: layaById(r.model)?.name ?? r.model,
+    modelId: r.model,
     ms: Math.round(performance.now() - started),
     modelMs: r.ms,
     flagBelow: FLAG_BELOW,
-    items: claims.map((c, i) => ({ ...c, score: r.scores[i], flagged: r.scores[i] < FLAG_BELOW })),
+    items: claims.map((c, i) => ({
+      ...c,
+      source: sent[i].source,
+      score: r.scores[i],
+      flagged: r.scores[i] < FLAG_BELOW,
+      inputTokens: r.inputTokens[i],
+      truncated: r.truncated[i],
+    })),
   };
 }

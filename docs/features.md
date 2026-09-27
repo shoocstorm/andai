@@ -113,10 +113,20 @@ pasting in whatever one search returns:
   written, Laya checks each sentence that cites a source (`[n]`) against the
   passage it cites. When one probably isn't supported, a short note under
   the answer lists it, and the Execution Trace shows every cited sentence
-  with its score. The answer itself is never changed, and the note says
-  *may not be*: in our tests most flags were real gaps (a source that
-  doesn't mention what the sentence says), but not all. It takes about
+  with its score. **Why?** on any of them opens the check itself: the
+  sentence, the passage it was compared with, Laya's answer, and why it
+  counts as a flag. The answer itself is never changed. It takes about
   15 ms (Laya Multilingual) to 41 ms (Laya English) per answer.
+  *How far to trust it:* treat a flag as "read this source", not "this is
+  wrong". On our small test set (60 cited sentences, not hand-checked),
+  Laya ranked a sentence's own passage above an unrelated one 67%
+  (Multilingual) or 82% (English) of the time, flagged about 40% or 60% of
+  the unrelated pairings, and wrongly flagged 1 or 2 of 60 correct ones.
+  Real miscitations are usually subtler than an unrelated passage, so
+  expect it to miss more. It also checks only sentences that carry a `[n]`,
+  checks a sentence that cites several sources against each one alone (so
+  a sentence that combines them can be flagged), and reads the stored
+  passage, which may be shorter than what the chat model saw.
 - **Search scope (with a Laya decision model).** A knowledge search is either
   *focused* (direct matches for a name or exact term) or *broad* (related
   passages too). With Laya loaded, Laya picks the scope as a typed choice in

@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, Copy } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from '../state/ui';
 
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
@@ -188,8 +189,13 @@ export function CopyButton({ text, label, size = 12, children }: { text: string 
   );
 }
 
+/**
+ * A dialog over the whole window. It renders into `document.body`: opened from
+ * inside a transformed element (an answer card animates with `transform`), a
+ * `position: fixed` backdrop would be laid out and clipped inside that element.
+ */
 export function Modal({ open, onClose, children, wide, label }: { open: boolean; onClose: () => void; children: ReactNode; wide?: boolean; label?: string }) {
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -215,7 +221,8 @@ export function Modal({ open, onClose, children, wide, label }: { open: boolean;
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }
 

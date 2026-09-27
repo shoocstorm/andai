@@ -164,6 +164,19 @@ pub struct LayaRelevance {
     model: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayaSupport {
+    /// P(the passage supports the statement), per claim in order.
+    scores: Vec<f64>,
+    /// Input tokens per claim's row, and whether it was cut to fit (the trace shows both).
+    input_tokens: Vec<usize>,
+    truncated: Vec<bool>,
+    /// Model time for all claims (Rust), ms.
+    ms: f64,
+    model: String,
+}
+
 pub fn validate_passages(request: &str, passages: &[LayaPassage]) -> Result<(), String> {
     if request.trim().is_empty() || request.len() > MAX_REQUEST {
         return Err(format!("the request must be 1–{MAX_REQUEST} bytes"));
@@ -475,7 +488,7 @@ pub async fn laya_relevance(app: AppHandle, mlx: State<'_, Mlx>, request: String
 /// Scores how likely each cited passage supports the sentence that cites it,
 /// one `noul` row per claim, batched. The webview decides what to flag.
 #[tauri::command]
-pub async fn laya_support(app: AppHandle, mlx: State<'_, Mlx>, claims: Vec<LayaClaim>) -> Result<LayaRelevance, String> {
+pub async fn laya_support(app: AppHandle, mlx: State<'_, Mlx>, claims: Vec<LayaClaim>) -> Result<LayaSupport, String> {
     validate_claims(&claims)?;
     #[cfg(mlx)]
     {
@@ -492,7 +505,13 @@ pub async fn laya_support(app: AppHandle, mlx: State<'_, Mlx>, claims: Vec<LayaC
             })
         })
         .await?;
-        Ok(LayaRelevance { scores: asked.answers.iter().map(|a| a.probabilities[1]).collect(), ms: asked.ms, model })
+        Ok(LayaSupport {
+            scores: asked.answers.iter().map(|a| a.probabilities[1]).collect(),
+            input_tokens: asked.answers.iter().map(|a| a.input_tokens).collect(),
+            truncated: asked.answers.iter().map(|a| a.truncated).collect(),
+            ms: asked.ms,
+            model,
+        })
     }
     #[cfg(not(mlx))]
     {

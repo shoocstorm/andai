@@ -113,7 +113,8 @@ vi.mock('../llm/laya', () => ({
   layaSupport: async (claims: unknown[]) => {
     rel.claims.push(claims);
     if (rel.supportFail) throw rel.supportFail;
-    return { scores: rel.support ?? claims.map(() => 0.9), ms: 9, model: 'laya-multilingual' };
+    const scores = rel.support ?? claims.map(() => 0.9);
+    return { scores, inputTokens: scores.map(() => 50), truncated: scores.map(() => false), ms: 9, model: 'laya-multilingual' };
   },
 }));
 

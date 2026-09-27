@@ -571,6 +571,16 @@ junk sentences, the surcharge one, and the `refundFraction` false alarm),
 checks now accept the Laya-only relevance and claim steps as skipped, which
 they are when there's nothing to check.
 
+**Claim dialog (2026-09-27).** Every checked sentence opens a dialog like
+*Why this step?*: the sentence, the passage it was compared with (from the
+message's sources), the yes/no question, Laya's answer against the cut, the
+exact input (`claimState`), input tokens and whether it was cut to fit
+(`laya_support` now returns both per claim), and what the probe measured
+for that checkpoint (`MEASURED`). Known limits, stated in the docs:
+proxy labels with easy negatives (an upper bound), uncited sentences
+unchecked, multi-cite sentences checked per source, the stored snippet
+rather than everything the chat model read.
+
 ## Decided: a native engine (MLX)
 
 **Decided 2026-09-27; what ships is described in AGENTS.md §2** (the native

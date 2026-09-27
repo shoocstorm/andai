@@ -513,7 +513,16 @@ level defaults to *Ask*.
   1–2 of 60 own citations were clear false alarms and the rest real gaps,
   so it flags "may not be supported" and never changes the answer. In the
   eval it flagged 1 of 32 (multilingual, 15 ms) and 4 of 33 (English, 41 ms)
-  cited sentences (tracker item 13).
+  cited sentences (tracker item 13). The probe's labels are a proxy (own
+  passage vs. a random one, not hand-checked), and random negatives are
+  easier than real miscitations, so treat its numbers as an upper bound;
+  `claims.ts` `MEASURED` shows them in the claim dialog. Its input is
+  `claimState` in TS and `claim_state` in Rust: keep them identical (both
+  tested).
+- **A `Modal` renders into `document.body`** (portal). Opened from inside
+  a transformed element (an answer card animates with `transform`), its
+  `position: fixed` backdrop was laid out and clipped inside that card
+  (seen 2026-09-27 with the claim dialog).
 - **Don't edit `src/` while `eval:agent` runs from the same checkout.** The
   harness serves the dev UI with hot reload, and a reload mid-run failed it
   ("eval-docs did not index: empty", 2026-09-27). A second run failed with
