@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { addMessage, clearChat, type AgentStep, type Message, type ToolCallRecord } from '../state/chat';
 import { requestApproval } from '../state/tools';
 import { useKb } from '../state/kb';
@@ -144,6 +144,36 @@ describe('Command Center', () => {
     await userEvent.click(folded.querySelector('summary')!);
     expect(folded.open).toBe(true);
     expect(within(folded).getByText('Searching knowledge base: Retrieved 1 passage')).toBeVisible();
+  });
+
+  it('numbers each step’s chip as the trace does, shows its icon on the trace card, and flashes that card on a click', async () => {
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
+    useLayout.setState({ traceOpen: true });
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Use COOP.',
+      createdAt: 0,
+      steps: [
+        { kind: 'analyze', title: 'Analyze query', detail: '', status: 'skipped' },
+        { kind: 'retrieve', title: 'Knowledge retrieval', detail: 'Retrieved 1 passage', status: 'done' },
+        { kind: 'generate', title: 'Generate', detail: '10 tokens', status: 'done' },
+      ],
+    });
+    render(<CommandCenter />);
+    // a skipped step keeps its number, as in the trace: retrieval is step 02
+    const chip = screen.getByRole('button', { name: 'Show step 02 in the trace: Searching knowledge base: Retrieved 1 passage' });
+    expect(within(chip).getByText('02')).toHaveClass('step-no');
+    const card = document.getElementById('trace-a-retrieve')!;
+    expect(card).toHaveTextContent('Step 02');
+    expect(card.querySelector('.trace-step-icon')).not.toBeNull();
+    await userEvent.click(chip);
+    expect(card).toHaveClass('flash');
+    raf.mockRestore();
   });
 
   it('shows a running turn as one live line: a dot per step and what the current one is doing', () => {
@@ -809,6 +839,19 @@ describe('Command Center (agent mode)', () => {
     });
     render(<CommandCenter />);
     expect(screen.queryByText(/may not be supported/)).toBeNull();
+  });
+
+  it('numbers a tool call’s chip under the plan step, and points it at its card in the trace', async () => {
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
+    turn([{ id: 's1', index: 0, at: 0, decision: null, action: 'kb_search', call: call() }]);
+    render(<CommandCenter />);
+    const chip = screen.getByRole('button', { name: /^Show step 01\.1 in the trace: Knowledge search/ });
+    await userEvent.click(chip);
+    expect(document.getElementById('trace-a-call-s1')).toHaveClass('flash');
+    raf.mockRestore();
   });
 
   it('shows a fallback note when the loop overrode the decision', () => {

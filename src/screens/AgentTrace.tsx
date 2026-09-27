@@ -605,13 +605,13 @@ export function DecisionDialog({ s, open, onClose }: { s: AgentStep; open: boole
 }
 
 /** One loop iteration in the Execution Trace: the decision and the tool call each open in a dialog. */
-export function AgentStepCard({ s }: { s: AgentStep }) {
+export function AgentStepCard({ s, domId }: { s: AgentStep; domId?: string }) {
   const c = s.call;
   const [open, setOpen] = useState(false);
   const [why, setWhy] = useState(false);
   const pill = c ? CALL_PILL[c.status] : ['Decided', 'violet'];
   return (
-    <div className={`trace-card ag-step${c?.status === 'running' || c?.status === 'awaiting' ? ' running' : ''}`}>
+    <div id={domId} className={`trace-card ag-step${c?.status === 'running' || c?.status === 'awaiting' ? ' running' : ''}`}>
       <div className="trace-top">
         <span className="label violet">
           Step {s.index + 1} · {fmtTime(s.at)}
@@ -1176,7 +1176,14 @@ export function callChipText(c: ToolCallRecord): string {
 /** Whether a call is still under way (writing arguments, running, or waiting for approval). */
 export const callLive = (c: ToolCallRecord) => c.status === 'running' || c.status === 'filling' || c.status === 'awaiting';
 
-export function ToolChips({ m }: { m: Message }) {
+/** The DOM id of an agent step's card in the Execution Trace, so a chip can point at it. */
+export const traceCallId = (msgId: string, stepId: string) => `trace-${msgId}-call-${stepId}`;
+
+/**
+ * The tool calls as chips, numbered under the plan step (`planNo`.n, as the
+ * trace nests them); `onPick` makes each one point at its card in the trace.
+ */
+export function ToolChips({ m, planNo, onPick }: { m: Message; planNo?: number; onPick?: (domId: string) => void }) {
   const calls = (m.agent ?? []).filter((s) => s.call);
   if (!calls.length) return null;
   return (
@@ -1185,13 +1192,26 @@ export function ToolChips({ m }: { m: Message }) {
         const c = s.call!;
         const bad = c.status === 'error' || c.status === 'denied';
         const live = callLive(c);
+        const no = planNo != null ? `${String(planNo).padStart(2, '0')}.${s.index + 1}` : null;
+        const chip = (
+          <>
+            {no && <span className="step-no">{no}</span>}
+            {c.status === 'awaiting' ? <Hand size={14} /> : <Wrench size={14} />}
+            <span>{callChipText(c)}</span>
+          </>
+        );
         return (
           <div key={s.id} className="cc-chip-row">
             <span className={`dot${live ? ' pulse' : ''}`} style={{ color: 'var(--violet)' }} />
-            <div className="cc-chip" style={{ color: bad ? 'var(--red)' : 'var(--violet)' }}>
-              {c.status === 'awaiting' ? <Hand size={14} /> : <Wrench size={14} />}
-              <span>{callChipText(c)}</span>
-            </div>
+            {onPick ? (
+              <button type="button" className="cc-chip" style={{ color: bad ? 'var(--red)' : 'var(--violet)' }} aria-label={`Show step ${no ?? s.index + 1} in the trace: ${c.title}`} onClick={() => onPick(traceCallId(m.id, s.id))}>
+                {chip}
+              </button>
+            ) : (
+              <div className="cc-chip" style={{ color: bad ? 'var(--red)' : 'var(--violet)' }}>
+                {chip}
+              </div>
+            )}
           </div>
         );
       })}

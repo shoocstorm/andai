@@ -40,7 +40,7 @@ import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
-import { AgentStepCard, ApprovalCard, callChipText, callLive, CopyTraceButton, DecisionSummary, MatchBadge, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
+import { AgentStepCard, ApprovalCard, callChipText, callLive, traceCallId, CopyTraceButton, DecisionSummary, MatchBadge, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 import { shortcut } from '../lib/platform';
 
@@ -300,26 +300,64 @@ function reportFor(m: Message): string {
   });
 }
 
-/** Every step as a chip, one per line, and the tool calls: the full "how it got here". */
+/** The DOM id of a step's card in the Execution Trace, so a chip can point at it. */
+const traceStepId = (msgId: string, kind: TraceStep['kind']) => `trace-${msgId}-${kind}`;
+
+/** A step's number as the trace shows it: its place among all the turn's steps, skipped ones included. */
+const stepNo = (m: Message, s: TraceStep) => (m.steps ?? []).indexOf(s) + 1;
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * Scrolls the Execution Trace to a card and flashes it, after the click has
+ * focused the turn (two frames: the trace re-renders for it first). Does
+ * nothing when the trace is hidden.
+ */
+export function flashTrace(domId: string) {
+  const run = () => {
+    const el = document.getElementById(domId);
+    if (!el) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView?.({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+    el.classList.remove('flash');
+    void el.offsetWidth; // restart the animation on a second click
+    el.classList.add('flash');
+    window.setTimeout(() => el.classList.remove('flash'), 1600);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(run));
+}
+
+/** Every step as a chip, one per line, and the tool calls: the full "how it got here". Each points at its card in the trace. */
 function StepChips({ m, steps }: { m: Message; steps: TraceStep[] }) {
+  const traceOpen = useLayout((st) => st.traceOpen);
+  const hint = traceOpen ? undefined : `Open the Execution Trace (${shortcut('J')}) to see this step`;
+  const plan = steps.find((s) => s.kind === 'plan');
   return (
     <div className="cc-chips">
       <AnimatePresence initial={false}>
         {steps.map((s) => {
           const st = STEP_STYLE[s.kind];
           const Icon = st.icon;
+          const no = pad2(stepNo(m, s));
           return (
             <motion.div key={s.kind} className="cc-chip-row" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
               <span className={`dot${s.status === 'running' ? ' pulse' : ''}`} style={{ color: st.color }} />
-              <div className="cc-chip" style={{ color: s.status === 'error' ? 'var(--red)' : st.color }}>
+              <button
+                type="button"
+                className="cc-chip"
+                style={{ color: s.status === 'error' ? 'var(--red)' : st.color }}
+                title={hint}
+                aria-label={`Show step ${no} in the trace: ${chipText(s)}`}
+                onClick={() => flashTrace(traceStepId(m.id, s.kind))}
+              >
+                <span className="step-no">{no}</span>
                 {s.status === 'running' ? <Loader2 size={14} className="spin" /> : <Icon size={14} />}
                 <span>{chipText(s)}</span>
-              </div>
+              </button>
             </motion.div>
           );
         })}
       </AnimatePresence>
-      <ToolChips m={m} />
+      <ToolChips m={m} planNo={plan ? stepNo(m, plan) : undefined} onPick={flashTrace} />
     </div>
   );
 }
@@ -361,6 +399,9 @@ function ReasoningStrip({ m, steps }: { m: Message; steps: TraceStep[] }) {
           {steps.map((s) => (
             <i key={s.kind} className={s.status} style={{ color: s.status === 'error' ? 'var(--red)' : STEP_STYLE[s.kind].color }} />
           ))}
+        </span>
+        <span className="step-no" style={{ color: st.color }}>
+          {pad2(stepNo(m, running))}
         </span>
         <Loader2 size={13} className="spin" style={{ color: st.color }} />
         <span className="cc-live-text ellipsis" style={{ color: st.color }}>
@@ -782,56 +823,63 @@ function TracePanel({ msg }: { msg?: Message }) {
                 <div className="trace-title">{title.length > 70 ? `${title.slice(0, 70)}…` : title || 'Transmission'}</div>
               </div>
             </TraceNode>
-            {steps.map((s, i) => (
-              <TraceNode key={s.kind} state={s.status === 'running' ? 'active' : s.status === 'queued' ? 'queued' : s.status === 'skipped' ? 'queued' : 'done'}>
-                <div className={`trace-card${s.status === 'running' ? ' running' : ''}${s.status === 'queued' || s.status === 'skipped' ? ' dim' : ''}`}>
-                  <div className="trace-top">
-                    <span className="label blue">Step {String(i + 1).padStart(2, '0')}</span>
-                    <span className={`pill ${STATUS_PILL[s.status][1]}`}>{STATUS_PILL[s.status][0]}</span>
+            {steps.map((s, i) => {
+              const Icon = STEP_STYLE[s.kind].icon;
+              return (
+                <TraceNode key={s.kind} state={s.status === 'running' ? 'active' : s.status === 'queued' ? 'queued' : s.status === 'skipped' ? 'queued' : 'done'}>
+                  <div id={traceStepId(msg.id, s.kind)} className={`trace-card${s.status === 'running' ? ' running' : ''}${s.status === 'queued' || s.status === 'skipped' ? ' dim' : ''}`}>
+                    <div className="trace-top">
+                      <span className="label blue">Step {pad2(i + 1)}</span>
+                      <span className={`pill ${STATUS_PILL[s.status][1]}`}>{STATUS_PILL[s.status][0]}</span>
+                    </div>
+                    <div className="trace-title trace-step-title">
+                      {/* the same icon as the step's chip above the answer, so the two can be matched at a glance */}
+                      <Icon size={15} className="trace-step-icon" style={{ color: s.status === 'error' ? 'var(--red)' : STEP_STYLE[s.kind].color }} aria-hidden="true" />
+                      {s.title}
+                    </div>
+                    <div className="trace-detail">
+                      {s.detail}
+                      {s.ms != null && s.status === 'done' && <span className="faint"> · {(s.ms / 1000).toFixed(2)}s</span>}
+                    </div>
+                    {s.kind === 'generate' && s.status === 'running' && (
+                      <div style={{ marginTop: 12 }}>
+                        <Bar value={genTokens / maxTokens} indeterminate={!genTokens} />
+                      </div>
+                    )}
                   </div>
-                  <div className="trace-title">{s.title}</div>
-                  <div className="trace-detail">
-                    {s.detail}
-                    {s.ms != null && s.status === 'done' && <span className="faint"> · {(s.ms / 1000).toFixed(2)}s</span>}
-                  </div>
-                  {s.kind === 'generate' && s.status === 'running' && (
-                    <div style={{ marginTop: 12 }}>
-                      <Bar value={genTokens / maxTokens} indeterminate={!genTokens} />
+                  {s.kind === 'plan' && !!msg.agent?.length && (
+                    <div className="trace-subs ag-subs">
+                      <DecisionSummary agent={msg.agent} />
+                      {msg.agent.map((a) => (
+                        <AgentStepCard key={a.id} s={a} domId={traceCallId(msg.id, a.id)} />
+                      ))}
                     </div>
                   )}
-                </div>
-                {s.kind === 'plan' && !!msg.agent?.length && (
-                  <div className="trace-subs ag-subs">
-                    <DecisionSummary agent={msg.agent} />
-                    {msg.agent.map((a) => (
-                      <AgentStepCard key={a.id} s={a} />
-                    ))}
-                  </div>
-                )}
-                {s.kind === 'filter' && msg.relevance && <RelevanceList r={msg.relevance} sources={msg.sources ?? []} question={questionFor(msg)} />}
-                {s.kind === 'verify' && msg.support && <SupportList r={msg.support} sources={msg.sources ?? []} />}
-                {/* In agent mode the tool calls and the relevance check already list the passages. */}
-                {s.kind === 'retrieve' && !!msg.sources?.length && (
-                  <div className="trace-subs">
-                    {msg.sources.slice(0, 5).map((h, j) => (
-                      <div key={h.id + j} className="trace-sub">
-                        <FileText size={13} color="var(--text-3)" />
-                        <span className="ellipsis">
-                          [{j + 1}] {h.file}
-                          <span className="faint">
-                            :{h.start_line}-{h.end_line}
+                  {s.kind === 'filter' && msg.relevance && <RelevanceList r={msg.relevance} sources={msg.sources ?? []} question={questionFor(msg)} />}
+                  {s.kind === 'verify' && msg.support && <SupportList r={msg.support} sources={msg.sources ?? []} />}
+                  {/* In agent mode the tool calls and the relevance check already list the passages. */}
+                  {s.kind === 'retrieve' && !!msg.sources?.length && (
+                    <div className="trace-subs">
+                      {msg.sources.slice(0, 5).map((h, j) => (
+                        <div key={h.id + j} className="trace-sub">
+                          <FileText size={13} color="var(--text-3)" />
+                          <span className="ellipsis">
+                            [{j + 1}] {h.file}
+                            <span className="faint">
+                              :{h.start_line}-{h.end_line}
+                            </span>
                           </span>
-                        </span>
-                        {/* the narrow trace keeps room for the file name: the tag only, its score in the tooltip */}
-                        <MatchBadge h={h} peers={msg.sources!} compact />
-                        <Check size={14} color="var(--violet)" />
-                      </div>
-                    ))}
-                    {msg.sources.length > 5 && <div className="trace-sub faint">+{msg.sources.length - 5} more</div>}
-                  </div>
-                )}
-              </TraceNode>
-            ))}
+                          {/* the narrow trace keeps room for the file name: the tag only, its score in the tooltip */}
+                          <MatchBadge h={h} peers={msg.sources!} compact />
+                          <Check size={14} color="var(--violet)" />
+                        </div>
+                      ))}
+                      {msg.sources.length > 5 && <div className="trace-sub faint">+{msg.sources.length - 5} more</div>}
+                    </div>
+                  )}
+                </TraceNode>
+              );
+            })}
           </div>
         )}
       </div>

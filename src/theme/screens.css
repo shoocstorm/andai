@@ -3104,3 +3104,64 @@ tr:hover .kn-remove {
     animation: none;
   }
 }
+
+/* a step's number, the same on its chip and its card in the trace */
+.step-no {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+/* a chip is a button that points at its step in the trace; it keeps the chip's look */
+button.cc-chip {
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.cc-reasoning button.cc-chip {
+  font-size: 12.5px;
+}
+button.cc-chip:hover {
+  border-color: color-mix(in srgb, currentColor 45%, transparent);
+  background: color-mix(in srgb, currentColor 11%, transparent);
+}
+button.cc-chip:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.trace-step-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.trace-step-icon {
+  flex: none;
+}
+/* the card a chip pointed at, for a moment */
+.trace-card.flash {
+  animation: trace-flash 1.5s ease-out;
+}
+@keyframes trace-flash {
+  0%,
+  25% {
+    box-shadow: 0 0 0 2px var(--violet), 0 0 0 7px var(--violet-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trace-card.flash {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--violet);
+  }
+}

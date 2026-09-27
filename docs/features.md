@@ -21,7 +21,9 @@ model download nothing leaves the machine: no account, no API key, no cloud.
   generating*) and what the current one is doing, such as the tool call it's
   running. Once the answer is in, it folds to a single line (how long it
   took, the tool calls and passages it used, and a warning if a step failed
-  or a claim needs checking) that opens to every step. Qwen3 models can also
+  or a claim needs checking) that opens to every step. Each step carries the
+  same number and icon as its card in the Execution Trace; click one to
+  scroll the trace to that card and highlight it. Qwen3 models can also
   show their step-by-step thinking, folded away until you open it.
 - **Cited sources.** When a knowledge base is selected, answers cite passages
   as `[1]`, `[2]`. Each citation matches a source listed under the answer, with
