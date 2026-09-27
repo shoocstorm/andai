@@ -508,6 +508,63 @@ describe('Command Center (agent mode)', () => {
     expect(why.getByText(/76% of the time/)).toBeInTheDocument();
   });
 
+  it('fills in a relevance record saved before the request and passage text were kept, and says what can’t be recovered (reported)', async () => {
+    const user = userEvent.setup();
+    // The shape saved by earlier builds: no modelId, request, text, inputTokens or truncated.
+    const old = {
+      model: 'Laya Multilingual',
+      ms: 29,
+      modelMs: 28,
+      keepTop: 2,
+      dropBelow: 0.1,
+      tokensSaved: 20,
+      items: [
+        { file: 'release-notes.md', start_line: 13, end_line: 18, name: 'a', score: 0.22, kept: true, reason: 'score', chars: 120 },
+        { file: 'operations.md', start_line: 3, end_line: 9, name: 'b', score: 0.02, kept: false, reason: 'low', chars: 90 },
+      ],
+    } as unknown as NonNullable<Message['relevance']>;
+    addMessage({ id: 'u', role: 'user', content: 'Can I get a refund in cash if my sailing is canceled?', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'No [1].',
+      createdAt: 0,
+      sources: [{ id: 'h1', name: '2.4.0', node_type: 'Section', file: 'release-notes.md', start_line: 13, end_line: 18, snippet: 'Group bookings: parties of 10 or more get 15% off.' }],
+      relevance: old,
+      steps: [{ kind: 'filter', title: 'Relevance check', detail: 'All passages look relevant', status: 'done' }],
+    });
+    render(<CommandCenter />);
+    await user.click(screen.getByRole('button', { name: 'Relevance check: release-notes.md:13-18' }));
+    let dialog = within(screen.getByRole('dialog', { name: 'Relevance check for release-notes.md:13-18' }));
+    expect(dialog.getByText('Can I get a refund in cash if my sailing is canceled?')).toBeInTheDocument();
+    expect(dialog.getAllByText(/Group bookings: parties of 10 or more get 15% off\./).length).toBe(2); // passage, and the exact input
+    expect(dialog.queryByText('(empty)')).toBeNull();
+    expect(dialog.getByText(/76% of the time/)).toBeInTheDocument(); // the model id, recovered from the name
+    await user.click(dialog.getAllByRole('button', { name: 'Close dialog' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Relevance check: operations.md:3-9' }));
+    dialog = within(await screen.findByRole('dialog', { name: 'Relevance check for operations.md:3-9' }));
+    expect(dialog.getAllByText(/Not recorded: this check ran before Andai kept the text of dropped passages\./).length).toBe(2);
+  });
+
+  it('opens a claim saved before cites and source were kept', async () => {
+    const user = userEvent.setup();
+    const old = { model: 'Laya English', ms: 30, modelMs: 25, flagBelow: 0.1, items: [{ sentence: 'Cars pay 18.5.', n: 1, score: 0.04, flagged: true }] } as unknown as NonNullable<Message['support']>;
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Cars pay 18.5 [1].',
+      createdAt: 0,
+      sources: [{ id: 'h1', name: 'fares', node_type: 'Code', file: 'fares.ts', start_line: 12, end_line: 12, snippet: 'export const VEHICLE_SURCHARGE = 18.5;' }],
+      support: old,
+    });
+    render(<CommandCenter />);
+    await user.click(within(document.querySelector('.cc-support') as HTMLElement).getByRole('button', { name: 'Claim check: [1] Cars pay 18.5.' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Claim check for source 1' }));
+    expect(dialog.getByText(/whether passage \[1\] \(fares\.ts:12-12\) supports/)).toBeInTheDocument();
+    expect(dialog.getByText(/82% of the time/)).toBeInTheDocument();
+  });
+
   it('makes each citation in the answer and each retrieval.log line open that source, with what the checks said', async () => {
     const user = userEvent.setup();
     addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });

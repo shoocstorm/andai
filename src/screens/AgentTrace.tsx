@@ -10,6 +10,7 @@ import { CopyButton, Modal, fmtTime } from '../components/ui';
 import { shellCommand } from '../agent/debugReport';
 import type { RelevanceRecord } from '../agent/relevance';
 import { claimState, MEASURED, SUPPORTS, type SupportItem, type SupportRecord } from '../agent/claims';
+import { LAYA_MODELS } from '../llm/models';
 import { MEASURED_RELEVANCE, passageState, passageText, RELEVANT, type RelevanceItem } from '../agent/relevance';
 import type { SearchHit } from '../kb/api';
 import type { DecisionIO } from '../llm/decide';
@@ -667,11 +668,30 @@ export function explainRelevance(x: RelevanceItem, r: RelevanceRecord): string[]
   return out;
 }
 
+/**
+ * A relevance record with what an older one lacks filled in from the message
+ * (saved before Andai kept the request, the passage text and the model id):
+ * the request is the question, and a kept passage is one of the answer's
+ * sources, with the same text Laya read. A dropped passage's text can't be
+ * recovered, and is left undefined so the dialog says so.
+ */
+export function resolveRelevance(r: RelevanceRecord, sources: SearchHit[], question: string) {
+  const modelId = r.modelId ?? LAYA_MODELS.find((m) => m.name === r.model)?.id ?? '';
+  const request = r.request ?? question;
+  const textOf = (x: RelevanceItem): string | undefined => {
+    if (typeof x.text === 'string') return x.text;
+    const h = x.kept ? sources.find((s) => s.file === x.file && s.start_line === x.start_line && s.end_line === x.end_line) : undefined;
+    return h ? passageText(h) : undefined;
+  };
+  return { r: { ...r, modelId, request }, textOf };
+}
+
+const NOT_RECORDED = 'Not recorded: this check ran before Andai kept the text of dropped passages.';
+
 /** One passage's relevance check: the request, the passage, Laya's answer and why it was kept or dropped, and the exact call. */
-export function RelevanceDialog({ x, r, cite, onClose }: { x: RelevanceItem; r: RelevanceRecord; cite: number | null; onClose: () => void }) {
+export function RelevanceDialog({ x, r, text, cite, onClose }: { x: RelevanceItem; r: RelevanceRecord; text: string | undefined; cite: number | null; onClose: () => void }) {
   const source = `${x.file}:${x.start_line}-${x.end_line}`;
-  const text = String(x.text ?? '');
-  const state = passageState(String(r.request ?? ''), source, text);
+  const state = text == null ? null : passageState(r.request, source, text);
   return (
     <Modal open onClose={onClose} wide label={`Relevance check for ${source}`}>
       <div className="dd-head">
@@ -707,7 +727,7 @@ export function RelevanceDialog({ x, r, cite, onClose }: { x: RelevanceItem; r: 
             <div className="ag-small selectable">{r.request}</div>
           </Field>
           <Field k={`Passage · ${source}`} copy={text}>
-            <pre className="ag-pre selectable dd-state">{text || '(empty)'}</pre>
+            {text == null ? <div className="ag-small faint">{NOT_RECORDED}</div> : <pre className="ag-pre selectable dd-state">{text || '(empty)'}</pre>}
           </Field>
           <Field k="Yes/no question">
             <div className="ag-small selectable">{RELEVANT}</div>
@@ -724,8 +744,8 @@ export function RelevanceDialog({ x, r, cite, onClose }: { x: RelevanceItem; r: 
 
       <details className="ag-raw dd-raw">
         <summary>Exact call: Laya’s input for this passage</summary>
-        <Field k="Input: state" copy={state}>
-          <pre className="ag-pre selectable">{state}</pre>
+        <Field k="Input: state" copy={state ?? undefined}>
+          {state == null ? <div className="ag-small faint">{NOT_RECORDED}</div> : <pre className="ag-pre selectable">{state}</pre>}
         </Field>
         <Field k="Input: question">
           <pre className="ag-pre selectable">{`noul · ${RELEVANT}`}</pre>
@@ -774,8 +794,9 @@ function YesNoBars({ yes, no, p, chosenYes }: { yes: string; no: string; p: numb
  * (numbered as the answer cites it) or was dropped. Each passage opens its
  * check; a dialog is built only while open.
  */
-export function RelevanceList({ r }: { r: RelevanceRecord }) {
+export function RelevanceList({ r: stored, sources, question }: { r: RelevanceRecord; sources: SearchHit[]; question: string }) {
   const [open, setOpen] = useState<number | null>(null);
+  const { r, textOf } = resolveRelevance(stored, sources, question);
   const dropped = r.items.filter((x) => !x.kept).length;
   let n = 0;
   const cites = r.items.map((x) => (x.kept ? ++n : null));
@@ -815,7 +836,7 @@ export function RelevanceList({ r }: { r: RelevanceRecord }) {
           {fmtMs(r.ms)}
         </div>
       </details>
-      {open != null && <RelevanceDialog x={r.items[open]} r={r} cite={cites[open]} onClose={() => setOpen(null)} />}
+      {open != null && <RelevanceDialog x={r.items[open]} r={r} text={textOf(r.items[open])} cite={cites[open]} onClose={() => setOpen(null)} />}
     </section>
   );
 }
@@ -859,7 +880,7 @@ export function ClaimDialog({ x, r, passage, open, onClose }: { x: SupportItem; 
           <div className="label violet">Claim check · source [{x.n}]</div>
           <h3>{x.flagged ? 'May not be supported by its source' : 'Looks supported by its source'}</h3>
           <div className="faint ag-small">
-            {r.model} · decision model · {x.inputTokens} input tokens · the check took {fmtMs(r.ms)} for {r.items.length} claim{r.items.length === 1 ? '' : 's'} (model{' '}
+            {r.model} · decision model{x.inputTokens != null ? ` · ${x.inputTokens} input tokens` : ''} · the check took {fmtMs(r.ms)} for {r.items.length} claim{r.items.length === 1 ? '' : 's'} (model{' '}
             {fmtMs(r.modelMs)})
             {x.truncated && <span className="ag-note"> · input cut to fit the model</span>}
           </div>
@@ -934,12 +955,15 @@ export function ClaimDialog({ x, r, passage, open, onClose }: { x: SupportItem; 
 function ClaimLink({ x, r, sources, children }: { x: SupportItem; r: SupportRecord; sources: SearchHit[]; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const h = sources[x.n - 1];
+  // A claim saved before these were kept has no `cites` or `source`: both follow from the answer's sources.
+  const full: SupportItem = { ...x, cites: x.cites ?? [x.n], source: x.source ?? (h ? `${h.file}:${h.start_line}-${h.end_line}` : `source [${x.n}]`) };
+  const rr: SupportRecord = { ...r, modelId: r.modelId ?? LAYA_MODELS.find((m) => m.name === r.model)?.id ?? '' };
   return (
     <>
       <TextLink label={`Claim check: [${x.n}] ${x.sentence}`} onClick={() => setOpen(true)}>
         {children}
       </TextLink>
-      {open && <ClaimDialog x={x} r={r} passage={h ? passageText(h) : ''} open onClose={() => setOpen(false)} />}
+      {open && <ClaimDialog x={full} r={rr} passage={h ? passageText(h) : ''} open onClose={() => setOpen(false)} />}
     </>
   );
 }

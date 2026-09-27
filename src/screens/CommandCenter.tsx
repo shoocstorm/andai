@@ -745,7 +745,7 @@ function TracePanel({ msg }: { msg?: Message }) {
                     ))}
                   </div>
                 )}
-                {s.kind === 'filter' && msg.relevance && <RelevanceList r={msg.relevance} />}
+                {s.kind === 'filter' && msg.relevance && <RelevanceList r={msg.relevance} sources={msg.sources ?? []} question={questionFor(msg)} />}
                 {s.kind === 'verify' && msg.support && <SupportList r={msg.support} sources={msg.sources ?? []} />}
                 {/* In agent mode the tool calls and the relevance check already list the passages. */}
                 {s.kind === 'retrieve' && !!msg.sources?.length && (
