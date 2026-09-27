@@ -2165,14 +2165,6 @@ tr:hover .kn-remove {
 .ag-toggle {
   margin-top: 8px;
 }
-.ag-details {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
 .ag-decision-head,
 .ag-seed,
 .ag-small {
@@ -2347,6 +2339,126 @@ tr:hover .kn-remove {
   .dd-grid {
     grid-template-columns: 1fr;
   }
+}
+/* tool call dialog (AgentTrace.tsx ToolCallDialog), on the decision dialog's frame */
+.tc-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tc-title svg {
+  color: var(--violet);
+}
+.tc-title .pill {
+  font-size: 11px;
+}
+.tc-desc {
+  margin: 0 0 4px;
+  max-width: 68ch;
+}
+.tc-args {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tc-arg {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--inset);
+}
+.tc-arg dt {
+  font-size: 11.5px;
+  margin-bottom: 3px;
+}
+.tc-arg dt .mono {
+  color: var(--violet);
+}
+.tc-arg dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.tc-by {
+  margin-top: 8px;
+}
+.tc-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 12px 0 0;
+}
+.tc-facts dt {
+  color: var(--text-3);
+}
+.tc-facts dd {
+  margin: 0;
+  color: var(--text-2);
+}
+.tc-found {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.tc-found h4 {
+  margin-bottom: 12px;
+}
+.tc-found .ag-field + .ag-field {
+  margin-top: 12px;
+}
+.tc-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  counter-reset: tc-hit;
+}
+.tc-hits li {
+  counter-increment: tc-hit;
+  padding: 8px 10px 8px 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  position: relative;
+}
+.tc-hits li::before {
+  content: counter(tc-hit);
+  position: absolute;
+  left: 10px;
+  top: 9px;
+  font: 600 11px/1.4 var(--font-mono);
+  color: var(--violet);
+}
+.tc-hit-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  min-width: 0;
+}
+.tc-hit-loc {
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.tc-hit-kind {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tc-hit-snippet {
+  margin: 6px 0 0;
+  font: 400 12px/1.5 var(--font-body);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 7.5em;
+  overflow: auto;
 }
 .ag-rel {
   gap: 8px;

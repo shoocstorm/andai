@@ -40,6 +40,9 @@ const WEB_CONNECT = [
   'https://www.google-analytics.com',
   'https://*.google-analytics.com',
   'https://*.analytics.google.com',
+  // Firebase Analytics SDK: measurement-ID lookup + app-instance ID.
+  'https://firebase.googleapis.com',
+  'https://firebaseinstallations.googleapis.com',
 ];
 
 describe('firebase hosting config', () => {

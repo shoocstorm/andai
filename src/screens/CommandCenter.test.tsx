@@ -212,12 +212,16 @@ describe('Command Center (agent mode)', () => {
     expect(trace.getByText('Answer now')).toBeInTheDocument();
     expect(trace.getByText(/Chosen with 85% of 3 options/)).toBeInTheDocument();
 
-    // the tool call unfolds in the card, without the decision
+    // the tool call opens in a dialog, without the decision
     await user.click(trace.getByRole('button', { name: 'Tool call' }));
-    expect(trace.getByText("ug search 'wllama COOP headers' -k 8 --json")).toBeInTheDocument();
-    expect(trace.getByText(/"file":"README.md"/)).toBeInTheDocument();
-    expect(trace.queryByRole('list', { name: /probabilities/i })).toBeNull();
-    // a step without a tool call has no tool-call toggle
+    const dialog = within(screen.getByRole('dialog', { name: 'Tool call, step 1' }));
+    expect(dialog.getByText("ug search 'wllama COOP headers' -k 8 --json")).toBeInTheDocument();
+    await user.click(dialog.getByText('Raw output from ug'));
+    expect(dialog.getByText(/"file":"README.md"/)).toBeInTheDocument();
+    expect(dialog.queryByRole('list', { name: /probabilities/i })).toBeNull();
+    await user.click(dialog.getByRole('button', { name: /^close$/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // a step without a tool call has no tool-call button
     expect(trace.getAllByRole('button', { name: /tool call$/i })).toHaveLength(1);
     expect(trace.getByRole('button', { name: /copy trace/i })).toBeInTheDocument();
   });
@@ -271,6 +275,59 @@ describe('Command Center (agent mode)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); // after its exit animation
   });
 
+  it('explains a tool call in a dialog: what happened, what it was given, what it ran and found', async () => {
+    const user = userEvent.setup();
+    const output = JSON.stringify({
+      items: [
+        { id: 'n1', name: 'Run it', node_type: 'Concept', file: 'README.md', start_line: 11, end_line: 33, snippet: 'Serve with COOP and COEP headers.' },
+        { id: 'n2', name: 'vite.config.ts', node_type: 'File', file: 'vite.config.ts', snippet: 'headers: { COOP }' },
+      ],
+    });
+    turn([{ id: 's1', index: 0, at: 0, decision, action: 'kb_search', call: call({ output, outputBytes: 2048, hits: 2 }) }]);
+    render(<CommandCenter />);
+    await user.click(within(screen.getByText('Execution Trace').closest('aside')!).getByRole('button', { name: 'Tool call' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Tool call, step 1' }));
+    expect(dialog.getByRole('heading', { name: /Knowledge search/ })).toHaveTextContent('Done');
+    expect(within(dialog.getByRole('region', { name: 'What happened' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Qwen3 0.6B filled in the arguments: query: "wllama COOP headers", scope: "broad".',
+      'It ran without asking: the tool is set to Auto, and it only reads the selected knowledge base.',
+      'ug answered in 42 ms with 2,048 bytes of results.',
+      '2 passages went into the answer’s context, new or with text the context didn’t have yet.',
+    ]);
+    // each argument by name, with what the tool's schema says it means
+    const given = within(dialog.getByRole('region', { name: 'What it was given' }));
+    expect(given.getByText('scope').closest('div')).toHaveTextContent(/scope.*focused returns direct matches only.*broad/);
+    // the passages, read from the output the way the agent read them
+    const found = within(dialog.getByRole('list', { name: 'Passages found' }));
+    expect(found.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      expect.stringMatching(/^README\.md:11-33Run it · ConceptServe with COOP and COEP headers\.$/),
+      expect.stringMatching(/^vite\.config\.tsFileheaders: \{ COOP \}$/),
+    ]);
+    await user.click(dialog.getByRole('button', { name: 'Copy tool call' }));
+    expect(JSON.parse(await navigator.clipboard.readText())).toMatchObject({ step: 1, tool: 'kb_search', args: { scope: 'broad' } });
+  });
+
+  it('explains a denied call and a failed one', async () => {
+    const user = userEvent.setup();
+    turn([
+      { id: 's1', index: 0, at: 0, decision, action: 'kb_search', call: call({ status: 'denied', policy: 'ask', approval: 'denied', argv: undefined, output: undefined, outputBytes: undefined, ms: undefined, hits: undefined, observation: 'The user declined this call; do not ask for it again.' }) },
+      { id: 's2', index: 1, at: 0, decision, action: 'kb_search', call: call({ status: 'error', args: null, argsRaw: '{"query":', argAttempts: 2, argv: undefined, output: undefined, hits: undefined, error: 'Could not produce valid arguments: bad JSON' }) },
+    ]);
+    render(<CommandCenter />);
+    const trace = within(screen.getByText('Execution Trace').closest('aside')!);
+    await user.click(trace.getAllByRole('button', { name: 'Tool call' })[0]);
+    let lines = within(within(screen.getByRole('dialog', { name: 'Tool call, step 1' })).getByRole('region', { name: 'What happened' })).getAllByRole('listitem');
+    expect(lines.map((li) => li.textContent)[1]).toBe('The tool is set to Ask, and you denied this call, so it did not run.');
+    await user.click(screen.getByRole('button', { name: /^close$/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await user.click(trace.getAllByRole('button', { name: 'Tool call' })[1]);
+    const dialog = within(screen.getByRole('dialog', { name: 'Tool call, step 2' }));
+    lines = within(dialog.getByRole('region', { name: 'What happened' })).getAllByRole('listitem');
+    expect(lines.map((li) => li.textContent)).toEqual(['Qwen3 0.6B could not write valid arguments in 2 attempts, so the tool never ran.']);
+    expect(dialog.getByText('Could not produce valid arguments: bad JSON')).toBeInTheDocument();
+    expect(dialog.getByText('No command ran.')).toBeInTheDocument();
+  });
+
   it('asks for approval inline and resolves the waiting call', async () => {
     const user = userEvent.setup();
     const ctl = new AbortController();
@@ -294,7 +351,7 @@ describe('Command Center (agent mode)', () => {
     expect(trace.getByRole('button', { name: 'Copy step 1 as JSON' }).querySelector('svg')).toBeTruthy();
 
     await user.click(trace.getByRole('button', { name: 'Tool call' }));
-    await user.click(trace.getByRole('button', { name: 'Copy command' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Tool call, step 1' })).getByRole('button', { name: 'Copy command' }));
     expect(await navigator.clipboard.readText()).toBe("ug search 'wllama COOP headers' -k 8 --json");
 
     await user.click(screen.getAllByRole('button', { name: 'Copy debug report' })[0]);

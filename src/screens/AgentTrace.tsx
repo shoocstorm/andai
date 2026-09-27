@@ -1,6 +1,6 @@
 // How agent mode shows its work: every decision with each option's
 // probability, and every tool call with its arguments, approval, the ug
-// command that ran, timing and output. Tool output and arguments come from
+// command that ran, timing, the passages it found and its raw output. Tool output and arguments come from
 // the model and the user's files, so they render as plain text only.
 
 import { Check, ChevronRight, Copy, Hand, HelpCircle, ShieldQuestion, Wrench, X } from 'lucide-react';
@@ -9,6 +9,7 @@ import { toolById } from '../agent/tools/registry';
 import { CopyButton, Modal, fmtTime } from '../components/ui';
 import { shellCommand } from '../agent/debugReport';
 import type { RelevanceRecord } from '../agent/relevance';
+import type { SearchHit } from '../kb/api';
 import type { DecisionIO } from '../llm/decide';
 import type { AgentStep, CallStatus, DecisionRecord, Message, ToolCallRecord } from '../state/chat';
 import { resolveApproval } from '../state/tools';
@@ -205,62 +206,233 @@ function Field({ k, copy, children }: { k: string; copy?: string; children: Reac
   );
 }
 
-export function CallDetail({ c }: { c: ToolCallRecord }) {
+/** The passages a call's output holds, read the way the agent read them; null when the stored output can't be parsed (clipped, or not JSON). */
+export function callResults(c: ToolCallRecord): SearchHit[] | null {
+  const def = toolById(c.tool);
+  if (!def || !c.output) return null;
+  try {
+    return def.observe(JSON.parse(c.output)).hits;
+  } catch {
+    return null;
+  }
+}
+
+const RISK_LABEL: Record<string, string> = { read: 'read-only', write: 'writes', device: 'reaches the device' };
+
+/**
+ * What a tool call did, in plain sentences, from its record: who wrote the
+ * arguments, whether it ran on its own or waited for approval, how ug
+ * answered, and what it added to the answer. Pure, for the call dialog and
+ * its tests.
+ */
+export function explainCall(c: ToolCallRecord): string[] {
+  const out: string[] = [];
+  const writer = c.argModel ?? 'The chat model';
+  const tries = c.argAttempts > 1 ? ` in ${c.argAttempts} attempts` : '';
+  if (c.args) {
+    const n = Object.keys(c.args).length;
+    out.push(n ? `${writer} filled in the arguments${tries}: ${argsInline(c.args, 160)}.` : `${c.title} takes no arguments.`);
+  } else if (c.status === 'filling') out.push(`${writer} is writing the arguments.`);
+  else out.push(`${writer} could not write valid arguments${tries}, so the tool never ran.`);
+  if (c.approval === 'pending') out.push('It is waiting for your approval before it runs.');
+  else if (c.approval === 'approved') out.push('The tool is set to Ask, and you approved this call.');
+  else if (c.approval === 'denied') out.push('The tool is set to Ask, and you denied this call, so it did not run.');
+  else if (c.args && c.policy === 'auto') out.push('It ran without asking: the tool is set to Auto, and it only reads the selected knowledge base.');
+  if (c.status === 'running') out.push('It is running now.');
+  else if (c.status === 'skipped' && c.error) out.push(c.error);
+  else if (c.status === 'error' && c.args) out.push(`The call failed${c.ms != null ? ` after ${fmtMs(c.ms)}` : ''}: ${c.error ?? 'no reason given'}`);
+  else if (c.status === 'done') {
+    if (c.error) out.push(c.error);
+    const size = c.outputBytes != null ? ` with ${c.outputBytes.toLocaleString()} bytes of results` : '';
+    out.push(`ug answered in ${c.ms != null ? fmtMs(c.ms) : 'an unknown time'}${size}${c.truncated ? ', cut at the size cap' : ''}.`);
+    if (c.hits != null)
+      out.push(
+        c.hits
+          ? `${c.hits} passage${c.hits === 1 ? '' : 's'} went into the answer’s context, new or with text the context didn’t have yet.`
+          : 'Nothing new went into the answer’s context: it found nothing, or only passages already there.',
+      );
+  }
+  return out;
+}
+
+function ResultList({ hits }: { hits: SearchHit[] }) {
+  if (!hits.length) return <div className="ag-small faint">No passages in the output.</div>;
+  return (
+    <ol className="tc-hits" aria-label="Passages found">
+      {hits.map((h, i) => (
+        <li key={`${h.id}:${i}`}>
+          <div className="tc-hit-head">
+            <span className="mono tc-hit-loc selectable" title={h.file}>
+              {h.file}
+              {h.start_line ? <span className="faint">:{h.start_line}-{h.end_line}</span> : null}
+            </span>
+            <span className="tc-hit-kind faint">
+              {h.name && h.name !== h.file ? `${h.name} · ` : ''}
+              {h.node_type}
+            </span>
+          </div>
+          {h.snippet && <pre className="tc-hit-snippet selectable">{h.snippet}</pre>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** Everything about one tool call: why in plain words, what it was given, what it ran, and what came back. */
+export function ToolCallDialog({ s, open, onClose }: { s: AgentStep; open: boolean; onClose: () => void }) {
+  const c = s.call!;
+  const def = toolById(c.tool);
   const [full, setFull] = useState(false);
   const out = c.output ?? '';
   const preview = out.length > 1200 && !full ? `${out.slice(0, 1200)}\n…` : out;
+  const results = callResults(c);
+  const pill = CALL_PILL[c.status];
+  const props = def?.schema?.properties ?? {};
   return (
-    <div className="ag-call">
-      <Field k="Arguments" copy={c.args ? JSON.stringify(c.args) : undefined}>
-        <pre className="ag-pre selectable">{c.args ? JSON.stringify(c.args, null, 2) : '—'}</pre>
-        {c.argsRaw && (
-          <details className="ag-raw">
-            <summary>Model’s raw reply{c.argAttempts > 1 ? ` (${c.argAttempts} attempts)` : ''}</summary>
-            <pre className="ag-pre selectable">{c.argsRaw}</pre>
-          </details>
-        )}
-        {c.argModel && <div className="faint ag-small">Written by {c.argModel}</div>}
-      </Field>
-      <Field k="Policy">
-        <span className="ag-small">
-          {c.policy === 'ask' ? 'Ask' : c.policy === 'auto' ? 'Auto (read-only)' : 'Off'}
-          {c.approval && ` · ${c.approval}`}
-        </span>
-      </Field>
-      {c.argv && (
-        <Field k="Command" copy={shellCommand(c.argv)}>
-          <pre className="ag-pre selectable">{shellCommand(c.argv)}</pre>
-        </Field>
-      )}
-      <Field k="Timing">
-        <span className="ag-small">
-          {fmtTime(c.startedAt)}
-          {c.ms != null && ` · ${c.ms} ms`}
-          {c.outputBytes != null && ` · ${c.outputBytes.toLocaleString()} bytes`}
-          {c.truncated && ' · output cut at the size cap'}
-        </span>
-      </Field>
-      {c.error && (
-        <Field k={c.status === 'done' ? 'Note' : 'Error'} copy={c.error}>
-          <div className="ag-small ag-err selectable">{c.error}</div>
-        </Field>
-      )}
-      {c.observation && (
-        <Field k="What the agent saw">
-          <div className="ag-small selectable">{c.observation}</div>
-        </Field>
-      )}
-      {out && (
-        <Field k="Output" copy={out}>
-          <pre className="ag-pre ag-out selectable">{preview}</pre>
-          {out.length > 1200 && (
-            <button className="btn ghost sm" onClick={() => setFull(!full)}>
-              {full ? 'Show less' : `Show all ${out.length.toLocaleString()} characters`}
-            </button>
+    <Modal open={open} onClose={onClose} wide label={`Tool call, step ${s.index + 1}`}>
+      <div className="dd-head">
+        <div>
+          <div className="label violet">Step {s.index + 1} · tool call</div>
+          <h3 className="tc-title">
+            <Wrench size={17} /> {c.title} <span className={`pill ${pill[1]}`}>{pill[0]}</span>
+          </h3>
+          {def && <p className="ag-small faint tc-desc">{def.description}</p>}
+          <div className="faint ag-small">
+            {[
+              def && RISK_LABEL[def.risk],
+              c.policy === 'ask' ? 'Ask before running' : c.policy === 'auto' ? 'Runs automatically' : 'Off',
+              c.ms != null && `took ${fmtMs(c.ms)}`,
+              c.outputBytes != null && `${c.outputBytes.toLocaleString()} bytes`,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </div>
+        </div>
+        <button className="btn ghost sm" aria-label="Close dialog" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+
+      <section className="dd-section" aria-label="What happened">
+        <h4 className="label">What happened</h4>
+        <ol className="dd-why">
+          {explainCall(c).map((line, i) => (
+            <li key={i} className="selectable">
+              {line}
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <div className="dd-grid">
+        <section className="dd-section" aria-label="What it was given">
+          <h4 className="label">What it was given</h4>
+          {c.args && Object.keys(c.args).length ? (
+            <dl className="tc-args">
+              {Object.entries(c.args).map(([k, v]) => (
+                <div key={k} className="tc-arg">
+                  <dt>
+                    <span className="mono">{k}</span>
+                    {props[k]?.description && <span className="faint"> {props[k].description}</span>}
+                  </dt>
+                  <dd className="selectable">{typeof v === 'string' ? v : JSON.stringify(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <div className="ag-small faint">{c.args ? 'No arguments.' : 'No valid arguments.'}</div>
           )}
-        </Field>
+          {c.argModel && (
+            <div className="faint ag-small tc-by">
+              Written by {c.argModel}
+              {c.argAttempts > 1 ? ` in ${c.argAttempts} attempts` : ''}
+            </div>
+          )}
+          {c.argsRaw && (
+            <details className="ag-raw">
+              <summary>Model’s raw reply{c.argAttempts > 1 ? ` (${c.argAttempts} attempts)` : ''}</summary>
+              <pre className="ag-pre selectable">{c.argsRaw}</pre>
+            </details>
+          )}
+        </section>
+        <section className="dd-section" aria-label="What it ran">
+          <h4 className="label">What it ran</h4>
+          {c.argv ? (
+            <Field k="Command" copy={shellCommand(c.argv)}>
+              <pre className="ag-pre selectable">{shellCommand(c.argv)}</pre>
+            </Field>
+          ) : (
+            <div className="ag-small faint">No command ran.</div>
+          )}
+          <dl className="tc-facts ag-small">
+            <dt>Policy</dt>
+            <dd>
+              {c.policy === 'ask' ? 'Ask' : c.policy === 'auto' ? 'Auto (read-only)' : 'Off'}
+              {c.approval && ` · ${c.approval}`}
+            </dd>
+            <dt>Started</dt>
+            <dd>{fmtTime(c.startedAt)}</dd>
+            {c.ms != null && (
+              <>
+                <dt>Took</dt>
+                <dd>{fmtMs(c.ms)}</dd>
+              </>
+            )}
+            {c.outputBytes != null && (
+              <>
+                <dt>Output</dt>
+                <dd>
+                  {c.outputBytes.toLocaleString()} bytes{c.truncated && <span className="ag-note"> · cut at the size cap</span>}
+                </dd>
+              </>
+            )}
+          </dl>
+        </section>
+      </div>
+
+      {(c.observation || c.error || results) && (
+        <section className="dd-section tc-found" aria-label="What it found">
+          <h4 className="label">What it found</h4>
+          {c.error && c.status !== 'skipped' && (
+            <Field k={c.status === 'done' ? 'Note' : 'Error'} copy={c.error}>
+              <div className={`ag-small selectable${c.status === 'done' ? ' ag-note' : ' ag-err'}`}>{c.error}</div>
+            </Field>
+          )}
+          {c.observation && (
+            <Field k="What the agent saw next">
+              <div className="ag-small selectable">{c.observation}</div>
+            </Field>
+          )}
+          {results && (
+            <Field k={`Passages (${results.length})`}>
+              <ResultList hits={results} />
+            </Field>
+          )}
+        </section>
       )}
-    </div>
+
+      {out && (
+        <details className="ag-raw dd-raw">
+          <summary>Raw output from ug</summary>
+          <Field k="Output" copy={out}>
+            <pre className="ag-pre ag-out selectable">{preview}</pre>
+            {out.length > 1200 && (
+              <button className="btn ghost sm" onClick={() => setFull(!full)}>
+                {full ? 'Show less' : `Show all ${out.length.toLocaleString()} characters`}
+              </button>
+            )}
+          </Field>
+        </details>
+      )}
+      <div className="dd-foot">
+        <CopyButton text={JSON.stringify({ step: s.index + 1, ...c }, null, 2)} label="Copy tool call">
+          Copy tool call
+        </CopyButton>
+        <button className="btn primary sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -394,7 +566,7 @@ export function DecisionDialog({ s, open, onClose }: { s: AgentStep; open: boole
   );
 }
 
-/** One loop iteration in the Execution Trace: the decision opens in a dialog, the tool call unfolds here. */
+/** One loop iteration in the Execution Trace: the decision and the tool call each open in a dialog. */
 export function AgentStepCard({ s }: { s: AgentStep }) {
   const c = s.call;
   const [open, setOpen] = useState(false);
@@ -434,17 +606,13 @@ export function AgentStepCard({ s }: { s: AgentStep }) {
           <HelpCircle size={12} /> Why this step?
         </button>
         {c && (
-          <button className="btn ghost sm ag-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-            {open ? 'Hide tool call' : 'Tool call'}
+          <button className="btn ghost sm ag-toggle" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+            <Wrench size={12} /> Tool call
           </button>
         )}
       </div>
-      {open && c && (
-        <div className="ag-details">
-          <CallDetail c={c} />
-        </div>
-      )}
       <DecisionDialog s={s} open={why} onClose={() => setWhy(false)} />
+      {c && <ToolCallDialog s={s} open={open} onClose={() => setOpen(false)} />}
     </div>
   );
 }

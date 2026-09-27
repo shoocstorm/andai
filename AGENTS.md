@@ -234,7 +234,9 @@ level defaults to *Ask*.
   `andai-agent`, project `aldrick-ai`, `bun run deploy:web`): Vite's `dist/`
   with the desktop isolation headers (COOP/COEP, so Chromium gets
   SharedArrayBuffer and wllama's threaded build) and a CSP that mirrors
-  `tauri.conf.json` minus the `ipc:` sources plus the Analytics hosts. Routing
+  `tauri.conf.json` minus the `ipc:` sources plus the Analytics hosts (gtag
+  hosts, and `firebase.googleapis.com` + `firebaseinstallations.googleapis.com`,
+  which the Firebase Analytics SDK fetches its config and instance ID from). Routing
   is hash-based, so no SPA rewrites are needed. `index.html` is served
   `no-cache` for the same reason as the 304 fact above; `/assets/**` are
   content-hashed and `immutable`. The nested `docs/andai-website/firebase.json`

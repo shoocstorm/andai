@@ -117,8 +117,12 @@ pasting in whatever one search returns:
   asked, how it scored each option, any override, what the agent did), shows
   what the model saw (the state, the question and the options) and what it
   returned, with the exact prompt, parameters and raw reply folded away and a
-  copy button. Tool call details unfold separately. A decision that failed
-  shows the same. **Copy trace** exports a turn as JSON.
+  copy button. A decision that failed shows the same. **Tool call** opens a
+  second dialog that says what the call did in plain sentences (who wrote
+  the arguments, whether it ran on its own or waited for your approval, how
+  long ug took, how many passages went into the answer), then each argument
+  with what it means, the ug command, and the passages it found by file and
+  line, with the raw output folded away. **Copy trace** exports a turn as JSON.
 - **Read-only and on your computer.** Every tool only reads the selected
   knowledge base. Andai re-checks each call before running it, limits its
   time and output, and never lets a tool reach the network.
