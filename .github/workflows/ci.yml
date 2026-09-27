@@ -8,6 +8,15 @@ jobs:
   check:
     # WKWebView paths: build and test on macOS
     runs-on: macos-15
+    env:
+      # mlx-sys's build script compiles mlx.metallib into ~/.mlx/lib/<hash> —
+      # outside everything rust-cache saves — and MLX bakes that path into the
+      # binary as its runtime fallback. On a runner with a restored cache the
+      # build script doesn't rerun, the file is missing, and the first test that
+      # evaluates an MLX array aborts the whole test process ("Failed to load
+      # the default metallib", exit 255). Inside the workspace target dir the
+      # metallib is cached and restored with everything else (AGENTS.md §2).
+      MLX_RS_METAL_PATH: ${{ github.workspace }}/src-tauri/target/mlx
     steps:
       - uses: actions/checkout@v4
       # Node only runs Vitest (jsdom breaks on Bun's runtime); everything else runs on Bun

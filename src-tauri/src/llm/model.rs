@@ -269,6 +269,11 @@ mod tests {
     use super::*;
 
     #[test]
+    // The only unignored test that evaluates MLX arrays: where its metallib is
+    // missing (a CI runner whose restored cargo cache never built `~/.mlx`),
+    // the MLX error aborts the whole test process, not just this test
+    // (AGENTS.md §2). Run it explicitly: `cargo test -- --ignored kv`.
+    #[ignore = "evaluates MLX arrays; aborts the whole test process where mlx.metallib is missing"]
     fn the_kv_cache_grows_in_steps_and_trims() {
         let mut kv = Kv::default();
         let a = |n: i32, x: f32| ops::full::<f32>(&[1, 2, n, 4], Array::from_f32(x)).unwrap();

@@ -25,8 +25,10 @@ const json = {
 
 // [package] version is the first `version = "…"` line in Cargo.toml
 const cargoTomlRe = /^(version\s*=\s*")([^"]+)(")/m;
-// the [[package]] block whose name is "andai" in Cargo.lock
-const cargoLockRe = /(\[\[package\]\]\nname = "andai"\nversion = ")([^"]+)(")/;
+// the [[package]] block whose name is "andai" in Cargo.lock. \r?\n: Git for
+// Windows checks text files out with CRLF (autocrlf), so the manifests read
+// differently there (AGENTS.md §2).
+const cargoLockRe = /(\[\[package\]\]\r?\nname = "andai"\r?\nversion = ")([^"]+)(")/;
 
 export function readVersions() {
   const toml = readFileSync(path('src-tauri/Cargo.toml'), 'utf8').match(cargoTomlRe);

@@ -205,6 +205,13 @@ level defaults to *Ask*.
   Microsoft's bootstrapper, an outbound request (§1.4), so
   `bundle.windows.webviewInstallMode` is `skip` (`security.test.ts`). Windows
   11 ships WebView2; the docs list it as a requirement.
+- **Windows CI checks out CRLF and has no exec bits** (measured 2026-09-27:
+  Git for Windows' `autocrlf`, NTFS). Guard tests broke three ways: paths from
+  `readdirSync(…, { recursive: true })` come back with `\` and must be
+  normalized before matching a forward-slash allowlist (`security.test.ts`);
+  file content can carry `\r\n`, so manifest regexes use `\r?\n`
+  (`scripts/version.mjs`); and `statSync().mode` has no `0o111` there — check
+  exec-ness through `git ls-files -s` (`hooks.test.ts`).
 - **Cross-checking Windows from a Mac:** `cargo clippy --target
   x86_64-pc-windows-msvc` needs `llvm-rc` for the app's resource file. A stub
   `llvm-rc` on `PATH` that touches its `/fo` output is enough for clippy (it
@@ -320,6 +327,18 @@ level defaults to *Ask*.
   built it) and `mlx.rs` points MLX at it with `set_metallib_path`.
   Without it MLX compiles kernels at runtime: the first run measured 42 ms
   P50 instead of 9 ms. The release job fails if the arm64 app lacks it.
+- **mlx-sys builds `mlx.metallib` outside every cargo cache.** Its build script
+  writes it to `~/.mlx/lib/<hash>` (or `$MLX_RS_METAL_PATH`) and MLX bakes that
+  path into every binary as its runtime fallback. CI's rust-cache restores
+  `target/` and `~/.cargo` but never `~/.mlx`, so on a cache hit the build
+  script doesn't rerun and the file is missing; the first test that evaluates
+  an MLX array then aborts the whole test process ("Failed to load the default
+  metallib", exit 255; reproduced 2026-09-27). The macOS CI jobs therefore set
+  `MLX_RS_METAL_PATH` to `src-tauri/target/mlx`, which rust-cache saves, and
+  the one unignored test that evaluates arrays
+  (`llm::model::tests::the_kv_cache_grows_in_steps_and_trims`) is `#[ignore]`d
+  as a second guard. Release bundling is unaffected: `scripts/mlx-metallib.mjs`
+  reads the CMake install tree under `target/`, produced either way.
 - **One thread owns MLX** (`mlx.rs`): the Laya checkpoint and both native
   LLM slots live on it, and commands send it closures. Decisions queue behind
   a streaming answer, which the agent never overlaps anyway.

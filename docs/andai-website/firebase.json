@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "andai-website",
+    "site": "andai-ai-agent",
     "public": ".",
     "ignore": [
       "firebase.json",

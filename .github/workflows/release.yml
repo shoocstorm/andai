@@ -27,6 +27,10 @@ jobs:
   # ── 1. nothing ships unless the tag matches the manifests and the suite is green
   verify:
     runs-on: macos-15
+    env:
+      # Same as ci.yml `check`: keep mlx.metallib inside the rust-cached
+      # workspace, or a restored cache fails every MLX test (AGENTS.md §2).
+      MLX_RS_METAL_PATH: ${{ github.workspace }}/src-tauri/target/mlx
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:

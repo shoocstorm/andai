@@ -34,6 +34,9 @@ const HARNESS = ['smoke.ts'];
 
 const appFiles = readdirSync(join(ROOT, 'src'), { recursive: true })
   .map(String)
+  // readdirSync is OS-native: Windows hands back `llm\hub.ts`, and the
+  // allowlists below are written with forward slashes (AGENTS.md §2).
+  .map((f) => f.replaceAll('\\', '/'))
   .filter((f) => /\.tsx?$/.test(f) && !f.includes('.test.') && !HARNESS.includes(f));
 
 describe('content security policy', () => {
