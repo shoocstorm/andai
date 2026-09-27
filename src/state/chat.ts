@@ -5,6 +5,7 @@ import type { SearchHit } from '../kb/api';
 import type { RelevanceRecord } from '../agent/relevance';
 import type { SupportRecord } from '../agent/claims';
 import type { ContextRecord } from '../agent/prompt';
+import type { Found } from '../kb/match';
 import type { DecisionIO } from '../llm/decide';
 
 /**
@@ -76,6 +77,8 @@ export type ToolCallRecord = {
   error?: string;
   /** The line the next decision saw. */
   observation?: string;
+  /** A search's passages counted by how ug found them (semantic, keyword, graph), for a short summary. */
+  found?: Found;
   /** Passages this call added to the answer's context, or added text to (agent/evidence.ts). */
   hits?: number;
 };

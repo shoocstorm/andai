@@ -475,6 +475,8 @@ describe('runTurn (agent mode)', () => {
     expect(call).toMatchObject({ tool: 'kb_search', status: 'done', args: { query: 'wllama COOP COEP headers' }, argv: ['search', 'x'], hits: 1 });
     expect(call.output).toContain('serve.json adds the COOP/COEP headers');
     expect(call.observation).toMatch(/^1 passage/);
+    // counted by how ug found them, for the trace's one-line summary
+    expect(call.found).toEqual({ total: 1, by: {} });
     expect(assistant().sources).toHaveLength(1);
     expect(engine.seen[0].messages[0].content).toContain('[1] README.md (lines 11-33)');
     // the trace's "Assemble context" dialog shows exactly what was sent

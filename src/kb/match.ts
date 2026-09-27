@@ -28,6 +28,29 @@ const HELP: Record<string, string> = {
   graph: 'Reached by following links in the knowledge graph from a passage that matched.',
 };
 
+/** How many passages a search returned, and how many each channel found. */
+export type Found = { total: number; by: Record<string, number> };
+
+/** Counts `hits` by the channel ug matched them by (`matched_by`). Pure. */
+export function countMatches(hits: SearchHit[]): Found {
+  const by: Record<string, number> = {};
+  for (const h of hits) {
+    const how = h.matched_by?.trim().toLowerCase();
+    if (how) by[how] = (by[how] ?? 0) + 1;
+  }
+  return { total: hits.length, by };
+}
+
+const CHANNEL_ORDER = ['semantic', 'keyword', 'graph'];
+
+/** "10 passages · 7 semantic · 1 keyword · 2 graph": a search's result in one short line. Pure. */
+export function foundLine(f: Found): string {
+  const channels = Object.entries(f.by).sort(
+    ([a], [b]) => (CHANNEL_ORDER.indexOf(a) + 1 || 99) - (CHANNEL_ORDER.indexOf(b) + 1 || 99) || a.localeCompare(b),
+  );
+  return [`${f.total} passage${f.total === 1 ? '' : 's'}`, ...channels.map(([how, n]) => `${n} ${how}`)].join(' · ');
+}
+
 /** Each hit's strength relative to the best-ranked one among `peers`. Pure. */
 export function strengthOf(score: number, peers: number[]): number {
   const all = peers.filter(Number.isFinite);

@@ -2818,7 +2818,7 @@ tr:hover .kn-remove {
   right: 8px;
 }
 
-/* retrieval.log folds away (a <details>); the head is its toggle */
+/* the passages found fold away (a <details>); the head is its toggle */
 .cc-log > summary.head {
   cursor: pointer;
   list-style: none;

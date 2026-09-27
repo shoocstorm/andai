@@ -64,14 +64,14 @@ describe('Command Center', () => {
     expect(screen.getByText(/Analyzing query/)).toBeInTheDocument();
     expect(screen.getByText('COOP').tagName).toBe('STRONG');
     expect(screen.queryByText(/thought process/i)).not.toBeInTheDocument(); // empty think pair is hidden
-    expect(screen.getByText(/retrieval\.log — Docs/)).toBeInTheDocument();
+    expect(screen.getByText(/^Passages found in “Docs”$/)).toBeInTheDocument();
     const trace = screen.getByText('Execution Trace').closest('aside')!;
     expect(within(trace).getAllByText(/Completed/i)).toHaveLength(4);
     expect(within(trace).getByText('30.0')).toBeInTheDocument();
     expect(within(trace).getByText('20%')).toBeInTheDocument(); // (800+9)/4096
   });
 
-  it('folds the retrieval log until opened', async () => {
+  it('folds the passages found until opened', async () => {
     const user = userEvent.setup();
     addMessage({
       id: 'a',
@@ -83,9 +83,9 @@ describe('Command Center', () => {
       sources: [{ id: 's', name: 'Run it', node_type: 'Concept', file: 'README.md', start_line: 11, end_line: 33, snippet: 'x' }],
     });
     render(<CommandCenter />);
-    const log = screen.getByText(/retrieval\.log — Docs/).closest('details')!;
+    const log = screen.getByText(/^Passages found in “Docs”$/).closest('details')!;
     expect(log).not.toHaveAttribute('open');
-    await user.click(screen.getByText(/retrieval\.log — Docs/));
+    await user.click(screen.getByText(/^Passages found in “Docs”$/));
     expect(log).toHaveAttribute('open');
   });
 
@@ -650,7 +650,7 @@ describe('Command Center (agent mode)', () => {
     expect(dialog.getByText(/82% of the time/)).toBeInTheDocument();
   });
 
-  it('shows in retrieval.log how ug found each passage, and nothing for one no search returned', () => {
+  it('shows in the passages found how ug found each passage, and nothing for one no search returned', () => {
     addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
     addMessage({
       id: 'a',
@@ -671,7 +671,7 @@ describe('Command Center (agent mode)', () => {
     expect(within(log.getByRole('button', { name: /^Source 3/ })).queryByText(/semantic|keyword|graph/)).toBeNull();
   });
 
-  it('makes each citation in the answer and each retrieval.log line open that source, with what the checks said', async () => {
+  it('makes each citation in the answer and each passage in the list open that source, with what the checks said', async () => {
     const user = userEvent.setup();
     addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
     addMessage({
@@ -719,7 +719,7 @@ describe('Command Center (agent mode)', () => {
       agent: [{ id: 's1', index: 0, at: 0, decision: null, action: 'kb_search', call: call() }],
     });
     render(<CommandCenter />);
-    // the per-passage rows the retrieve step shows (trace-sub), not the answer's retrieval.log
+    // the per-passage rows the retrieve step shows (trace-sub), not the passages listed under the answer
     expect([...document.querySelectorAll('.trace-sub')].some((el) => el.textContent?.includes('zzz-unique.md'))).toBe(false);
   });
 
@@ -852,6 +852,22 @@ describe('Command Center (agent mode)', () => {
     await userEvent.click(chip);
     expect(document.getElementById('trace-a-call-s1')).toHaveClass('flash');
     raf.mockRestore();
+  });
+
+  it('sums up a knowledge search by how its passages were found, instead of listing them', () => {
+    const long = '10 passage(s): 2.5.1 (2026-05-14) @ release-notes.md:3-6; 2.5.0 (2026-04-20) @ release-notes.md:7-12; +8 more';
+    turn([{ id: 's1', index: 0, at: 0, decision: null, action: 'kb_search', call: call({ observation: long, found: { total: 10, by: { semantic: 7, graph: 2, keyword: 1 } } }) }]);
+    render(<CommandCenter />);
+    expect(screen.getAllByText('10 passages · 7 semantic · 1 keyword · 2 graph').length).toBeGreaterThan(0);
+    expect(screen.queryByText(long)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show step 01.1 in the trace: Knowledge search' })).toHaveTextContent(/— 10 passages · 7 semantic · 1 keyword · 2 graph$/);
+  });
+
+  it('counts a knowledge search recorded before the counts were kept from its stored output', () => {
+    const output = JSON.stringify({ items: [{ id: 'a', name: 'A', node_type: 'Concept', file: 'a.md', start_line: 1, end_line: 3, snippet: 'x', matched_by: 'semantic' }, { id: 'b', name: 'B', node_type: 'Concept', file: 'b.md', start_line: 1, end_line: 3, snippet: 'y', matched_by: 'graph', hop: 1 }] });
+    turn([{ id: 's1', index: 0, at: 0, decision: null, action: 'kb_search', call: call({ output, observation: '2 passage(s): A @ a.md:1-3; B @ b.md:1-3' }) }]);
+    render(<CommandCenter />);
+    expect(screen.getAllByText('2 passages · 1 semantic · 1 graph').length).toBeGreaterThan(0);
   });
 
   it('lists the tool calls right under the plan step, before the steps that came after', () => {

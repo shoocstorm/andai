@@ -2,7 +2,7 @@
 // the refund question against the Tidewater documents).
 import { describe, expect, it } from 'vitest';
 import type { SearchHit } from './api';
-import { matchOf, strengthOf } from './match';
+import { countMatches, foundLine, matchOf, strengthOf } from './match';
 
 const hit = (distance: number | undefined, matched_by: string | undefined, hop?: number): SearchHit => ({
   id: `h${distance}`,
@@ -28,6 +28,17 @@ describe('strengthOf', () => {
     expect(strengthOf(0.6, [0.2, 0.6])).toBe(0);
     expect(strengthOf(0.4, [0.4])).toBe(1);
     expect(strengthOf(-0.1, [])).toBe(1);
+  });
+});
+
+describe('countMatches and foundLine', () => {
+  it('counts a search’s passages by channel, in a fixed order, and says so in one line', () => {
+    const hits = [hit(-0.08, 'semantic'), hit(-0.07, 'graph', 1), hit(-0.06, 'semantic'), hit(-0.05, 'keyword'), hit(-0.04, undefined)];
+    const found = countMatches(hits);
+    expect(found).toEqual({ total: 5, by: { semantic: 2, graph: 1, keyword: 1 } });
+    expect(foundLine(found)).toBe('5 passages · 2 semantic · 1 keyword · 1 graph');
+    expect(foundLine(countMatches([hit(-0.1, 'semantic')]))).toBe('1 passage · 1 semantic');
+    expect(foundLine(countMatches([]))).toBe('0 passages');
   });
 });
 

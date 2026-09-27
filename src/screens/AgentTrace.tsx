@@ -11,7 +11,7 @@ import { shellCommand } from '../agent/debugReport';
 import type { RelevanceRecord } from '../agent/relevance';
 import { claimState, MEASURED, SUPPORTS, type SupportItem, type SupportRecord } from '../agent/claims';
 import { LAYA_MODELS } from '../llm/models';
-import { matchOf } from '../kb/match';
+import { countMatches, foundLine, matchOf } from '../kb/match';
 import { CHARS_PER_TOKEN, type ContextRecord } from '../agent/prompt';
 import { MEASURED_RELEVANCE, passageState, passageText, RELEVANT, type RelevanceItem } from '../agent/relevance';
 import type { SearchHit } from '../kb/api';
@@ -226,6 +226,24 @@ export function callResults(c: ToolCallRecord): SearchHit[] | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A call's result in one short line. A knowledge search is counted by how ug
+ * found its passages ("10 passages · 8 semantic · 2 graph") rather than
+ * listing them: the passages are in its dialog and under the answer. Other
+ * tools keep the line the agent saw. A search recorded before the counts
+ * were kept is counted from its stored output, when that still parses.
+ */
+export function callSummary(c: ToolCallRecord): string | undefined {
+  if (c.tool === 'kb_search' && c.status === 'done') {
+    const found = c.found ?? (() => {
+      const hits = callResults(c);
+      return hits ? countMatches(hits) : null;
+    })();
+    if (found) return foundLine(found);
+  }
+  return c.observation;
 }
 
 const RISK_LABEL: Record<string, string> = { read: 'read-only', write: 'writes', device: 'reaches the device' };
@@ -639,7 +657,7 @@ export function AgentStepCard({ s, domId }: { s: AgentStep; domId?: string }) {
         </div>
       )}
       {s.note && <div className="trace-detail ag-note">{s.note}</div>}
-      {c?.observation && <div className="trace-detail">{c.observation}</div>}
+      {c && callSummary(c) && <div className="trace-detail">{callSummary(c)}</div>}
       <div className="ag-step-buttons">
         <button className="btn ghost sm ag-toggle" onClick={() => setWhy(true)}>
           <HelpCircle size={12} /> <span className="ellipsis">Why this step?</span>
@@ -1064,7 +1082,7 @@ export function SupportNote({ r, sources }: { r: SupportRecord; sources: SearchH
  * One source of an answer, `[n]`: where it's from, the passage the chat model
  * read, and what the Laya checks said about it (its relevance score, the
  * cited sentences checked against it). Opened from the answer's citations and
- * from retrieval.log.
+ * from the passages list under the answer.
  */
 export function SourceDialog({ m, n, onClose }: { m: Message; n: number; onClose: () => void }) {
   const h = m.sources?.[n - 1];
@@ -1310,8 +1328,9 @@ export function ApprovalCard({ s }: { s: AgentStep }) {
 /** Tool calls as chips under "Processing reasoning". */
 /** A tool call in one line: title, arguments, status and what it found. */
 export function callChipText(c: ToolCallRecord): string {
+  const said = c.status === 'done' ? callSummary(c) : undefined;
   return `${c.title}${c.args ? ` (${argsInline(c.args, 48)})` : ''} · ${CALL_PILL[c.status][0].toLowerCase()}${
-    c.status === 'done' && c.observation ? ` — ${c.observation.slice(0, 60)}${c.observation.length > 60 ? '…' : ''}` : ''
+    said ? ` — ${said.slice(0, 60)}${said.length > 60 ? '…' : ''}` : ''
   }`;
 }
 

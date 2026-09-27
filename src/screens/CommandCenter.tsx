@@ -204,7 +204,7 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
   const { thinking, answer, open } = splitThink(m.content);
   const visibleSteps = (m.steps ?? []).filter((s) => s.status !== 'queued' && s.status !== 'skipped');
   const waiting = m.streaming && !answer && !thinking;
-  // The source whose dialog is open, from a citation or retrieval.log.
+  // The source whose dialog is open, from a citation or the passages list.
   const [source, setSource] = useState<number | null>(null);
   const nSources = m.sources?.length ?? 0;
   return (
@@ -238,8 +238,8 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
           {!!m.sources?.length && (
             <details className="logblock cc-log">
               <summary className="head">
-                <span>retrieval.log — {m.kbName}</span>
-                {m.streaming ? <span className="live">LIVE</span> : <span>{m.sources.length} hits</span>}
+                <span>Passages found{m.kbName ? ` in “${m.kbName}”` : ''}</span>
+                {m.streaming ? <span className="live">LIVE</span> : <span>{m.sources.length} passage{m.sources.length === 1 ? '' : 's'}</span>}
               </summary>
               {m.sources.map((h, i) => (
                 <button key={h.id + i} type="button" className="cc-log-line linklike" aria-haspopup="dialog" aria-label={`Source ${i + 1}: ${h.file}:${h.start_line}-${h.end_line}`} onClick={() => setSource(i + 1)}>

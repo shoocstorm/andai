@@ -8,6 +8,7 @@
 // as fenced passages (prompt.ts) and a clipped summary line.
 
 import { kbTool, type KbInfo, type SearchHit } from '../kb/api';
+import { countMatches } from '../kb/match';
 import { decide, decidesWithLaya, DecisionError, layaChoices, seededShuffle, type ArgChoice, type ArgPick, type Decision, type DecisionOption } from '../llm/decide';
 import {
   addAgentStep,
@@ -425,6 +426,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
         outputBytes: out.bytes,
         truncated: out.truncated,
         observation: ev.summary,
+        ...(tool.id === 'kb_search' ? { found: countMatches(ev.hits) } : {}),
         hits: added,
         endedAt: Date.now(),
         ms: out.ms,

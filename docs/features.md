@@ -27,8 +27,10 @@ model download nothing leaves the machine: no account, no API key, no cloud.
   show their step-by-step thinking, folded away until you open it.
 - **Cited sources.** When a knowledge base is selected, answers cite passages
   as `[1]`, `[2]`. Each citation matches a source listed under the answer, with
-  its file name and line range. Click a citation, or a line of
-  *retrieval.log*, to read that passage, with what the relevance and claim
+  its file name and line range, in *Passages found*, where each also shows
+  how the search found it (by meaning, by keyword, or by following the
+  knowledge graph) and how strongly it matched. Click a citation, or a
+  passage in the list, to read it, with what the relevance and claim
   checks said about it.
 - **What the model read.** *What went in?* on the trace's *Assemble context*
   step shows how the model's context window was split between the reply,
