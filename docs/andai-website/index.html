@@ -232,6 +232,7 @@
       <nav class="nav-links" aria-label="Sections">
         <a href="#features">Features</a>
         <a href="#how">How it works</a>
+        <a href="agent-loop.html">Agent loop</a>
         <a href="#privacy">Privacy</a>
         <a href="#faq">FAQ</a>
       </nav>
@@ -417,7 +418,7 @@
           <details><summary>How good is a model that runs on a laptop?</summary><p>Small models like Qwen3 are fast and private, but less capable than large cloud models. Grounding answers in your own documents, with citations you can check, closes much of that gap for everyday questions.</p></details>
           <details><summary>macOS or Windows won't open the app.</summary><p>Current builds aren't signed yet. On macOS, right-click <code>Andai.app</code> and choose <em>Open</em>, or run <code>xattr -dr com.apple.quarantine /Applications/Andai.app</code>. On Windows, if SmartScreen warns, choose <em>More info</em> → <em>Run anyway</em>.</p></details>
           <details><summary>Are workflows and tools real?</summary><p>The knowledge-base tools are real: the agent chooses among eight read-only ug tools over your knowledge base, with your approval for any tool you set to Ask, and every call is in the Execution Trace. The Workflows screens are still a clearly labeled, simulated preview of what's coming.</p></details>
-          <details><summary>What does "agentic RAG" mean here?</summary><p>RAG (retrieval-augmented generation) means the answer is written from passages retrieved from your documents, not from the model's memory. "Agentic" means the agent decides how to retrieve: which tool to use, what to look up next, and when it has enough to answer. Every step shows in the Execution Trace, including the probability of each option the agent weighed.</p></details>
+          <details><summary>What does "agentic RAG" mean here?</summary><p>RAG (retrieval-augmented generation) means the answer is written from passages retrieved from your documents, not from the model's memory. "Agentic" means the agent decides how to retrieve: which tool to use, what to look up next, and when it has enough to answer. Every step shows in the Execution Trace, including the probability of each option the agent weighed. <a href="agent-loop.html">See how the agent loop works</a>, with diagrams and real examples.</p></details>
         </div>
       </div>
     </section>

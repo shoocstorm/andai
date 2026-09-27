@@ -100,7 +100,7 @@ Andai/
 │  ├─ build.rs               app command manifest (ACL)
 │  └─ capabilities/default.json
 ├─ docs/                     user-facing docs (features.md, …) — index in docs/README.md
-│  └─ andai-website/         static product site: index.html + img/ (real app screenshots)
+│  └─ andai-website/         static product site: index.html, agent-loop.html (how the agent works) + img/
 ├─ tests/                    setup, guard tests, e2e fixtures, perf/ micro-benchmarks
 ├─ perf/baseline.json        performance baselines (docs/performance.md)
 └─ scripts/                  copy-wllama (postinstall), e2e runner, perf runner, agent eval runner, mlx-metallib, laya-cache
@@ -670,8 +670,12 @@ Rules:
   (`andai.theme`, `andai.chat`, `andai.layout`). Look at every image before
   committing it. Don't capture screens that show browser-only states (e.g. the
   Knowledge screen's "desktop runtime required" notice) as if they were the app.
-- The website is **one self-contained static page** (`index.html` + `img/`):
-  no build step and no JS framework. Its tokens mirror
+- The website is **self-contained static pages** (`index.html`, plus
+  `agent-loop.html`, which explains the agent loop with diagrams and real
+  eval traces; each page linked from the home page) and `img/`: no build step
+  and no JS framework. When the loop changes (decisions, tools, relevance
+  check), update `agent-loop.html` in the same change; its examples and
+  numbers come from `bun run eval:agent` reports. Its tokens mirror
   `src/theme/tokens.css`; if the app's palette changes, update the site's
   `:root` blocks to match. It must work in light and dark and at phone width
   (no horizontal scroll at 390 px).

@@ -6,21 +6,31 @@ import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = join(__dirname, '../..');
-const SITE = join(ROOT, 'docs/andai-website/index.html');
+const SITE_DIR = join(ROOT, 'docs/andai-website');
+const SITE = join(SITE_DIR, 'index.html');
 const html = readFileSync(SITE, 'utf8');
+/** Every page of the site: the home page and the ones it links to (agent-loop.html, …). */
+const pages = readdirSync(SITE_DIR)
+  .filter((f) => f.endsWith('.html'))
+  .map((f) => ({ file: f, html: readFileSync(join(SITE_DIR, f), 'utf8') }));
 const isLocal = (u: string) => !/^(https?:|mailto:|#|data:)/.test(u);
 
 describe('andai-website', () => {
-  it('every local image, icon and link resolves to a file', () => {
-    const refs = [...html.matchAll(/\s(?:src|href)="([^"]+)"/g)].map((m) => m[1]).filter(isLocal);
-    const missing = refs.filter((r) => !existsSync(resolve(dirname(SITE), r)));
-    expect(refs.length).toBeGreaterThan(5);
+  it('has more than the home page, and the home page links every page', () => {
+    expect(pages.map((p) => p.file)).toContain('agent-loop.html');
+    for (const p of pages.filter((x) => x.file !== 'index.html')) expect(html, p.file).toContain(`href="${p.file}"`);
+  });
+
+  it.each(pages.map((p) => [p.file, p.html]))('%s: every local image, icon and link resolves to a file', (_, page) => {
+    const refs = [...page.matchAll(/\s(?:src|href)="([^"]+)"/g)].map((m) => m[1]).filter(isLocal);
+    const missing = refs.filter((r) => !existsSync(resolve(SITE_DIR, r)));
+    expect(refs.length).toBeGreaterThan(1);
     expect(missing).toEqual([]);
   });
 
-  it('every in-page #anchor has a target', () => {
-    const ids = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
-    const anchors = [...html.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]);
+  it.each(pages.map((p) => [p.file, p.html]))('%s: every in-page #anchor has a target', (_, page) => {
+    const ids = new Set([...page.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
+    const anchors = [...page.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]);
     expect(anchors.filter((a) => !ids.has(a))).toEqual([]);
   });
 
@@ -30,9 +40,11 @@ describe('andai-website', () => {
     expect(html).toMatch(/Are workflows and tools real\?/);
   });
 
-  it('every screenshot has alt text', () => {
-    const imgs = [...html.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+  it.each(pages.map((p) => [p.file, p.html]))('%s: every image has alt text, every diagram a title', (_, page) => {
+    const imgs = [...page.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
     expect(imgs.filter((i) => !/\salt="[^"]*"/.test(i))).toEqual([]);
+    const diagrams = [...page.matchAll(/<svg\b[^>]*role="img"[^>]*>([\s\S]*?)<\/svg>/g)].map((m) => m[1]);
+    expect(diagrams.filter((d) => !/<title\b/.test(d) || !/<desc\b/.test(d))).toEqual([]);
   });
 });
 
