@@ -694,6 +694,40 @@ mod tests {
         );
     }
 
+    /// Qwen's own MLX builds in the catalog (4B–32B): each loads from its
+    /// pinned files, matches mlx-lm's greedy text, and reports its speed on a
+    /// grounded-size prompt. Set `LLM_BIG` to a subset (e.g. `4B,8B`); needs the
+    /// checkpoints in the Hugging Face cache.
+    #[test]
+    #[ignore = "needs Qwen's MLX checkpoints (2–17 GB each)"]
+    fn llm_qwen3_big_match_mlx_lm() {
+        let golden: Value = serde_json::from_str(include_str!("../../tests/fixtures/llm/golden-qwen3-mlx-4bit.json")).unwrap();
+        let only = std::env::var("LLM_BIG").unwrap_or_else(|_| "4B,8B,14B,32B".into());
+        for size in only.split(',') {
+            let g = &golden[size];
+            let id = format!("qwen3-{}-mlx", size.to_lowercase());
+            let c = catalog::checkpoint(&id).unwrap();
+            assert_eq!((c.repo.as_ref(), c.commit.as_ref()), (g["repo"].as_str().unwrap(), g["commit"].as_str().unwrap()));
+            let t = Instant::now();
+            let mut engine = Engine::load(&checkpoint_dir(&id), 4096).unwrap();
+            let load_ms = t.elapsed().as_secs_f64() * 1e3;
+            let out = engine.generate(g["text"].as_str().unwrap(), &greedy(12), &mut |_| {}, &|| false).unwrap();
+            assert_eq!(out.text, g["greedy_text"].as_str().unwrap(), "{id}: same greedy text as mlx-lm");
+            let filler = "The ferry leaves the north pier at nine and returns at five. ".repeat(40);
+            let prompt = render(&[Message { role: crate::llm::template::Role::User, content: format!("{filler}\nSummarize the schedule in detail.") }], false);
+            engine.clear_cache();
+            let run = engine.generate(&prompt, &Params { max_tokens: 128, ..greedy(128) }, &mut |_| {}, &|| false).unwrap();
+            println!(
+                "{id}: load {load_ms:.0} ms; {} prompt tokens at {:.0} tok/s (first token {:.0} ms), {} generated at {:.0} tok/s",
+                run.prompt_tokens,
+                run.prompt_tokens as f64 / (run.prompt_ms / 1e3),
+                run.prompt_ms,
+                run.completion_tokens,
+                (run.completion_tokens.saturating_sub(1)) as f64 / (run.gen_ms / 1e3)
+            );
+        }
+    }
+
     /// A model added from Hugging Face, end to end in Rust: the spec the webview
     /// builds (llm/hub.ts), `custom::add`, a chunked download through the store
     /// with its sha256 check, then load and generate. Qwen3 8B is untied (its own

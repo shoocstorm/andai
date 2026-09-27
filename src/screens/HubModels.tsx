@@ -162,7 +162,9 @@ export function HubModels({ open, onClose }: { open: boolean; onClose: () => voi
           ) : (
             results.map((r) => (
               <button key={r.repo} className="hub-result" aria-pressed={picked === r.repo} onClick={() => setPicked(r.repo)}>
-                <span className="hub-repo mono">{r.repo}</span>
+                <span className="hub-repo mono">
+                  {picked === r.repo && <Check size={12} className="st-check" aria-hidden />} {r.repo}
+                </span>
                 <span className="faint hub-meta">
                   <Download size={11} /> {compact(r.downloads)} <Heart size={11} /> {compact(r.likes)}
                   {month(r.lastModified) ? ` · ${month(r.lastModified)}` : ''}
@@ -244,6 +246,7 @@ function Detail({ model, variant, onVariant }: { model: HubModel; variant: strin
               onClick={() => onVariant(v.path)}
               title={v.path}
             >
+              {variant === v.path ? <Check size={13} className="st-check" aria-hidden /> : <span className="hub-radio" aria-hidden />}
               <span className="mono">{v.quant}</span>
               <span className="faint">{fmtBytes(v.bytes)}</span>
               {v.path === model.gguf!.recommended && <span className="pill blue">Recommended</span>}

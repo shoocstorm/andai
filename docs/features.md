@@ -85,7 +85,7 @@ pasting in whatever one search returns:
   (Apple Silicon): with Qwen3 1.7B · MLX answering, Qwen3 0.6B · MLX deciding
   takes about 25 ms per decision.
 - **Laya decision models (Apple Silicon Macs).** *Settings → Decision model*
-  also offers **Laya Multilingual** (322M parameters, 614 MB) and **Laya
+  lists them first and offers **Laya Multilingual** (322M parameters, 614 MB) and **Laya
   English** (421M, 804 MB): small encoders built for exactly this kind of
   choice, run natively on the Mac's GPU. A decision takes about 10 ms with
   Laya Multilingual and 20 ms with Laya English, against about 0.6 s for a
@@ -166,7 +166,14 @@ pasting in whatever one search returns:
 - Built-in catalog: **Qwen3 0.6B** (default, 639 MB), **Qwen3 1.7B**
   (1.1 GB, smarter and slower) and a tiny test model, on every computer; and
   on Apple Silicon Macs, **Qwen3 1.7B · MLX** (980 MB) and **Qwen3 0.6B ·
-  MLX** (645 MB), listed first there.
+  MLX** (645 MB), listed first there, followed by Qwen's own larger MLX
+  builds: **Qwen3 4B** (2.1 GB), **8B** (4.4 GB), **14B** (7.9 GB) and
+  **32B** (17.4 GB). Larger models answer better and write more slowly
+  (measured on an Apple M5 Max: about 185, 115, 65 and 28 tokens/second; they need about 3, 5, 9 and 19 GB of memory). A model that probably won't fit your Mac's memory says so on its
+  card before you download it.
+- **What's loaded is marked.** The chat model in use has a green check and a
+  green outline in *Settings → Models*, and the decision model in use has a
+  green check and an *In use* label.
 - **MLX models are much faster on a Mac.** They run natively on the Mac's
   GPU with Apple's MLX, instead of inside the app's web view. Measured on an
   Apple M5 Max with a grounded-size prompt: Qwen3 1.7B · MLX writes about

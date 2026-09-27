@@ -51,7 +51,7 @@ const { loadModel } = await import('../llm/engine');
 beforeEach(() => {
   hub.searches = [];
   vi.mocked(addHubModel).mockClear();
-  act(() => useEngine.setState({ native: { supported: false, chat: null, decider: null, checkpoints: [] } }));
+  act(() => useEngine.setState({ native: { supported: false, chat: null, decider: null, checkpoints: [], memory: null } }));
 });
 
 describe('Add from Hugging Face', () => {
@@ -86,7 +86,7 @@ describe('Add from Hugging Face', () => {
   });
 
   it('offers MLX first on a Mac that runs it', () => {
-    act(() => useEngine.setState({ native: { supported: true, chat: null, decider: null, checkpoints: [] } }));
+    act(() => useEngine.setState({ native: { supported: true, chat: null, decider: null, checkpoints: [], memory: null } }));
     render(<HubModels open onClose={() => {}} />);
     const format = within(screen.getByRole('group', { name: 'Model format' }));
     expect(format.getByRole('button', { name: /MLX/ })).toHaveAttribute('aria-pressed', 'true');

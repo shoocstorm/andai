@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { availableModels, DEFAULT_MODEL, isMlx, LAYA_MODELS, layaById, MODELS, modelById, pinnedFileUrl, recommendedModel, type WllamaDef } from './models';
+import { availableModels, DEFAULT_MODEL, memoryFit, isMlx, LAYA_MODELS, layaById, MODELS, modelById, pinnedFileUrl, recommendedModel, type WllamaDef } from './models';
 
 describe('model catalog', () => {
   it('has unique ids and a valid default', () => {
@@ -27,7 +27,7 @@ describe('model catalog', () => {
 
   it('offers MLX models only where MLX runs, and recommends them there', () => {
     expect(availableModels(false).some(isMlx)).toBe(false);
-    expect(availableModels(true).filter(isMlx).map((m) => m.id)).toEqual(['qwen3-1.7b-mlx', 'qwen3-0.6b-mlx']);
+    expect(availableModels(true).filter(isMlx).map((m) => m.id)).toEqual(['qwen3-1.7b-mlx', 'qwen3-0.6b-mlx', 'qwen3-4b-mlx', 'qwen3-8b-mlx', 'qwen3-14b-mlx', 'qwen3-32b-mlx']);
     expect(recommendedModel(true).id).toBe('qwen3-1.7b-mlx');
     expect(recommendedModel(false).id).toBe(DEFAULT_MODEL);
     expect(DEFAULT_MODEL).toBe('qwen3-0.6b');
@@ -76,5 +76,15 @@ describe('Laya catalog', () => {
     expect(() => pinnedFileUrl('aac6fef/laya-mlx', sha, '../x')).toThrow();
     expect(() => pinnedFileUrl('evil.com/../x', sha, 'a')).toThrow();
     expect(() => pinnedFileUrl('a/b', sha, 'a?x=1')).toThrow();
+  });
+});
+
+describe('memoryFit', () => {
+  it('estimates what a native model needs and whether this Mac has it', () => {
+    const q32 = modelById('qwen3-32b-mlx')!;
+    expect(memoryFit(q32.bytes, 128e9)).toEqual({ needGb: 22, fits: true });
+    expect(memoryFit(q32.bytes, 16e9).fits).toBe(false);
+    expect(memoryFit(modelById('qwen3-4b-mlx')!.bytes, 16e9).fits).toBe(true);
+    expect(memoryFit(q32.bytes, null).fits).toBeNull();
   });
 });

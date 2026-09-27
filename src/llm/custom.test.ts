@@ -55,7 +55,7 @@ beforeEach(() => {
   calls.evicted = [];
   calls.removed = [];
   useCustomModels.setState({ gguf: [] });
-  useEngine.setState({ native: { supported: true, chat: null, decider: null, checkpoints: [] }, loadedId: null });
+  useEngine.setState({ native: { supported: true, chat: null, decider: null, checkpoints: [], memory: null }, loadedId: null });
   initCustomModels();
 });
 
@@ -118,14 +118,14 @@ describe('custom MLX models', () => {
 
   it('come from Rust’s status, and are loadable by id', () => {
     const c = { id: 'hf-mlx-community--qwen3-4b-4bit-d7f544ee', repo: spec.repo, commit: COMMIT, bytes: 2_300_000_000, files: [], downloaded: true, custom: { thinking: true, layers: 36, bits: 4, addedAt: 1 } };
-    expect(mlxDefs({ supported: true, chat: null, decider: null, checkpoints: [{ ...c, custom: null }] })).toEqual([]);
-    useEngine.setState({ native: { supported: true, chat: null, decider: null, checkpoints: [c] } });
+    expect(mlxDefs({ supported: true, chat: null, decider: null, checkpoints: [{ ...c, custom: null }], memory: null })).toEqual([]);
+    useEngine.setState({ native: { supported: true, chat: null, decider: null, checkpoints: [c], memory: null } });
     expect(modelById(c.id)).toMatchObject({ engine: 'mlx', native: c.id, name: 'Qwen3-4B-4bit · MLX', family: '4-bit · 36 layers · Hugging Face', size: '2.3 GB' });
   });
 
   it('are removed through Rust, which forgets them', async () => {
     const c = { id: 'hf-x--y-d7f544ee', repo: 'x/y', commit: COMMIT, bytes: 5, files: [], downloaded: true, custom: { thinking: false, layers: 1, bits: 4, addedAt: 1 } };
-    useEngine.setState({ native: { supported: true, chat: null, decider: null, checkpoints: [c] } });
+    useEngine.setState({ native: { supported: true, chat: null, decider: null, checkpoints: [c], memory: null } });
     await removeCustomModel(c.id);
     expect(calls.removed).toEqual([c.id]);
   });

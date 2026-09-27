@@ -20,7 +20,7 @@ vi.mock('../llm/engine', async (original) => ({
 }));
 
 const gguf = MODELS.filter((m) => !isMlx(m));
-const setMlx = (supported: boolean) => act(() => useEngine.setState({ native: { supported, chat: null, decider: null, checkpoints: [] } }));
+const setMlx = (supported: boolean) => act(() => useEngine.setState({ native: { supported, chat: null, decider: null, checkpoints: [], memory: null } }));
 
 describe('Settings', () => {
   it('lists every portable model with a download action, and no MLX model where MLX can’t run', () => {
@@ -38,7 +38,7 @@ describe('Settings', () => {
     const registry = within(screen.getByRole('region', { name: 'Model registry' }));
     const names = registry.getAllByText(/^Qwen3|^TinyStories/).map((n) => n.textContent);
     expect(names.slice(0, 2)).toEqual(['Qwen3 1.7B · MLX', 'Qwen3 0.6B · MLX']);
-    expect(registry.getAllByText(/fastest on this Mac/)).toHaveLength(2);
+    expect(registry.getAllByText(/fastest on this Mac/)).toHaveLength(MODELS.filter(isMlx).length);
     expect(registry.getAllByText(/wllama · WebGPU/)).toHaveLength(gguf.length);
     expect(registry.getAllByRole('button', { name: /download & load/i })).toHaveLength(MODELS.length);
     expect(screen.getByRole('note')).toHaveTextContent(/MLX models are much faster on this Mac/);
@@ -78,9 +78,12 @@ describe('Settings', () => {
     await user.click(screen.getByRole('button', { name: /^remove$/i }));
     expect(removeLaya).toHaveBeenCalledWith('laya-multilingual');
 
+    // Laya first, then the chat-model deciders.
     const uses = panel().getAllByRole('button', { name: /use for decisions/i });
-    await user.click(uses[uses.length - 1]);
+    await user.click(uses[1]);
     expect(loadDecider).toHaveBeenLastCalledWith('laya-en');
+    const rows = panel().getAllByText(/^(Laya|Qwen3)/).map((n) => n.textContent);
+    expect(rows.slice(0, 2)).toEqual(['Laya Multilingual', 'Laya English']);
     act(() => useEngine.setState({ laya: { supported: false, loaded: null, checkpoints: [] } }));
   });
 
@@ -144,5 +147,31 @@ describe('Settings', () => {
     await user.click(screen.getByRole('button', { name: /add from hugging face/i }));
     expect(screen.getByRole('dialog', { name: 'Add a model from Hugging Face' })).toBeInTheDocument();
     setCustomModels([]);
+  });
+
+  it('marks the loaded chat model and the decision model in use with a green check', () => {
+    act(() =>
+      useEngine.setState((st) => ({
+        status: 'ready',
+        loadedId: DEFAULT_MODEL,
+        decider: { ...st.decider, status: 'ready', loadedId: 'qwen3-1.7b', loadingId: null },
+      })),
+    );
+    render(<Settings />);
+    const registry = within(screen.getByRole('region', { name: 'Model registry' }));
+    expect(registry.getAllByText('Loaded · in use')).toHaveLength(1);
+    expect(registry.getByLabelText('Loaded')).toBeInTheDocument();
+    const panel = within(screen.getByRole('region', { name: 'Decision model' }));
+    expect(panel.getByLabelText('In use for decisions')).toBeInTheDocument();
+    expect(panel.getByText('In use')).toBeInTheDocument();
+    act(() => useEngine.setState((st) => ({ status: 'idle', loadedId: null, decider: { ...st.decider, status: 'idle', loadedId: null } })));
+  });
+
+  it('warns on an MLX model that likely doesn’t fit this Mac’s memory', () => {
+    act(() => useEngine.setState({ native: { supported: true, chat: null, decider: null, checkpoints: [], memory: 16e9 } }));
+    render(<Settings />);
+    const notes = screen.getAllByRole('note').filter((n) => /Needs about/.test(n.textContent ?? ''));
+    expect(notes.map((n) => n.textContent)).toEqual([expect.stringMatching(/Needs about 22 GB of memory; this Mac has 16 GB/)]);
+    setMlx(false);
   });
 });

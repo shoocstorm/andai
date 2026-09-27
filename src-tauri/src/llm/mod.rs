@@ -111,6 +111,18 @@ pub struct LlmStatus {
     chat: Option<String>,
     decider: Option<String>,
     checkpoints: Vec<LlmCheckpoint>,
+    /// This Mac's memory in bytes, so Settings can say when a model likely won't fit.
+    memory: Option<u64>,
+}
+
+/// Physical memory (macOS `hw.memsize`), read once.
+#[cfg(mlx)]
+fn memory() -> Option<u64> {
+    static MEMORY: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *MEMORY.get_or_init(|| {
+        let out = std::process::Command::new("/usr/sbin/sysctl").args(["-n", "hw.memsize"]).env_clear().output().ok()?;
+        String::from_utf8(out.stdout).ok()?.trim().parse().ok()
+    })
 }
 
 /// A catalog model, or one the user added (`custom`, with what Rust read from it).
@@ -202,12 +214,12 @@ pub async fn llm_status(app: AppHandle, mlx: State<'_, Mlx>) -> Result<LlmStatus
         // Hashing a custom model's small files is cheap, but its folder is on disk: off the async runtime.
         checkpoints.extend(blocking(move || Ok(custom::list(&r).iter().map(|m| custom_status(&r, m)).collect::<Vec<_>>())).await?);
         let [chat, decider] = mlx.loaded().llm;
-        Ok(LlmStatus { supported: true, chat, decider, checkpoints })
+        Ok(LlmStatus { supported: true, chat, decider, checkpoints, memory: memory() })
     }
     #[cfg(not(mlx))]
     {
         let _ = (app, mlx);
-        Ok(LlmStatus { supported: false, chat: None, decider: None, checkpoints: vec![] })
+        Ok(LlmStatus { supported: false, chat: None, decider: None, checkpoints: vec![], memory: None })
     }
 }
 

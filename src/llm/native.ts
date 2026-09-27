@@ -20,6 +20,8 @@ export type NativeStatus = {
   chat: string | null;
   decider: string | null;
   checkpoints: NativeCheckpoint[];
+  /** This Mac's memory in bytes (null where unknown). */
+  memory: number | null;
 };
 
 export type NativeParams = {
@@ -53,7 +55,7 @@ export type Generated = {
   first: { token: string; bytes: number[]; logprob: number; top_logprobs: TopLogprob[] } | null;
 };
 
-const UNSUPPORTED: NativeStatus = { supported: false, chat: null, decider: null, checkpoints: [] };
+const UNSUPPORTED: NativeStatus = { supported: false, chat: null, decider: null, checkpoints: [], memory: null };
 
 /** In a plain browser (no Tauri) there's no MLX: same answer as a Windows or Intel build. */
 export const nativeStatus = (): Promise<NativeStatus> => (isTauri() ? invoke<NativeStatus>('llm_status') : Promise.resolve(UNSUPPORTED));

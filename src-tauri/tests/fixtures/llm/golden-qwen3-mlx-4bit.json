@@ -1,0 +1,26 @@
+{
+ "4B": {
+  "repo": "Qwen/Qwen3-4B-MLX-4bit",
+  "commit": "52a5ab34fa604bc8af6d3ce0cac0cab10b7eb495",
+  "text": "<|im_start|>user\nName three ferry routes in Norway, briefly.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "greedy_text": "1. **Stavanger–Tromsø**"
+ },
+ "8B": {
+  "repo": "Qwen/Qwen3-8B-MLX-4bit",
+  "commit": "383413e909f3bc5303ce195ebbdf0339c5a1a2a3",
+  "text": "<|im_start|>user\nName three ferry routes in Norway, briefly.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "greedy_text": "1. **Oslo to Ålesund** – A"
+ },
+ "14B": {
+  "repo": "Qwen/Qwen3-14B-MLX-4bit",
+  "commit": "ba63a5141812f9870287df53341123a71ba41433",
+  "text": "<|im_start|>user\nName three ferry routes in Norway, briefly.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "greedy_text": "1. **Oslo–Helsinki (via the Baltic"
+ },
+ "32B": {
+  "repo": "Qwen/Qwen3-32B-MLX-4bit",
+  "commit": "ceb4c4aad0164033af0c8dd37a0641693d0d6321",
+  "text": "<|im_start|>user\nName three ferry routes in Norway, briefly.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "greedy_text": "Here are three ferry routes in Norway, briefly described:\n\n1"
+ }
+}

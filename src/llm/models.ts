@@ -88,6 +88,58 @@ export const MODELS: ModelDef[] = [
     decider: true,
   },
   {
+    id: 'qwen3-4b-mlx',
+    engine: 'mlx',
+    native: 'qwen3-4b-mlx',
+    name: 'Qwen3 4B · MLX',
+    family: '4-bit · 4.0B params · Qwen’s MLX build',
+    size: '2.1 GB',
+    bytes: 2_148_759_741,
+    url: 'https://huggingface.co/Qwen/Qwen3-4B-MLX-4bit/tree/52a5ab34fa604bc8af6d3ce0cac0cab10b7eb495',
+    note: 'Noticeably smarter than 1.7B, still quick: about 185 tok/s on an M5 Max. Needs about 3 GB of memory.',
+    thinking: true,
+    n_ctx: 4096,
+  },
+  {
+    id: 'qwen3-8b-mlx',
+    engine: 'mlx',
+    native: 'qwen3-8b-mlx',
+    name: 'Qwen3 8B · MLX',
+    family: '4-bit · 8.2B params · Qwen’s MLX build',
+    size: '4.4 GB',
+    bytes: 4_363_317_501,
+    url: 'https://huggingface.co/Qwen/Qwen3-8B-MLX-4bit/tree/383413e909f3bc5303ce195ebbdf0339c5a1a2a3',
+    note: 'Stronger answers at about 115 tok/s on an M5 Max. Needs about 5 GB of memory.',
+    thinking: true,
+    n_ctx: 4096,
+  },
+  {
+    id: 'qwen3-14b-mlx',
+    engine: 'mlx',
+    native: 'qwen3-14b-mlx',
+    name: 'Qwen3 14B · MLX',
+    family: '4-bit · 14.8B params · Qwen’s MLX build',
+    size: '7.9 GB',
+    bytes: 7_857_921_687,
+    url: 'https://huggingface.co/Qwen/Qwen3-14B-MLX-4bit/tree/ba63a5141812f9870287df53341123a71ba41433',
+    note: 'Stronger still, about 65 tok/s on an M5 Max. Needs about 9 GB of memory; a Mac with 16 GB or more.',
+    thinking: true,
+    n_ctx: 4096,
+  },
+  {
+    id: 'qwen3-32b-mlx',
+    engine: 'mlx',
+    native: 'qwen3-32b-mlx',
+    name: 'Qwen3 32B · MLX',
+    family: '4-bit · 32.8B params · Qwen’s MLX build',
+    size: '17.4 GB',
+    bytes: 17_417_626_566,
+    url: 'https://huggingface.co/Qwen/Qwen3-32B-MLX-4bit/tree/ceb4c4aad0164033af0c8dd37a0641693d0d6321',
+    note: 'The most capable, about 28 tok/s on an M5 Max. Needs about 19 GB of memory; a Mac with 32 GB or more.',
+    thinking: true,
+    n_ctx: 4096,
+  },
+  {
     id: 'qwen3-0.6b',
     engine: 'wllama',
     name: 'Qwen3 0.6B',
@@ -148,6 +200,16 @@ export const modelById = (id: string | null | undefined) => allModels().find((m)
 export const isMlx = (def: ModelDef | undefined): def is MlxDef => def?.engine === 'mlx';
 /** The models this computer can run: MLX ones only where Rust reports MLX (Apple Silicon). */
 export const availableModels = (mlx: boolean) => allModels().filter((m) => mlx || m.engine !== 'mlx');
+/**
+ * Whether a native model likely fits this Mac: its weights plus about 20% for
+ * the KV cache and activations and 1 GB, against about 75% of memory, which
+ * is roughly what macOS lets the GPU use. A guide for the UI, not a limit.
+ */
+export function memoryFit(bytes: number, memory: number | null): { needGb: number; fits: boolean | null } {
+  const need = bytes * 1.2 + 1e9;
+  return { needGb: Math.ceil(need / 1e9), fits: memory ? need <= memory * 0.75 : null };
+}
+
 /** What to suggest first: natively on MLX where it runs (much faster), else the portable default. */
 export const recommendedModel = (mlx: boolean): ModelDef => modelById(mlx ? 'qwen3-1.7b-mlx' : DEFAULT_MODEL)!;
 

@@ -108,7 +108,7 @@ export const useEngine = create<EngineState>(() => ({
   lastLoadMs: null,
   lastVerifyMs: null,
   laya: { supported: false, loaded: null, checkpoints: [] },
-  native: { supported: false, chat: null, decider: null, checkpoints: [] },
+  native: { supported: false, chat: null, decider: null, checkpoints: [], memory: null },
   decider: { status: 'idle', loadingId: null, loadedId: null, progress: null, error: null },
 }));
 

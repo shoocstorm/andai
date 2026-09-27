@@ -1,9 +1,9 @@
-import { Check, Cpu, Download, GitFork, HardDrive, Loader2, Monitor, Moon, Palette, Plus, Power, Radio, Sun, Trash2, X, Zap } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Cpu, Download, GitFork, HardDrive, Loader2, Monitor, Moon, Palette, Plus, Power, Radio, Sun, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, Modal, fmtBytes } from '../components/ui';
 import { evictModel, loadDecider, loadModel, refreshLaya, refreshNative, removeLaya, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
 import { removeCustomModel } from '../llm/custom';
-import { availableModels, isMlx, LAYA_MODELS, layaById, modelById, type LayaDef, type ModelDef } from '../llm/models';
+import { availableModels, isMlx, LAYA_MODELS, layaById, memoryFit, modelById, type LayaDef, type ModelDef } from '../llm/models';
 import { clearChat } from '../state/chat';
 import { useKb } from '../state/kb';
 import { useTheme, type ThemeMode } from '../state/theme';
@@ -38,9 +38,13 @@ function DecisionModel() {
     const loading = d.loadingId === id;
     const pct = loading && d.progress?.total ? d.progress.loaded / d.progress.total : 0;
     return (
-      <div key={id} className="st-decider-row">
+      <div key={id} className={`st-decider-row${loaded ? ' loaded' : ''}`}>
+        {loaded && <CheckCircle2 size={18} className="st-check" aria-label="In use for decisions" />}
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 600 }}>{name}</div>
+          <div style={{ fontWeight: 600 }}>
+            {name}
+            {loaded && <span className="pill green st-inuse">In use</span>}
+          </div>
           <div className="faint mono" style={{ fontSize: 11.5 }}>
             {meta}
             {loading && d.progress ? ` · ${d.progress.phase} ${Math.round(pct * 100)}%` : ''}
@@ -65,7 +69,8 @@ function DecisionModel() {
       <div className="panel-head">
         <GitFork size={20} color="var(--violet)" />
         <h3>Decision model</h3>
-        <span className={`right pill ${d.status === 'ready' ? 'violet' : ''}`}>
+        <span className={`right pill ${d.status === 'ready' ? 'green' : ''}`}>
+          {d.status === 'ready' && <Check size={11} />}
           {d.status === 'ready' ? loadedName : d.status === 'loading' ? 'loading' : 'using chat model'}
         </span>
       </div>
@@ -76,7 +81,7 @@ function DecisionModel() {
         so it needs its own memory.
       </p>
       <div className="st-decider-list">
-        {candidates.map((m) => row(m.id, m.name, `${m.size} · ${e.cached[m.url] ? 'cached' : 'download'}`))}
+        {/* Laya first: built for exactly this choice, and the fastest. */}
         {layas.map(({ m, c }) =>
           row(
             m.id,
@@ -89,6 +94,7 @@ function DecisionModel() {
             ) : null,
           ),
         )}
+        {candidates.map((m) => row(m.id, m.name, `${m.size} · ${e.cached[m.url] ? 'cached' : 'download'}`))}
       </div>
       {layas.length > 0 && (
         <p className="faint" style={{ margin: '10px 0 0', fontSize: 12 }}>
@@ -196,11 +202,11 @@ export function Settings() {
               <div key={m.id} className={`panel st-model${loaded ? ' loaded' : ''}`}>
                 <div className="st-model-top">
                   <div className="st-model-icon">
-                    <Cpu size={20} />
+                    {loaded ? <CheckCircle2 size={20} aria-label="Loaded" /> : <Cpu size={20} />}
                   </div>
                   {loaded ? (
-                    <span className="pill blue">
-                      <span className="dot pulse" /> Online
+                    <span className="pill green">
+                      <Check size={11} /> Loaded · in use
                     </span>
                   ) : cached ? (
                     <span className="pill violet">Cached · {fmtBytes(cached)}</span>
@@ -217,6 +223,12 @@ export function Settings() {
                   {m.thinking ? ' · reasoning' : ''}
                 </div>
                 <p className="muted">{m.note}</p>
+                {isMlx(m) && memoryFit(m.bytes, e.native.memory).fits === false && (
+                  <div className="st-memory" role="note">
+                    <AlertTriangle size={13} /> Needs about {memoryFit(m.bytes, e.native.memory).needGb} GB of memory; this Mac has{' '}
+                    {Math.round((e.native.memory ?? 0) / 1e9)} GB, so it may not load, or run very slowly.
+                  </div>
+                )}
                 {m.source && (
                   <div className="st-source faint mono" title={`${m.source.repo} at commit ${m.source.commit}`}>
                     <span className="pill">Hugging Face</span> {m.source.repo}@{m.source.commit.slice(0, 7)}

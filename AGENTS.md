@@ -387,6 +387,17 @@ level defaults to *Ask*.
   heads (Qwen3 8B) and sharded weights are supported. Checked end to end on
   Qwen3 8B 4-bit (`test:llm`): add, chunked download, sha256, load, same
   greedy text as mlx-lm, 116 tok/s on an M5 Max.
+- **The catalog carries Qwen's own MLX builds, 4B to 32B** (`Qwen/Qwen3-*-MLX-4bit`,
+  2026-09-27): 4-bit in groups of 128, the same tokenizer as the smaller
+  ones, untied from 8B up, and sharded at 14B and 32B, so their
+  `model.safetensors.index.json` is pinned with the shards (4B and 8B ship
+  an index naming the single file; it isn't pinned). They're chat models,
+  not deciders (item 8: larger deciders chose worse). `test:llm`
+  (`llm_qwen3_big_match_mlx_lm`) loads each from the HF cache and matches
+  mlx-lm's greedy text; on an M5 Max, generation 184 / 113 / 64 / 28 tok/s
+  (mlx-lm: 188 / 114 / 64 / 29), prompt 2,900 / 2,800 / 1,550 / 640 tok/s,
+  peak memory 3.0 / 5.0 / 8.4 / 18.2 GB (mlx-lm), load 0.2–0.5 s. Settings warns (`memoryFit`) when a model
+  likely exceeds ~75% of the Mac's memory, read by Rust from `hw.memsize`.
 - **A Tauri channel can deliver its last messages after the command
   resolves.** `chatNative` (engine.ts) therefore takes any text that hadn't
   streamed yet from the command's result and drops later pieces.

@@ -206,9 +206,15 @@ M5 Max, dev build, two launches each:
 | Qwen3 1.7B · MLX 4-bit | 348–352 tok/s | 9,850 tok/s | 56 ms | 0.49 s |
 | Qwen3 0.6B · MLX 8-bit | 448–449 tok/s | 17,400–17,850 tok/s | 31–32 ms | 0.47 s |
 | Qwen3 1.7B · MLX 5-bit (not shipped) | 298–303 tok/s | 9,350 tok/s | 58 ms | 0.51 s |
+| Qwen3 4B · MLX 4-bit (Qwen's build) | 184 tok/s | 2,900 tok/s | 185 ms | 0.19 s |
+| Qwen3 8B · MLX 4-bit | 113 tok/s | 2,800 tok/s | 192 ms | 0.22 s |
+| Qwen3 14B · MLX 4-bit | 64 tok/s | 1,550 tok/s | 348 ms | 0.29 s |
+| Qwen3 32B · MLX 4-bit | 28 tok/s | 640 tok/s | 848 ms | 0.48 s |
 | Qwen3 1.7B · wllama Q4_K_M (above) | 29–64 tok/s | 185 tok/s | ~3 s | — |
 
-For reference, outside the app on the same Mac: mlx-lm 0.31 (Python) 347
+The 4B–32B rows are from `bun run test:llm` (Rust, release build, same
+prompt); mlx-lm measured 188, 114, 64 and 29 tok/s for them. For reference,
+outside the app on the same Mac: mlx-lm 0.31 (Python) 347
 tok/s generation and 12,200 prompt for the 4-bit 1.7B; llama.cpp b11205 on
 Metal with flash attention, the GGUF Q4_K_M wllama loads, 285 and 8,770.
 `bun run test:llm` prints the same numbers from Rust directly. A reply held

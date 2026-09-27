@@ -1289,9 +1289,14 @@ tr:hover .kn-remove {
   flex-direction: column;
   transition: border-color 0.2s;
 }
+/* The loaded model: green outline, and a check in place of the chip icon. */
 .st-model.loaded {
-  border-color: color-mix(in srgb, var(--blue) 33%, transparent);
-  box-shadow: 0 0 40px -24px var(--blue), var(--shadow-panel);
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
+  box-shadow: 0 0 40px -24px var(--green), var(--shadow-panel);
+}
+.st-model.loaded .st-model-icon {
+  color: var(--green);
+  background: var(--green-soft);
 }
 .st-model-top {
   display: flex;
@@ -1316,6 +1321,20 @@ tr:hover .kn-remove {
 .st-model-engine {
   margin: 8px 0 2px;
 }
+/* A native model that likely doesn't fit this Mac's memory (models.ts memoryFit). */
+.st-memory {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin: -8px 0 14px;
+  font-size: 12px;
+  color: var(--amber);
+}
+.st-memory svg {
+  flex: none;
+  margin-top: 2px;
+}
+
 /* A model the user added from Hugging Face: where it's from. */
 .st-source {
   display: flex;
@@ -1478,6 +1497,10 @@ tr:hover .kn-remove {
   cursor: pointer;
   font-size: 12.5px;
   text-align: left;
+}
+.hub-radio {
+  width: 13px;
+  flex: none;
 }
 .hub-variant > .mono {
   min-width: 72px;
@@ -2539,6 +2562,18 @@ tr:hover .kn-remove {
 /* decision model (Settings) and KB kind (Knowledge) */
 .st-decider {
   margin-top: 20px;
+}
+.st-decider-row.loaded {
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
+  background: var(--green-soft);
+}
+.st-check {
+  flex: none;
+  color: var(--green);
+}
+.st-inuse {
+  margin-left: 8px;
+  vertical-align: middle;
 }
 .st-decider-list {
   display: flex;
