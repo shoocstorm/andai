@@ -549,6 +549,12 @@ level defaults to *Ask*.
   mlx-sys, mlx-rs and tokenizers optimized in dev. `[profile.dev.build-override]`
   would reach it too, but it also changes Tauri's codegen and breaks the
   build (`missing field referenced_by`).
+- **Search first holds on code knowledge bases too** (tracker item 14,
+  2026-09-27). Letting the decision model pick the first step on code and
+  mixed questions lost answer facts on every setup (−3.4 to −7 points), even
+  only for questions naming a symbol: Find symbols returns names and lines,
+  not code, and the deciders answered from that. Without a name, the
+  argument writer guessed symbols that don't exist.
 - **ug search reports how each item was found** (ug 0.1.22): `matched_by`
   is `semantic` (vector), `keyword` (full-text) or `graph` (walked `hop`
   edges from a match), and `distance` is its Personalized PageRank score

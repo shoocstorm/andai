@@ -237,14 +237,17 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     // What to do when the decision can't be trusted: search once if nothing
     // was looked up yet (the fixed pipeline's behavior), else answer.
     const fallbackAction = () => (calls === 0 && searchTool ? searchTool.id : ANSWER);
-    // With a knowledge base selected, the first decision picked search on 23 of
-    // 24 lookup questions, and the miss was a follow-up that needed one, so
-    // it's skipped (about 0.7 s) when the request plainly asks about content.
-    // Anything else, small talk or a question to the assistant, still goes to
-    // the model (docs/agentic-rag-improvements.md, item 7).
+    // A request that plainly asks about content starts with a search, without
+    // a decision (about 0.7 s saved; the decision picked search for all but a
+    // follow-up, item 7). In code and mixed knowledge bases too: letting the
+    // decision model choose the first step there, always or only when the
+    // question names a symbol, lost answer facts on every setup, because the
+    // deciders stopped after Find symbols' names and lines without reading
+    // the code (docs/agentic-rag-improvements.md, item 14). Small talk and
+    // questions to the assistant always go to the model.
     if (settings.searchFirst && index === 0 && searchTool && needsLookup(prompt)) {
       action = searchTool.id;
-      note = 'Searched first, without a decision: with a knowledge base selected, a question almost always needs a search.';
+      note = 'Searched first, without a decision: a question about the knowledge base’s content starts with a search, which reads the matching text.';
     } else {
       try {
         const options = decisionOptions(tools, seed + index, found.length > 0);

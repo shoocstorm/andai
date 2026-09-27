@@ -31,6 +31,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 11 | [Rerank kept passages by relevance](#11-rerank-kept-passages-by-relevance) | measured 2026-09-27 · one fact lost per checkpoint, none gained; not shipped |
 | 12 | [Intent gate with Laya](#12-intent-gate-with-laya) | probed 2026-09-27 · fails the bar on both checkpoints; not shipped |
 | 13 | [Answer claim check](#13-answer-claim-check) | done 2026-09-27 · AUC 0.67 / 0.82; flags 3 of 42 and 8 of 41 cited sentences on the eval, 14 / 27 ms |
+| 14 | [Let the decision model choose the first step on code](#14-let-the-decision-model-choose-the-first-step-on-code) | measured 2026-09-27 · fewer facts on every setup; not shipped |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
 not shipped: 4, 9; 8 changed the recommendation (a small decision model with
@@ -610,3 +611,44 @@ M5 Max for Qwen3 1.7B: llama.cpp on Metal 285 tok/s, mlx-lm 347, Andai's
 port 349 (wllama: 30–65), prompts read 50× faster. MLX 4-bit ships over
 5-bit (302 tok/s, 89.7% facts) by a human decision; its quality gap is
 item 10.
+
+## 14. Let the decision model choose the first step on code
+
+**Why.** Item 7 searches first, without a decision, whenever the request
+plainly asks about content. On a code or mixed knowledge base a blind search
+isn't obviously the best start: finding a named symbol, reading its source
+or listing its callers can be (raised from the app, 2026-09-27; the trace's
+note also claimed "a question almost always needs a search", which item 7
+only measured with Qwen3 0.6B deciding).
+
+**Measured (2026-09-27), not shipped.** Two variants against the setups'
+last reports (`eval/laya13b-*`, `eval/item7fix-0.6b.json`; runs
+`eval/item14-*` and `eval/item14b-*`):
+
+| Setup | Facts, search first | Decision on every code/mixed question | Decision only when a symbol is named |
+|---|---|---|---|
+| MLX 1.7B + Laya Multilingual | 89.7% | 82.8% (wasted calls 4 → 12) | 82.8% (4 → 6) |
+| MLX 1.7B + Laya English | 89.7% | 82.8% (3 → 18; 3.7 decisions/q) | 86.2% (3 → 6) |
+| Qwen3 0.6B | 86.2% | 79.3% | 82.8% |
+
+"Named" meant a camelCase, PascalCase or snake_case identifier, backticks,
+`foo()` or a source file name (9 of the 16 code and mixed questions).
+
+- **Without a name,** the argument writer guesses one: Find symbols for
+  "vehicle" as a class, or for "eval-code" (the knowledge base's name) as a
+  file. It finds nothing, the repeat is skipped, and only then comes the
+  search.
+- **With a name,** Find symbols finds it, but it returns names and line
+  numbers, not code. The Laya deciders then judge the results sufficient and
+  answer without the source (`code-lines-cancel`, `code-retry-default`,
+  `mixed-context-createbooking`), or Laya Multilingual asks a clarifying
+  question straight away ("How does computeFare work out the price?").
+  A search returns the matching text itself, which is why it wins here.
+
+What ships: search first everywhere, as before; the trace note now says why
+("a question about the knowledge base's content starts with a search, which
+reads the matching text") instead of "almost always needs a search".
+**Next to try:** when Find symbols returns a symbol, read its source in the
+same step (or offer Read symbol source as the only next code tool), so a
+symbol-first start ends with code in the prompt; then re-measure this item.
+

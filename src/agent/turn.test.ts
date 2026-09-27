@@ -562,6 +562,20 @@ describe('runTurn (agent mode)', () => {
     expect(agent.seenOptions).toHaveLength(1); // only the second step was decided
   });
 
+  it('searches first in a code or mixed knowledge base too, even for a question that names a symbol (item 14)', async () => {
+    for (const kind of ['code', 'mixed'] as const) {
+      clearChat();
+      agent.tool = [];
+      agent.seenOptions = [];
+      useKb.setState({ kbs: [kb({ kind })] });
+      useTools.setState({ searchFirst: true });
+      agent.decisions = [{ chosen: 'answer_now' }];
+      await runTurn('Which functions call computeFare?');
+      expect(steps()[0]).toMatchObject({ action: 'kb_search', decision: null });
+      expect(steps()[0].note).toBe('Searched first, without a decision: a question about the knowledge base’s content starts with a search, which reads the matching text.');
+    }
+  });
+
   it('still lets the model decide on small talk, and after the first step', async () => {
     useTools.setState({ searchFirst: true });
     agent.decisions = [{ chosen: 'answer_now' }];
