@@ -55,7 +55,7 @@ export const layaDecide = (state: string, questions: LayaQuestion[]) => invoke<L
 
 /** How likely each passage helps answer `request` (one yes/no row per passage, batched in Rust). */
 export const layaRelevance = (request: string, passages: { source: string; text: string }[]) =>
-  invoke<{ scores: number[]; ms: number; model: string }>('laya_relevance', { request, passages });
+  invoke<{ scores: number[]; inputTokens: number[]; truncated: boolean[]; ms: number; model: string }>('laya_relevance', { request, passages });
 
 /** How likely each cited passage supports the sentence that cites it (one yes/no row per claim, batched in Rust). */
 export const layaSupport = (claims: { statement: string; source: string; text: string }[]) =>

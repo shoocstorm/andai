@@ -40,7 +40,7 @@ import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
-import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, RelevanceList, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
+import { AgentStepCard, ApprovalCard, CopyTraceButton, DecisionSummary, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 import { shortcut } from '../lib/platform';
 
@@ -203,6 +203,9 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
   const { thinking, answer, open } = splitThink(m.content);
   const visibleSteps = (m.steps ?? []).filter((s) => s.status !== 'queued' && s.status !== 'skipped');
   const waiting = m.streaming && !answer && !thinking;
+  // The source whose dialog is open, from a citation or retrieval.log.
+  const [source, setSource] = useState<number | null>(null);
+  const nSources = m.sources?.length ?? 0;
   return (
     <div className={`cc-turn${focused ? ' focused' : ''}`} onClick={onFocus}>
       <div className="cc-divider">
@@ -255,7 +258,7 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
               <i />
             </div>
           ) : (
-            answer && <Markdown text={answer + (m.streaming ? ' ▍' : '')} />
+            answer && <Markdown text={answer + (m.streaming ? ' ▍' : '')} sources={nSources} onCite={setSource} />
           )}
           {m.stopped && !answer && <div className="faint">Stopped before an answer was produced.</div>}
 
@@ -266,17 +269,18 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
                 {m.streaming ? <span className="live">LIVE</span> : <span>{m.sources.length} hits</span>}
               </summary>
               {m.sources.map((h, i) => (
-                <div key={h.id + i} className="cc-log-line">
+                <button key={h.id + i} type="button" className="cc-log-line linklike" aria-haspopup="dialog" aria-label={`Source ${i + 1}: ${h.file}:${h.start_line}-${h.end_line}`} onClick={() => setSource(i + 1)}>
                   <span className="log-violet">[{i + 1}]</span> <span className="log-info">{h.file}</span>
                   <span className="faint">
                     :{h.start_line}-{h.end_line}
                   </span>{' '}
                   <span className="faint">{h.name !== h.file ? `— ${h.name}` : ''}</span>
-                </div>
+                </button>
               ))}
             </details>
           )}
           {m.support && <SupportNote r={m.support} sources={m.sources ?? []} />}
+          {source != null && <SourceDialog m={m} n={source} onClose={() => setSource(null)} />}
           <div className="cc-answer-meta">
             {fmtTime(m.createdAt)} · {m.stats?.model ?? 'Andai'}
             {m.stats && ` · ${m.stats.tokens} tok · ${m.stats.tokPerSec.toFixed(1)} tok/s`}
@@ -743,7 +747,8 @@ function TracePanel({ msg }: { msg?: Message }) {
                 )}
                 {s.kind === 'filter' && msg.relevance && <RelevanceList r={msg.relevance} />}
                 {s.kind === 'verify' && msg.support && <SupportList r={msg.support} sources={msg.sources ?? []} />}
-                {(s.kind === 'retrieve' || s.kind === 'plan') && !!msg.sources?.length && (
+                {/* In agent mode the tool calls and the relevance check already list the passages. */}
+                {s.kind === 'retrieve' && !!msg.sources?.length && (
                   <div className="trace-subs">
                     {msg.sources.slice(0, 5).map((h, j) => (
                       <div key={h.id + j} className="trace-sub">

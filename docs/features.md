@@ -22,7 +22,9 @@ model download nothing leaves the machine: no account, no API key, no cloud.
   away until you open it.
 - **Cited sources.** When a knowledge base is selected, answers cite passages
   as `[1]`, `[2]`. Each citation matches a source listed under the answer, with
-  its file name and line range.
+  its file name and line range. Click a citation, or a line of
+  *retrieval.log*, to read that passage, with what the relevance and claim
+  checks said about it.
 - **Execution Trace.** A side panel with each step's status and timing,
   each decision and tool call (see below), the sources used, live throughput (tokens/second) and how much of the model's
   context window the turn used. Hide it for a focused view (`⌘J`).
@@ -105,7 +107,9 @@ pasting in whatever one search returns:
   helps answer the question and drops the clear misses (below 10%). The top
   two search results are always kept, and if the check fails nothing is
   dropped. The Execution Trace lists every passage with its score, what was
-  kept (numbered as the answer cites it) and what was dropped. In our agent
+  kept (numbered as the answer cites it) and what was dropped, folded to one
+  line until you open it; click a passage to see the request, its text,
+  Laya's answer and why it was kept or dropped. In our agent
   eval it made the prompt 23% shorter with Laya English (the first word came
   about 0.6 s sooner) and 8% shorter with Laya Multilingual, with no loss of
   answer facts, for 36–57 ms per question.
@@ -113,7 +117,7 @@ pasting in whatever one search returns:
   written, Laya checks each sentence that cites a source (`[n]`) against the
   passage it cites. When one probably isn't supported, a short note under
   the answer lists it, and the Execution Trace shows every cited sentence
-  with its score. **Why?** on any of them opens the check itself: the
+  with its score (folded to one line). Click a sentence to open the check: the
   sentence, the passage it was compared with, Laya's answer, and why it
   counts as a flag. The answer itself is never changed. It takes about
   15–30 ms per answer (median 14 ms with Laya Multilingual, 27 ms with

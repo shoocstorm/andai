@@ -428,16 +428,18 @@ describe('Command Center (agent mode)', () => {
   it('shows the relevance check: each passage’s score, what was kept and dropped', () => {
     const relevance = {
       model: 'Laya Multilingual',
+      modelId: 'laya-multilingual',
+      request: 'What headers?',
       ms: 41,
       modelMs: 38,
       keepTop: 2,
       dropBelow: 0.1,
       tokensSaved: 180,
       items: [
-        { file: 'README.md', start_line: 1, end_line: 9, name: 'a', score: 0.92, kept: true, reason: 'top' as const, chars: 400 },
-        { file: 'notes.md', start_line: 3, end_line: 8, name: 'b', score: 0.03, kept: true, reason: 'top' as const, chars: 300 },
-        { file: 'old.md', start_line: 1, end_line: 5, name: 'c', score: 0.04, kept: false, reason: 'low' as const, chars: 700 },
-        { file: 'api.md', start_line: 2, end_line: 6, name: 'd', score: 0.61, kept: true, reason: 'score' as const, chars: 200 },
+        { file: 'README.md', start_line: 1, end_line: 9, name: 'a', score: 0.92, kept: true, reason: 'top' as const, chars: 400, text: 'Set COOP and COEP.', inputTokens: 90, truncated: false },
+        { file: 'notes.md', start_line: 3, end_line: 8, name: 'b', score: 0.03, kept: true, reason: 'top' as const, chars: 300, text: 'Notes.', inputTokens: 40, truncated: false },
+        { file: 'old.md', start_line: 1, end_line: 5, name: 'c', score: 0.04, kept: false, reason: 'low' as const, chars: 700, text: 'Old release notes about fonts.', inputTokens: 60, truncated: false },
+        { file: 'api.md', start_line: 2, end_line: 6, name: 'd', score: 0.61, kept: true, reason: 'score' as const, chars: 200, text: 'The API needs COOP.', inputTokens: 55, truncated: true },
       ],
     };
     addMessage({ id: 'u', role: 'user', content: 'What headers?', createdAt: 0 });
@@ -467,6 +469,95 @@ describe('Command Center (agent mode)', () => {
     // kept passages carry the number the answer cites them by
     expect(list.getByText('[3]', { exact: false }).closest('li')).toHaveAttribute('aria-label', 'api.md: 61%, kept');
     expect(list.getByText(/1 dropped · ~180 fewer prompt tokens/)).toBeInTheDocument();
+    // folded to one line until opened
+    expect(list.getByText('4 passages scored · 1 dropped').closest('details')).not.toHaveAttribute('open');
+  });
+
+  it('opens a passage’s relevance check from its name: the request, the passage, Laya’s answer and why it was dropped', async () => {
+    const user = userEvent.setup();
+    addMessage({ id: 'u', role: 'user', content: 'What headers?', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Use COOP [1].',
+      createdAt: 0,
+      relevance: {
+        model: 'Laya Multilingual',
+        modelId: 'laya-multilingual',
+        request: 'What headers?',
+        ms: 41,
+        modelMs: 38,
+        keepTop: 2,
+        dropBelow: 0.1,
+        tokensSaved: 180,
+        items: [
+          { file: 'README.md', start_line: 1, end_line: 9, name: 'a', score: 0.92, kept: true, reason: 'top', chars: 400, text: 'Set COOP.', inputTokens: 90, truncated: false },
+          { file: 'old.md', start_line: 1, end_line: 5, name: 'c', score: 0.04, kept: false, reason: 'low', chars: 700, text: 'Old release notes about fonts.', inputTokens: 60, truncated: true },
+        ],
+      },
+      steps: [{ kind: 'filter', title: 'Relevance check', detail: 'Kept 1 of 2 passages', status: 'done' }],
+    });
+    render(<CommandCenter />);
+    await user.click(screen.getByRole('button', { name: 'Relevance check: old.md:1-5' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Relevance check for old.md:1-5' }));
+    expect(dialog.getByText('Dropped: unlikely to help')).toBeInTheDocument();
+    expect(dialog.getAllByText('Old release notes about fonts.').length).toBeGreaterThan(0);
+    const why = within(dialog.getByRole('region', { name: 'Why this verdict' }));
+    expect(why.getByText(/answered 4\.0% yes, below the 10% cut, so the passage was left out/)).toBeInTheDocument();
+    expect(why.getByText(/cut to fit the model’s input/)).toBeInTheDocument();
+    expect(why.getByText(/76% of the time/)).toBeInTheDocument();
+  });
+
+  it('makes each citation in the answer and each retrieval.log line open that source, with what the checks said', async () => {
+    const user = userEvent.setup();
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Cars pay 18.5 [2]. See `arr[1]` in code, and [9] is not a source.',
+      createdAt: 0,
+      kbName: 'Docs',
+      sources: [
+        { id: 'h1', name: 'README', node_type: 'Section', file: 'README.md', start_line: 1, end_line: 9, snippet: 'Set COOP.' },
+        { id: 'h2', name: 'VEHICLE_SURCHARGE', node_type: 'Constant', file: 'fares.ts', start_line: 12, end_line: 12, snippet: 'export const VEHICLE_SURCHARGE = 18.5;' },
+      ],
+      support: {
+        model: 'Laya English',
+        modelId: 'laya-en',
+        ms: 30,
+        modelMs: 25,
+        flagBelow: 0.1,
+        items: [{ sentence: 'Cars pay 18.5.', n: 2, cites: [2], source: 'fares.ts:12-12', score: 0.9, flagged: false, inputTokens: 30, truncated: false }],
+      },
+    });
+    render(<CommandCenter />);
+    // only real citations are links: not inside code, not past the source list
+    expect(screen.getAllByRole('button', { name: /^Source \d+$/ }).map((b) => b.getAttribute('aria-label'))).toEqual(['Source 2']);
+    await user.click(screen.getByRole('button', { name: 'Source 2' }));
+    let dialog = within(screen.getByRole('dialog', { name: 'Source 2' }));
+    expect(dialog.getByText('VEHICLE_SURCHARGE')).toBeInTheDocument();
+    expect(dialog.getByText('export const VEHICLE_SURCHARGE = 18.5;')).toBeInTheDocument();
+    expect(dialog.getByText(/Cars pay 18\.5\./)).toBeInTheDocument();
+    await user.click(dialog.getAllByRole('button', { name: 'Close dialog' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Source 1: README.md:1-9' }));
+    dialog = within(await screen.findByRole('dialog', { name: 'Source 1' }));
+    expect(dialog.getByText('Set COOP.')).toBeInTheDocument();
+  });
+
+  it('doesn’t list the passages again under the plan step: the tool calls and the relevance check do', () => {
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'A [1].',
+      createdAt: 0,
+      sources: [{ id: 'h9', name: 'x', node_type: 'Section', file: 'zzz-unique.md', start_line: 1, end_line: 2 }],
+      steps: [{ kind: 'plan', title: 'Plan & use tools', detail: '1 tool call', status: 'done' }],
+      agent: [{ id: 's1', index: 0, at: 0, decision: null, action: 'kb_search', call: call() }],
+    });
+    render(<CommandCenter />);
+    // the per-passage rows the retrieve step shows (trace-sub), not the answer's retrieval.log
+    expect([...document.querySelectorAll('.trace-sub')].some((el) => el.textContent?.includes('zzz-unique.md'))).toBe(false);
   });
 
   it('notes under the answer which cited sentences may not be supported, and lists every claim in the trace', () => {
@@ -555,7 +646,8 @@ describe('Command Center (agent mode)', () => {
       support,
     });
     render(<CommandCenter />);
-    await userEvent.click(within(document.querySelector('.cc-support') as HTMLElement).getByRole('button', { name: 'Why: [2] Cars pay 18.5.' }));
+    await userEvent.click(within(document.querySelector('.cc-support') as HTMLElement).getByRole('button', { name: 'Claim check: [2] Cars pay 18.5.' }));
+    expect(within(document.querySelector('.cc-support') as HTMLElement).getByText(/^A rough automatic check: it can miss real problems and flag correct ones\./)).toBeInTheDocument();
     const dialog = within(screen.getByRole('dialog', { name: 'Claim check for source 2' }));
     expect(dialog.getByText('May not be supported by its source')).toBeInTheDocument();
     expect(dialog.getAllByText('export const VEHICLE_SURCHARGE = 18.5;').length).toBeGreaterThan(0);

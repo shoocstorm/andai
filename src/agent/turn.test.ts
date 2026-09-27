@@ -108,7 +108,8 @@ const rel = vi.hoisted(() => ({
 vi.mock('../llm/laya', () => ({
   layaRelevance: async (_request: string, passages: unknown[]) => {
     if (rel.fail) throw rel.fail;
-    return { scores: rel.scores ?? passages.map(() => 0.9), ms: 20, model: 'laya-multilingual' };
+    const scores = rel.scores ?? passages.map(() => 0.9);
+    return { scores, inputTokens: scores.map(() => 100), truncated: scores.map(() => false), ms: 20, model: 'laya-multilingual' };
   },
   layaSupport: async (claims: unknown[]) => {
     rel.claims.push(claims);

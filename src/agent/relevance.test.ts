@@ -7,7 +7,7 @@ const rust = vi.hoisted(() => ({ scores: [] as number[], seen: [] as unknown[] }
 vi.mock('../llm/laya', () => ({
   layaRelevance: async (request: string, passages: unknown[]) => {
     rust.seen.push({ request, passages });
-    return { scores: rust.scores, ms: 30, model: 'laya-multilingual' };
+    return { scores: rust.scores, inputTokens: rust.scores.map(() => 120), truncated: rust.scores.map((_, i) => i === 0), ms: 30, model: 'laya-multilingual' };
   },
 }));
 
@@ -51,7 +51,10 @@ describe('checkRelevance', () => {
     const r = (await checkRelevance('What headers?', hits))!;
     expect(rust.seen).toEqual([{ request: 'What headers?', passages: hits.map((h) => ({ source: `${h.file}:${h.start_line}-${h.end_line}`, text: h.snippet!.trim() })) }]);
     expect(r.hits.map((h) => h.id)).toEqual(['h1', 'h2', 'h4']);
-    expect(r.record).toMatchObject({ model: 'Laya Multilingual', modelMs: 30, keepTop: 2, dropBelow: DROP_BELOW, tokensSaved: Math.round(400 / 3.2) });
+    expect(r.record).toMatchObject({ model: 'Laya Multilingual', modelId: 'laya-multilingual', request: 'What headers?', modelMs: 30, keepTop: 2, dropBelow: DROP_BELOW, tokensSaved: Math.round(400 / 3.2) });
+    // what the trace's relevance dialog shows: the text Laya read, its size, and whether it was cut
+    expect(r.record.items[2]).toMatchObject({ text: 'x'.repeat(400), inputTokens: 120, truncated: false });
+    expect(r.record.items[0].truncated).toBe(true);
     expect(r.record.items.map((x) => [x.file, x.kept, x.reason])).toEqual([
       ['f1.md', true, 'top'],
       ['f2.md', true, 'top'],

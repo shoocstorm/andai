@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { Markdown, ScreenBoundary } from './ui';
+import { linkCitations, Markdown, ScreenBoundary } from './ui';
 
 // Model output can be steered by a poisoned document (prompt injection), so
 // rendering it must never make a network request or navigate (AGENTS.md §9).
@@ -62,5 +62,27 @@ describe('ScreenBoundary', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(screen.getByText('Chat')).toBeInTheDocument();
     vi.restoreAllMocks();
+  });
+});
+
+describe('citations', () => {
+  it('links [n] within the sources, and leaves code, links and out-of-range numbers alone', () => {
+    expect(linkCitations('A [1]. B [2, 3]. C [9]. `x[1]` and\n```\ny[2]\n```\n[see](https://e.x) [1](https://e.x)', 3)).toBe(
+      'A [\\[1\\]](#cite-1). B [\\[2\\]](#cite-2)[\\[3\\]](#cite-3). C [9]. `x[1]` and\n```\ny[2]\n```\n[see](https://e.x) [1](https://e.x)',
+    );
+  });
+
+  it('renders a citation as a button that opens its source, and never navigates', async () => {
+    const onCite = vi.fn();
+    render(<Markdown text="Use COOP [2]. Plain [5]." sources={3} onCite={onCite} />);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Source 5' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Source 2' }));
+    expect(onCite).toHaveBeenCalledWith(2);
+  });
+
+  it('keeps model-written #cite links inert without onCite', () => {
+    render(<Markdown text="[click](#cite-1)" />);
+    expect(screen.queryByRole('button', { name: 'Source 1' })).toBeNull();
   });
 });

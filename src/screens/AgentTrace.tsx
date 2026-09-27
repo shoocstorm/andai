@@ -10,7 +10,7 @@ import { CopyButton, Modal, fmtTime } from '../components/ui';
 import { shellCommand } from '../agent/debugReport';
 import type { RelevanceRecord } from '../agent/relevance';
 import { claimState, MEASURED, SUPPORTS, type SupportItem, type SupportRecord } from '../agent/claims';
-import { passageText } from '../agent/relevance';
+import { MEASURED_RELEVANCE, passageState, passageText, RELEVANT, type RelevanceItem } from '../agent/relevance';
 import type { SearchHit } from '../kb/api';
 import type { DecisionIO } from '../llm/decide';
 import type { AgentStep, CallStatus, DecisionRecord, Message, ToolCallRecord } from '../state/chat';
@@ -631,32 +631,176 @@ export function AgentStepCard({ s }: { s: AgentStep }) {
   );
 }
 
+/** Plain text that opens a dialog: the item itself is the link, with no extra button. */
+function TextLink({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" className="linklike" aria-haspopup="dialog" aria-label={label} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
+/** A short line on how rough the Laya checks are, shown wherever their verdicts are. */
+export const ROUGH_CHECK = 'A rough automatic check: it can miss real problems and flag correct ones.';
+
 /**
- * The relevance check under its trace step: every retrieved passage, its
- * score, and whether it went into the prompt (numbered as the answer cites
- * it) or was dropped, and why.
+ * Why a passage was kept or dropped, in plain sentences: what Laya was asked,
+ * its answer against the rules (top results always kept, then the cut), and
+ * how far the check can be trusted. Pure, for the relevance dialog and its tests.
+ */
+export function explainRelevance(x: RelevanceItem, r: RelevanceRecord): string[] {
+  const out = [`The agent asked ${r.model} whether this passage (${x.file}:${x.start_line}-${x.end_line}) helps answer the request, as a yes/no question: “${RELEVANT}”`];
+  if (x.reason === 'top') {
+    out.push(`It answered ${pct(x.score)} yes. The passage is one of the top ${r.keepTop} search results, which are always kept, so it went into the prompt whatever it scored.`);
+  } else if (x.kept) {
+    out.push(`It answered ${pct(x.score)} yes, at or above the ${pct(r.dropBelow)} cut, so the passage went into the prompt.`);
+  } else {
+    out.push(`It answered ${pct(x.score)} yes, below the ${pct(r.dropBelow)} cut, so the passage was left out of the prompt and the chat model never read it.`);
+  }
+  if (x.truncated) out.push('The request or the passage was cut to fit the model’s input, so part of it wasn’t read.');
+  const m = MEASURED_RELEVANCE[r.modelId];
+  out.push(
+    m
+      ? `How far to trust it: on our test passages ${r.model} ranked a passage holding the answer above one without it ${Math.round(m.auc * 100)}% of the time, so the cut is kept low and only clear misses are dropped.`
+      : 'How far to trust it: this checkpoint wasn’t measured on the relevance check, so treat its scores as rough.',
+  );
+  return out;
+}
+
+/** One passage's relevance check: the request, the passage, Laya's answer and why it was kept or dropped, and the exact call. */
+export function RelevanceDialog({ x, r, cite, onClose }: { x: RelevanceItem; r: RelevanceRecord; cite: number | null; onClose: () => void }) {
+  const source = `${x.file}:${x.start_line}-${x.end_line}`;
+  const text = String(x.text ?? '');
+  const state = passageState(String(r.request ?? ''), source, text);
+  return (
+    <Modal open onClose={onClose} wide label={`Relevance check for ${source}`}>
+      <div className="dd-head">
+        <div>
+          <div className="label violet">Relevance check · {cite != null ? `source [${cite}]` : 'dropped passage'}</div>
+          <h3>{x.reason === 'top' ? 'Kept: a top search result' : x.kept ? 'Kept: likely to help' : 'Dropped: unlikely to help'}</h3>
+          <div className="faint ag-small">
+            {r.model} · decision model{x.inputTokens != null ? ` · ${x.inputTokens} input tokens` : ''} · the check took {fmtMs(r.ms)} for {r.items.length}{' '}
+            passage{r.items.length === 1 ? '' : 's'} (model {fmtMs(r.modelMs)})
+            {x.truncated && <span className="ag-note"> · input cut to fit the model</span>}
+          </div>
+        </div>
+        <button className="btn ghost sm" aria-label="Close dialog" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+
+      <section className="dd-section" aria-label="Why this verdict">
+        <h4 className="label">Why this verdict</h4>
+        <ol className="dd-why">
+          {explainRelevance(x, r).map((line, i) => (
+            <li key={i} className="selectable">
+              {line}
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <div className="dd-grid">
+        <section className="dd-section" aria-label="What the model saw">
+          <h4 className="label">What the model saw</h4>
+          <Field k="Request" copy={r.request}>
+            <div className="ag-small selectable">{r.request}</div>
+          </Field>
+          <Field k={`Passage · ${source}`} copy={text}>
+            <pre className="ag-pre selectable dd-state">{text || '(empty)'}</pre>
+          </Field>
+          <Field k="Yes/no question">
+            <div className="ag-small selectable">{RELEVANT}</div>
+          </Field>
+        </section>
+        <section className="dd-section" aria-label="What it returned">
+          <h4 className="label">What it returned</h4>
+          <YesNoBars yes="Helps" no="Doesn’t help" p={x.score} chosenYes={x.score >= r.dropBelow} />
+          <div className="faint ag-seed">
+            Dropped below {pct(r.dropBelow)} “helps”, except the top {r.keepTop} search results · {ROUGH_CHECK}
+          </div>
+        </section>
+      </div>
+
+      <details className="ag-raw dd-raw">
+        <summary>Exact call: Laya’s input for this passage</summary>
+        <Field k="Input: state" copy={state}>
+          <pre className="ag-pre selectable">{state}</pre>
+        </Field>
+        <Field k="Input: question">
+          <pre className="ag-pre selectable">{`noul · ${RELEVANT}`}</pre>
+        </Field>
+        <Field k="Output">
+          <pre className="ag-pre selectable">{JSON.stringify({ probabilities: [1 - x.score, x.score], inputTokens: x.inputTokens, truncated: x.truncated }, null, 2)}</pre>
+        </Field>
+      </details>
+      <div className="dd-foot">
+        <CopyButton text={JSON.stringify({ model: r.model, question: RELEVANT, state, score: x.score, kept: x.kept, reason: x.reason, dropBelow: r.dropBelow }, null, 2)} label="Copy relevance check call">
+          Copy relevance check call
+        </CopyButton>
+        <button className="btn primary sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Two bars for a yes/no answer; the side the verdict went to is highlighted. */
+function YesNoBars({ yes, no, p, chosenYes }: { yes: string; no: string; p: number; chosenYes: boolean }) {
+  return (
+    <ul className="ag-bars" aria-label="Laya's answer">
+      {(
+        [
+          [yes, p, chosenYes],
+          [no, 1 - p, !chosenYes],
+        ] as const
+      ).map(([label, v, chosen]) => (
+        <li key={label} className={chosen ? 'chosen' : undefined}>
+          <span className="ag-bar-label">{label}</span>
+          <span className="ag-bar-track">
+            <i style={{ width: `${Math.max(1, v * 100)}%` }} />
+          </span>
+          <span className="ag-bar-value mono">{pct(v)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * The relevance check under its trace step, folded to one line: every
+ * retrieved passage, its score, and whether it went into the prompt
+ * (numbered as the answer cites it) or was dropped. Each passage opens its
+ * check; a dialog is built only while open.
  */
 export function RelevanceList({ r }: { r: RelevanceRecord }) {
-  let n = 0;
+  const [open, setOpen] = useState<number | null>(null);
   const dropped = r.items.filter((x) => !x.kept).length;
+  let n = 0;
+  const cites = r.items.map((x) => (x.kept ? ++n : null));
   return (
     <section className="trace-subs ag-rel" aria-label="Relevance check">
-      <div className="faint ag-small">
-        {r.model} scored how likely each passage helps answer the request. The top {r.keepTop} search results are always kept; the
-        rest are dropped below {pct(r.dropBelow)}.
-      </div>
-      <ul className="ag-rel-list">
-        {r.items.map((x, i) => {
-          const cite = x.kept ? ++n : null;
-          return (
+      <details className="ag-fold">
+        <summary className="faint ag-small">
+          {r.items.length} passages scored · {dropped ? `${dropped} dropped` : 'none dropped'}
+        </summary>
+        <div className="faint ag-small">
+          {r.model} scored how likely each passage helps answer the request. The top {r.keepTop} search results are always kept; the
+          rest are dropped below {pct(r.dropBelow)}. {ROUGH_CHECK}
+        </div>
+        <ul className="ag-rel-list">
+          {r.items.map((x, i) => (
             <li key={i} className={x.kept ? 'kept' : 'dropped'} aria-label={`${x.file}: ${pct(x.score)}, ${x.kept ? 'kept' : 'dropped'}`}>
               {x.kept ? <Check size={13} color="var(--violet)" /> : <X size={13} color="var(--text-4)" />}
               <span className="ag-rel-file ellipsis" title={x.file}>
-                {cite != null && <span className="mono">[{cite}] </span>}
-                {x.file.split('/').pop()}
-                <span className="faint">
-                  :{x.start_line}-{x.end_line}
-                </span>
+                <TextLink label={`Relevance check: ${x.file}:${x.start_line}-${x.end_line}`} onClick={() => setOpen(i)}>
+                  {cites[i] != null && <span className="mono">[{cites[i]}] </span>}
+                  {x.file.split('/').pop()}
+                  <span className="faint">
+                    :{x.start_line}-{x.end_line}
+                  </span>
+                </TextLink>
               </span>
               <span className="ag-bar-track">
                 <i style={{ width: `${Math.max(1, x.score * 100)}%` }} />
@@ -664,13 +808,14 @@ export function RelevanceList({ r }: { r: RelevanceRecord }) {
               <span className="ag-bar-value mono">{pct(x.score)}</span>
               <span className="ag-rel-why faint">{x.reason === 'top' ? 'top result' : x.reason === 'score' ? 'relevant' : 'dropped'}</span>
             </li>
-          );
-        })}
-      </ul>
-      <div className="faint ag-small">
-        {dropped ? `${dropped} dropped · ~${r.tokensSaved.toLocaleString()} fewer prompt tokens for the chat model to read` : 'Nothing dropped'} ·{' '}
-        {fmtMs(r.ms)}
-      </div>
+          ))}
+        </ul>
+        <div className="faint ag-small">
+          {dropped ? `${dropped} dropped · ~${r.tokensSaved.toLocaleString()} fewer prompt tokens for the chat model to read` : 'Nothing dropped'} ·{' '}
+          {fmtMs(r.ms)}
+        </div>
+      </details>
+      {open != null && <RelevanceDialog x={r.items[open]} r={r} cite={cites[open]} onClose={() => setOpen(null)} />}
     </section>
   );
 }
@@ -750,22 +895,9 @@ export function ClaimDialog({ x, r, passage, open, onClose }: { x: SupportItem; 
         </section>
         <section className="dd-section" aria-label="What it returned">
           <h4 className="label">What it returned</h4>
-          <ul className="ag-bars" aria-label="Laya's answer">
-            {[
-              ['Supported', x.score],
-              ['Not supported', 1 - x.score],
-            ].map(([label, p]) => (
-              <li key={label} className={(label === 'Supported') === !x.flagged ? 'chosen' : undefined}>
-                <span className="ag-bar-label">{label}</span>
-                <span className="ag-bar-track">
-                  <i style={{ width: `${Math.max(1, (p as number) * 100)}%` }} />
-                </span>
-                <span className="ag-bar-value mono">{pct(p as number)}</span>
-              </li>
-            ))}
-          </ul>
+          <YesNoBars yes="Supported" no="Not supported" p={x.score} chosenYes={!x.flagged} />
           <div className="faint ag-seed">
-            Flagged below {pct(r.flagBelow)} “supported” · calibrated probabilities, but only checked on a small test set
+            Flagged below {pct(r.flagBelow)} “supported” · {ROUGH_CHECK}
           </div>
         </section>
       </div>
@@ -795,18 +927,18 @@ export function ClaimDialog({ x, r, passage, open, onClose }: { x: SupportItem; 
 }
 
 /**
- * A claim's "Why?" button and its dialog. The dialog is built only while
+ * A claim's text as a link to its dialog. The dialog is built only while
  * open: an answer can list 24 claims, and a closed dialog would still run its
  * explanation on every render (one that threw blanked the whole app).
  */
-function ClaimWhy({ x, r, sources, label }: { x: SupportItem; r: SupportRecord; sources: SearchHit[]; label: string }) {
+function ClaimLink({ x, r, sources, children }: { x: SupportItem; r: SupportRecord; sources: SearchHit[]; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const h = sources[x.n - 1];
   return (
     <>
-      <button className="btn ghost sm ag-toggle ag-claim-why" aria-haspopup="dialog" aria-label={`Why: [${x.n}] ${x.sentence}`} onClick={() => setOpen(true)}>
-        <HelpCircle size={12} /> <span>{label}</span>
-      </button>
+      <TextLink label={`Claim check: [${x.n}] ${x.sentence}`} onClick={() => setOpen(true)}>
+        {children}
+      </TextLink>
       {open && <ClaimDialog x={x} r={r} passage={h ? passageText(h) : ''} open onClose={() => setOpen(false)} />}
     </>
   );
@@ -817,29 +949,38 @@ function ClaimWhy({ x, r, sources, label }: { x: SupportItem; r: SupportRecord; 
  * cites, and how likely that passage supports it; each opens its dialog.
  */
 export function SupportList({ r, sources }: { r: SupportRecord; sources: SearchHit[] }) {
+  const flagged = new Set(r.items.filter((x) => x.flagged).map((x) => x.sentence)).size;
+  const sentences = new Set(r.items.map((x) => x.sentence)).size;
   return (
     <section className="trace-subs ag-rel" aria-label="Claim check">
-      <div className="faint ag-small">
-        {r.model} scored how likely each cited passage supports the sentence that cites it. Below {pct(r.flagBelow)}, a sentence is
-        marked as possibly unsupported; the answer itself is never changed.
-      </div>
-      <ul className="ag-rel-list ag-claims">
-        {r.items.map((x, i) => (
-          <li key={i} className={x.flagged ? 'dropped' : 'kept'} aria-label={`[${x.n}] ${x.sentence}: ${pct(x.score)}, ${x.flagged ? 'may not be supported' : 'supported'}`}>
-            {x.flagged ? <X size={13} color="var(--text-4)" /> : <Check size={13} color="var(--violet)" />}
-            <span className="ag-rel-file selectable">
-              <span className="mono">[{x.n}] </span>
-              {x.sentence}
-            </span>
-            <span className="ag-bar-track">
-              <i style={{ width: `${Math.max(1, x.score * 100)}%` }} />
-            </span>
-            <span className="ag-bar-value mono">{pct(x.score)}</span>
-            <ClaimWhy x={x} r={r} sources={sources} label={x.flagged ? 'Why?' : 'Details'} />
-          </li>
-        ))}
-      </ul>
-      <div className="faint ag-small">{fmtMs(r.ms)}</div>
+      <details className="ag-fold">
+        <summary className="faint ag-small">
+          {sentences} cited sentence{sentences === 1 ? '' : 's'} checked · {flagged ? `${flagged} may not be supported` : 'none flagged'}
+        </summary>
+        <div className="faint ag-small">
+          {r.model} scored how likely each cited passage supports the sentence that cites it. Below {pct(r.flagBelow)}, a sentence is
+          marked as possibly unsupported; the answer itself is never changed. {ROUGH_CHECK}
+        </div>
+        <ul className="ag-rel-list ag-claims">
+          {r.items.map((x, i) => (
+            <li key={i} className={x.flagged ? 'dropped' : 'kept'} aria-label={`[${x.n}] ${x.sentence}: ${pct(x.score)}, ${x.flagged ? 'may not be supported' : 'supported'}`}>
+              {x.flagged ? <X size={13} color="var(--text-4)" /> : <Check size={13} color="var(--violet)" />}
+              <span className="ag-rel-file">
+                <ClaimLink x={x} r={r} sources={sources}>
+                  <span className="mono">[{x.n}] </span>
+                  {x.sentence}
+                </ClaimLink>
+              </span>
+              <span className="ag-bar-track">
+                <i style={{ width: `${Math.max(1, x.score * 100)}%` }} />
+              </span>
+              <span className="ag-bar-value mono">{pct(x.score)}</span>
+              <span className="ag-rel-why faint">{x.flagged ? 'unsupported?' : 'supported'}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="faint ag-small">{fmtMs(r.ms)}</div>
+      </details>
     </section>
   );
 }
@@ -859,18 +1000,88 @@ export function SupportNote({ r, sources }: { r: SupportRecord; sources: SearchH
       <ul>
         {flagged.map((x, i) => (
           <li key={i}>
-            <span className="selectable">
-              <span className="mono">[{x.n}]</span> {x.sentence} <span className="faint mono">({pct(x.score)} supported)</span>
-            </span>{' '}
-            <ClaimWhy x={x} r={r} sources={sources} label="Why?" />
+            <ClaimLink x={x} r={r} sources={sources}>
+              <span className="mono">[{x.n}]</span> {x.sentence}
+            </ClaimLink>{' '}
+            <span className="faint mono">({pct(x.score)} supported)</span>
           </li>
         ))}
       </ul>
-      <div className="faint">
-        Checked by {r.model}, which compares each sentence with the one passage it cites. It misses some unsupported sentences and flags a few
-        supported ones: open “Why?” to read the passage.
-      </div>
+      <div className="faint">{ROUGH_CHECK} Click a sentence to see the passage it was checked against.</div>
     </details>
+  );
+}
+
+/**
+ * One source of an answer, `[n]`: where it's from, the passage the chat model
+ * read, and what the Laya checks said about it (its relevance score, the
+ * cited sentences checked against it). Opened from the answer's citations and
+ * from retrieval.log.
+ */
+export function SourceDialog({ m, n, onClose }: { m: Message; n: number; onClose: () => void }) {
+  const h = m.sources?.[n - 1];
+  const where = h ? `${h.file}:${h.start_line}-${h.end_line}` : `source [${n}]`;
+  const rel = h ? m.relevance?.items.find((x) => x.file === h.file && x.start_line === h.start_line && x.end_line === h.end_line) : undefined;
+  const claims = (m.support?.items ?? []).filter((x) => x.n === n);
+  const text = h ? passageText(h) : '';
+  return (
+    <Modal open onClose={onClose} wide label={`Source ${n}`}>
+      <div className="dd-head">
+        <div>
+          <div className="label violet">Source [{n}]</div>
+          <h3>{h ? (h.name && h.name !== h.file ? h.name : h.file.split('/').pop()) : 'Not in this answer’s sources'}</h3>
+          <div className="faint ag-small">
+            {where}
+            {h?.node_type ? ` · ${h.node_type}` : ''}
+            {m.kbName ? ` · from “${m.kbName}”` : ''}
+          </div>
+        </div>
+        <button className="btn ghost sm" aria-label="Close dialog" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+      {h && (
+        <section className="dd-section" aria-label="Passage">
+          <Field k="Passage the chat model read" copy={text}>
+            <pre className="ag-pre selectable dd-state">{text || '(empty)'}</pre>
+          </Field>
+        </section>
+      )}
+      {(rel || claims.length > 0) && (
+        <section className="dd-section" aria-label="What the checks said">
+          <h4 className="label">What the checks said</h4>
+          {rel && (
+            <div className="ag-small">
+              Relevance check: <b>{pct(rel.score)}</b> likely to help answer the request (
+              {rel.reason === 'top' ? `a top ${m.relevance!.keepTop} search result, always kept` : 'kept'}).
+            </div>
+          )}
+          {claims.length > 0 && (
+            <ul className="dd-why dd-claims">
+              {claims.map((x, i) => (
+                <li key={i} className="selectable">
+                  {x.flagged ? <X size={12} color="var(--text-4)" /> : <Check size={12} color="var(--violet)" />} {x.sentence}{' '}
+                  <span className="faint mono">
+                    {pct(x.score)} supported{x.flagged ? ' · may not be supported' : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="faint ag-small">{ROUGH_CHECK}</div>
+        </section>
+      )}
+      <div className="dd-foot">
+        {h && (
+          <CopyButton text={text} label={`Copy source ${n}`}>
+            Copy passage
+          </CopyButton>
+        )}
+        <button className="btn primary sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -950,7 +1161,7 @@ export function copyTrace(m: Message, question: string) {
 export function CopyTraceButton({ m, question }: { m: Message; question: string }) {
   return (
     <button className="btn ghost sm" onClick={() => copyTrace(m, question)} title="Copy this turn’s full trace as JSON">
-      <Copy size={12} /> Copy trace
+      <Copy size={12} />
     </button>
   );
 }

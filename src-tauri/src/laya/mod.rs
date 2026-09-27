@@ -159,6 +159,9 @@ pub struct LayaPassage {
 pub struct LayaRelevance {
     /// P(the passage helps answer the request), per passage in order.
     scores: Vec<f64>,
+    /// Input tokens per passage's row, and whether it was cut to fit (the trace shows both).
+    input_tokens: Vec<usize>,
+    truncated: Vec<bool>,
     /// Model time for all passages (Rust), ms.
     ms: f64,
     model: String,
@@ -476,7 +479,13 @@ pub async fn laya_relevance(app: AppHandle, mlx: State<'_, Mlx>, request: String
             })
         })
         .await?;
-        Ok(LayaRelevance { scores: asked.answers.iter().map(|a| a.probabilities[1]).collect(), ms: asked.ms, model })
+        Ok(LayaRelevance {
+            scores: asked.answers.iter().map(|a| a.probabilities[1]).collect(),
+            input_tokens: asked.answers.iter().map(|a| a.input_tokens).collect(),
+            truncated: asked.answers.iter().map(|a| a.truncated).collect(),
+            ms: asked.ms,
+            model,
+        })
     }
     #[cfg(not(mlx))]
     {

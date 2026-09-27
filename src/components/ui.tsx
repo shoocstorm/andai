@@ -107,7 +107,35 @@ const hostOf = (url?: string) => {
  * text out, and links show their real host and can only be copied. Raw HTML
  * stays off; react-markdown's default urlTransform drops `javascript:`.
  */
-export function Markdown({ text }: { text: string }) {
+const CITE_MARK = /\[(\d+(?:\s*,\s*\d+)*)\](?!\()/g;
+const CITE_HREF = /^#cite-(\d+)$/;
+
+/**
+ * Turns `[n]` citations (1…`max`) into links to `#cite-n`, which `Markdown`
+ * renders as buttons, outside code; `[1, 2]` becomes `[1][2]`. A number past
+ * `max` stays plain text. Pure.
+ */
+export function linkCitations(text: string, max: number): string {
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part.replace(CITE_MARK, (whole, list: string) => {
+            const ns = list.split(',').map((x) => Number(x.trim()));
+            if (!ns.every((n) => n >= 1 && n <= max)) return whole;
+            return ns.map((n) => `[\\[${n}\\]](#cite-${n})`).join('');
+          }),
+    )
+    .join('');
+}
+
+/**
+ * Model output as Markdown, made inert: no images, links copy-only. With
+ * `onCite`, `[n]` citations (1…`sources`) become buttons that call it; they
+ * never navigate.
+ */
+export function Markdown({ text, sources = 0, onCite }: { text: string; sources?: number; onCite?: (n: number) => void }) {
   return (
     <div className="md selectable">
       <ReactMarkdown
@@ -123,6 +151,15 @@ export function Markdown({ text }: { text: string }) {
             );
           },
           a: ({ href, children }) => {
+            const cite = onCite && href ? CITE_HREF.exec(href) : null;
+            if (cite) {
+              const n = Number(cite[1]);
+              return (
+                <button type="button" className="md-cite" aria-haspopup="dialog" aria-label={`Source ${n}`} onClick={() => onCite!(n)}>
+                  {children}
+                </button>
+              );
+            }
             if (!href) return <span>{children}</span>;
             const host = hostOf(href);
             return (
@@ -148,7 +185,7 @@ export function Markdown({ text }: { text: string }) {
           },
         }}
       >
-        {text}
+        {onCite && sources > 0 ? linkCitations(text, sources) : text}
       </ReactMarkdown>
     </div>
   );

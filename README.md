@@ -26,7 +26,7 @@ No cloud. No account. Nothing leaves your machine.
   questions never leave it. The only network request is the one-time model
   download from Hugging Face.
 - **Answers you can check.** Every answer cites the passages it used as `[1]`,
-  `[2]`… so you can see exactly where it came from.
+  `[2]`…; click one to read the passage it came from.
 - **An agent, not just a search box.** Andai searches your knowledge base, reads
   around a hit, outlines a file or follows a function to its callers until it
   has enough evidence. Then it answers.

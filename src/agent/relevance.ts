@@ -20,6 +20,13 @@ import { CHARS_PER_TOKEN } from './prompt';
 export const KEEP_TOP = 2;
 /** Below this likelihood of helping, a passage past the top ones is dropped. */
 export const DROP_BELOW = 0.1;
+/** What Laya is asked of each passage; a Rust constant (src-tauri/src/laya/mod.rs `RELEVANT`), repeated here for the trace. */
+export const RELEVANT = 'This passage contains information that helps answer the user’s request.';
+/** What was measured per checkpoint (AGENTS.md §2), shown in the relevance dialog: AUC on the eval fixtures. */
+export const MEASURED_RELEVANCE: Record<string, { auc: number }> = { 'laya-multilingual': { auc: 0.76 }, 'laya-en': { auc: 0.85 } };
+
+/** The input one passage is judged in, as Rust builds it (`passage_state`). */
+export const passageState = (request: string, source: string, text: string) => `User request:\n${request.trim()}\n\nPassage from ${source}:\n${text.trim()}`;
 
 export type RelevanceItem = {
   file: string;
@@ -32,10 +39,18 @@ export type RelevanceItem = {
   /** Why it was kept or dropped. */
   reason: 'top' | 'score' | 'low';
   chars: number;
+  /** The passage text Laya read, its input size in tokens, and whether it was cut to fit. */
+  text: string;
+  inputTokens: number;
+  truncated: boolean;
 };
 
 export type RelevanceRecord = {
   model: string;
+  /** Checkpoint id, for what was measured of it (`MEASURED_RELEVANCE`). */
+  modelId: string;
+  /** The request each passage was judged against. */
+  request: string;
   /** Wall time, IPC included; `modelMs` is Rust's own. */
   ms: number;
   modelMs: number;
@@ -76,12 +91,17 @@ export async function checkRelevance(request: string, hits: SearchHit[]): Promis
     kept: picks[i].kept,
     reason: picks[i].reason,
     chars: texts[i].length,
+    text: texts[i],
+    inputTokens: r.inputTokens[i],
+    truncated: r.truncated[i],
   }));
   const dropped = items.filter((x) => !x.kept).reduce((n, x) => n + x.chars, 0);
   return {
     hits: hits.filter((_, i) => picks[i].kept),
     record: {
       model: layaById(r.model)?.name ?? r.model,
+      modelId: r.model,
+      request,
       ms: Math.round(performance.now() - started),
       modelMs: r.ms,
       keepTop: KEEP_TOP,
