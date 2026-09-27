@@ -12,6 +12,7 @@ import { decide } from './llm/decide';
 import { chat, loadDecider, loadModel, unloadDecider, unloadModel, useEngine } from './llm/engine';
 import { clearChat, useChat } from './state/chat';
 import { kbAddFiles, kbAddSample, kbTool } from './kb/api';
+import { inspectHub, searchHub } from './llm/hub';
 import { modelById } from './llm/models';
 import { addFiles, createKb, deleteKb, useKb } from './state/kb';
 import { TOOL_DEFAULTS, useTools } from './state/tools';
@@ -238,6 +239,32 @@ async function nativeProbe(id: string, question: string) {
 }
 
 /**
+ * Adding a model from Hugging Face, as far as it goes without a download:
+ * search and inspect through the app's CSP and CORS, then (Apple Silicon) have
+ * Rust check and keep an MLX model's manifest, and forget it again. Its data
+ * lands in ANDAI_DATA_DIR, which the runner deletes.
+ */
+async function hubProbe(mlx: boolean) {
+  try {
+    const found = await searchHub('qwen3 0.6b', 'gguf');
+    const gguf = await inspectHub('Qwen/Qwen3-0.6B-GGUF', 'gguf');
+    const out: Record<string, unknown> = {
+      results: found.length,
+      gguf: { ok: gguf.ok, commit: gguf.commit, variants: gguf.gguf?.variants.length, recommended: gguf.gguf?.recommended, checks: gguf.checks },
+    };
+    if (mlx) {
+      const m = await inspectHub('mlx-community/Qwen3-0.6B-8bit', 'mlx');
+      const added = await invoke<{ id: string; downloaded: boolean; custom: { layers: number } | null }>('llm_add_custom', { spec: m.mlx!.spec });
+      await invoke('llm_remove', { checkpoint: added.id });
+      out.mlx = { ok: m.ok, files: m.mlx?.spec.files.map((f) => f.path), id: added.id, downloaded: added.downloaded, layers: added.custom?.layers };
+    }
+    return out;
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
  * A bundled sample knowledge base arrives with its files (samples.rs; the
  * release binary reads them from its resource folder). Not indexed: ug's
  * graphs are shared with the user's app, where the same sample may exist, so
@@ -313,6 +340,8 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
     if (mlx) await log(`mlx ${JSON.stringify(mlx).slice(0, 2000)}`);
     const sample = await sampleProbe();
     await log(`sample ${JSON.stringify(sample)}`);
+    const hub = await hubProbe(!!mlxId);
+    await log(`hub ${JSON.stringify(hub).slice(0, 1500)}`);
     const result = {
       caps: useEngine.getState().caps,
       engine: info,
@@ -327,6 +356,7 @@ export async function runE2E(files: string[], model = 'qwen3-0.6b') {
       laya,
       mlx,
       sample,
+      hub,
       // Compared with perf/baseline.json by the runner (docs/performance.md).
       perf: {
         ingestMs,

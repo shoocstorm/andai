@@ -36,7 +36,7 @@ describe('model catalog', () => {
 
 describe('MLX catalog', () => {
   const rust = readFileSync(join(__dirname, '../../src-tauri/src/llm/catalog.rs'), 'utf8');
-  const pins = [...rust.matchAll(/id: "([\w.-]+)",\s*repo: "([^"]+)",\s*commit: "([0-9a-f]{40})"/g)].map((m) => ({ id: m[1], repo: m[2], commit: m[3] }));
+  const pins = [...rust.matchAll(/pinned\("([\w.-]+)", "([^"]+)", "([0-9a-f]{40})", &(\w+)\)/g)].map((m) => ({ id: m[1], repo: m[2], commit: m[3], files: m[4] }));
 
   it('names exactly the checkpoints the Rust catalog pins, at the same repo and commit', () => {
     const mlx = MODELS.filter(isMlx);
@@ -49,8 +49,9 @@ describe('MLX catalog', () => {
 
   it('states the total size of the pinned files', () => {
     for (const m of MODELS.filter(isMlx)) {
-      const block = rust.slice(rust.indexOf(`id: "${m.native}"`));
-      const files = block.slice(0, block.indexOf('],'));
+      const pin = pins.find((p) => p.id === m.native)!;
+      const block = rust.slice(rust.indexOf(`static ${pin.files}:`));
+      const files = block.slice(0, block.indexOf('];'));
       const sizes = [...files.matchAll(/"[\w./-]+",\s*([\d_]+),/g)].map((x) => Number(x[1].replaceAll('_', '')));
       const tokenizer = files.includes('TOKENIZER') ? Number(/TOKENIZER: CheckpointFile = f\(\s*"tokenizer\.json",\s*([\d_]+)/.exec(rust)![1].replaceAll('_', '')) : 0;
       expect(sizes.reduce((a, b) => a + b, 0) + tokenizer).toBe(m.bytes);
@@ -61,7 +62,7 @@ describe('MLX catalog', () => {
 describe('Laya catalog', () => {
   it('names the checkpoints the Rust catalog pins', () => {
     const rust = readFileSync(join(__dirname, '../../src-tauri/src/laya/catalog.rs'), 'utf8');
-    const ids = [...rust.matchAll(/id: "([\w-]+)"/g)].map((m) => m[1]);
+    const ids = [...rust.matchAll(/pinned\("([\w-]+)"/g)].map((m) => m[1]);
     expect(LAYA_MODELS.map((m) => m.id).sort()).toEqual(ids.sort());
     expect(layaById('laya-en')?.name).toBe('Laya English');
   });

@@ -213,7 +213,7 @@ pub(crate) fn private_file(path: &Path) -> std::io::Result<fs::File> {
     opts.open(path)
 }
 
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     private_file(path)?.write_all(bytes)
 }
 

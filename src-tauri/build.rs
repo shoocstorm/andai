@@ -32,6 +32,7 @@ const COMMANDS: &[&str] = &[
     "llm_unload",
     "llm_generate",
     "llm_cancel",
+    "llm_add_custom",
 ];
 
 fn main() {

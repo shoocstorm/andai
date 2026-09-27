@@ -195,6 +195,22 @@ pasting in whatever one search returns:
   1.7B writes 30–65 tokens/second (it varies with how busy the Mac is) and
   reads about 185 tokens/second, so a grounded answer starts after about
   3 s. The answer footer shows both speeds.
+- **Add a model from Hugging Face** (*Settings → Models → Add from Hugging
+  Face*). Search public models by name; pick one to see whether Andai can
+  run it and why not, its license, downloads and the exact version that will
+  be used. Two kinds are offered:
+  - **GGUF**, on any computer: one file up to 2 GB (Andai recommends a
+    4-bit K-quant when there's a choice), run like the built-in models.
+  - **MLX**, on Apple Silicon Macs: Qwen3 models quantized for MLX (4- to
+    8-bit, including larger ones like Qwen3 8B), run natively on the GPU.
+    Tested with Qwen3 8B 4-bit: about 115 tokens/second on an Apple M5 Max.
+  The model is pinned to the version you saw and each file is checked
+  against its sha256 before it loads. Models that need a Hugging Face login
+  (gated) or are private can't be added. These are third-party models Andai
+  hasn't reviewed: the files can't run code, but a model can still give
+  wrong or harmful answers, and its license is yours to check. Added models
+  show where they came from and can be removed from Settings (their files
+  are deleted after you confirm).
 - Unload or delete cached models from **Settings**.
 
 ## Workspace

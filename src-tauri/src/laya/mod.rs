@@ -33,17 +33,18 @@ const UNSUPPORTED: &str = "The Laya decision model needs an Apple Silicon Mac.";
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckpointStatus {
-    id: &'static str,
-    repo: &'static str,
-    commit: &'static str,
-    bytes: u64,
-    files: Vec<FileInfo>,
-    downloaded: bool,
+    pub id: String,
+    pub repo: String,
+    pub commit: String,
+    pub bytes: u64,
+    /// The files the webview downloads (a custom model's small JSON files came with it).
+    pub files: Vec<FileInfo>,
+    pub downloaded: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct FileInfo {
-    path: &'static str,
+    path: String,
     bytes: u64,
 }
 
@@ -51,11 +52,11 @@ impl CheckpointStatus {
     #[cfg_attr(not(mlx), allow(dead_code))]
     pub(crate) fn of(root: &std::path::Path, c: &catalog::Checkpoint) -> Self {
         CheckpointStatus {
-            id: c.id,
-            repo: c.repo,
-            commit: c.commit,
+            id: c.id.to_string(),
+            repo: c.repo.to_string(),
+            commit: c.commit.to_string(),
             bytes: c.bytes(),
-            files: c.files.iter().map(|f| FileInfo { path: f.path, bytes: f.bytes }).collect(),
+            files: c.files.iter().map(|f| FileInfo { path: f.path.to_string(), bytes: f.bytes }).collect(),
             downloaded: store::is_downloaded(root, c),
         }
     }
@@ -303,7 +304,7 @@ pub async fn laya_remove(app: AppHandle, mlx: State<'_, Mlx>, checkpoint: String
     #[cfg(mlx)]
     {
         let c = catalog::checkpoint(&checkpoint)?;
-        if mlx.loaded().laya.as_deref() == Some(c.id) {
+        if mlx.loaded().laya.as_deref() == Some(&*c.id) {
             let t = mlx.thread(&app);
             blocking(move || {
                 t.run(|m| {

@@ -126,6 +126,7 @@ pub fn run() {
             llm::llm_unload,
             llm::llm_generate,
             llm::llm_cancel,
+            llm::llm_add_custom,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Andai");

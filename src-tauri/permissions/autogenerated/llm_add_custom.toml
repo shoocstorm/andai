@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-llm-add-custom"
+description = "Enables the llm_add_custom command without any pre-configured scope."
+commands.allow = ["llm_add_custom"]
+
+[[permission]]
+identifier = "deny-llm-add-custom"
+description = "Denies the llm_add_custom command without any pre-configured scope."
+commands.deny = ["llm_add_custom"]

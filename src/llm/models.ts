@@ -5,6 +5,9 @@
 // - `mlx`: an MLX checkpoint run natively by Rust on the Mac's GPU
 //   (src-tauri/src/llm/, Apple Silicon only). Its files, sizes and sha256
 //   live in the Rust catalog, which verifies every download.
+//
+// Beside the catalog, the user can add models from Hugging Face (llm/hub.ts,
+// llm/custom.ts): `setCustomModels` puts them in `allModels` and `modelById`.
 
 type Common = {
   id: string;
@@ -22,6 +25,8 @@ type Common = {
    * scored, so a model that can't fails closed.
    */
   decider?: boolean;
+  /** Added by the user from Hugging Face, pinned to this commit (third-party, unreviewed). */
+  source?: { repo: string; commit: string; license: string | null };
 };
 
 export type WllamaDef = Common & {
@@ -131,10 +136,18 @@ export const MODELS: ModelDef[] = [
 
 /** The portable default (every platform, and the e2e runs, AGENTS.md §5). */
 export const DEFAULT_MODEL = 'qwen3-0.6b';
-export const modelById = (id: string | null | undefined) => MODELS.find((m) => m.id === id);
+
+let custom: ModelDef[] = [];
+/** The models the user added from Hugging Face (llm/custom.ts keeps this current). */
+export const setCustomModels = (defs: ModelDef[]) => {
+  custom = defs.filter((d) => !MODELS.some((m) => m.id === d.id));
+};
+/** The catalog, then the models the user added. */
+export const allModels = (): ModelDef[] => [...MODELS, ...custom];
+export const modelById = (id: string | null | undefined) => allModels().find((m) => m.id === id);
 export const isMlx = (def: ModelDef | undefined): def is MlxDef => def?.engine === 'mlx';
 /** The models this computer can run: MLX ones only where Rust reports MLX (Apple Silicon). */
-export const availableModels = (mlx: boolean) => MODELS.filter((m) => mlx || m.engine !== 'mlx');
+export const availableModels = (mlx: boolean) => allModels().filter((m) => mlx || m.engine !== 'mlx');
 /** What to suggest first: natively on MLX where it runs (much faster), else the portable default. */
 export const recommendedModel = (mlx: boolean): ModelDef => modelById(mlx ? 'qwen3-1.7b-mlx' : DEFAULT_MODEL)!;
 
@@ -162,6 +175,54 @@ export const LAYA_MODELS: LayaDef[] = [
 ];
 
 export const layaById = (id: string | null | undefined) => LAYA_MODELS.find((m) => m.id === id);
+
+// ── Hugging Face API (llm/hub.ts) ────────────────────────────────────────
+// The only other requests Andai makes: when the user searches for a model to
+// add, and inspects one (AGENTS.md §1.4). Repo ids and commits are checked
+// before they're put in a URL; the search text is encoded.
+
+const HUB = 'https://huggingface.co/api/models';
+export const REPO_RE = /^[A-Za-z0-9][\w.-]{0,95}\/[A-Za-z0-9][\w.-]{0,95}$/;
+export const isRepo = (repo: string) => REPO_RE.test(repo) && !repo.split('/').some((p) => p === '..' || p === '.');
+const needRepo = (repo: string) => {
+  if (!isRepo(repo)) throw new Error(`Not a Hugging Face repository: ${repo}`);
+};
+
+export type HubFormat = 'gguf' | 'mlx';
+
+/** Public text-generation models in `format`, most downloaded first. */
+export function hubSearchUrl(query: string, format: HubFormat, limit = 20): string {
+  const q = new URLSearchParams({ search: query.trim().slice(0, 100), filter: format, pipeline_tag: 'text-generation', sort: 'downloads', direction: '-1', limit: String(limit) });
+  for (const f of ['downloads', 'likes', 'gated', 'lastModified', 'private', 'tags']) q.append('expand[]', f);
+  return `${HUB}?${q}`;
+}
+
+/** One model: its current commit, gating, license, GGUF metadata. */
+export function hubModelUrl(repo: string): string {
+  needRepo(repo);
+  const q = new URLSearchParams();
+  for (const f of ['sha', 'gated', 'private', 'cardData', 'gguf', 'downloads', 'likes', 'lastModified', 'tags']) q.append('expand[]', f);
+  return `${HUB}/${repo}?${q}`;
+}
+
+/** The top-level files at a commit, with sizes and LFS sha256. */
+export function hubTreeUrl(repo: string, commit: string): string {
+  needRepo(repo);
+  if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error(`Not a commit: ${commit}`);
+  return `${HUB}/${repo}/tree/${commit}`;
+}
+
+/** Every Hugging Face request starts here (hub.ts refuses anything else). */
+export const HF_ORIGIN = 'https://huggingface.co/';
+
+/** A repository's files at a commit: an added MLX model's display URL and cache key. */
+export function repoTreeUrl(repo: string, commit: string): string {
+  needRepo(repo);
+  return `https://huggingface.co/${repo}/tree/${commit}`;
+}
+
+/** Where the user can read about a model (shown as text; the app opens no links). */
+export const hubPageUrl = (repo: string) => (isRepo(repo) ? `https://huggingface.co/${repo}` : '');
 
 /** A checkpoint file at its pinned commit: the only URLs a Laya or MLX download fetches. */
 export function pinnedFileUrl(repo: string, commit: string, path: string): string {

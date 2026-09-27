@@ -38,7 +38,8 @@
     "allow-llm-load",
     "allow-llm-unload",
     "allow-llm-generate",
-    "allow-llm-cancel"
+    "allow-llm-cancel",
+    "allow-llm-add-custom"
   ],
   "remote": {
     "urls": [

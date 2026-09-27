@@ -44,6 +44,12 @@ the product.
    `isTauri()`, the firebase packages live in lazy chunks the desktop never
    downloads, and the desktop CSP names no Google host. Both lines are held by
    `tests/unit/firebase-hosting.test.ts`; loosening them needs a new decision.
+   **Recorded decision (2026-09-27):** *Add from Hugging Face* (Settings →
+   Models) searches and reads model metadata from `huggingface.co/api` when
+   the user types or picks a model, besides the download. Same host as the
+   downloads (no new CSP source); no credentials, no user data in the
+   request beyond the search text; `llm/hub.ts` is the only caller and
+   `security.test.ts` holds its one guarded `fetch`.
 5. **User data is sacred.** Never delete, overwrite, or migrate user data
    (`~/Library/Application Support/dev.andai.agent/` or
    `%APPDATA%\dev.andai.agent\` on Windows, `~/.ug/andai-*`, webview
@@ -78,6 +84,8 @@ Andai/
 ├─ src/                      React 19 + Vite UI (runs in the Tauri webview)
 │  ├─ llm/engine.ts          load / cache / stream on either engine: wllama (compat build on WKWebView) or native MLX
 │  ├─ llm/native.ts          native MLX chat models: command wrappers, streaming channel, wllama-shaped completions
+│  ├─ llm/hub.ts             Add from Hugging Face: search, inspect a repo at its commit, compatibility verdict
+│  ├─ llm/custom.ts          models the user added: GGUF kept in webview storage, MLX ones read from Rust
 │  ├─ llm/models.ts          model catalog: GGUF for wllama (< 2 GB, pinned commit + sha256), MLX checkpoints (pinned in Rust)
 │  ├─ llm/integrity.ts       incremental SHA-256 + download verification
 │  ├─ llm/decide.ts          choice-based decisions (SemIf): lettered options → one-pass logprob readout, or Laya in Rust
@@ -107,7 +115,8 @@ Andai/
 │  ├─ src/samples.rs         sample knowledge bases: closed list → bundled files (tests/fixtures/eval/) copied in, then indexed
 │  ├─ src/mlx.rs             the one MLX thread (Apple Silicon): owns every model on MLX, runs jobs from commands
 │  ├─ src/laya/              Laya decision model on MLX: catalog, verified store (shared with llm/), prompt, model
-│  ├─ src/llm/               native chat models on MLX: catalog, Qwen3 port, KV cache + prefix reuse, generation, template
+│  ├─ src/llm/               native chat models on MLX: catalog, Qwen3 port, KV cache + prefix reuse, generation, template;
+│  │                         config.rs (what runs), custom.rs (models the user adds: validated manifests)
 │  ├─ tauri.laya.conf.json   Apple Silicon build overlay: bundles mlx.metallib (bun run build:mac-arm64)
 │  ├─ build.rs               app command manifest (ACL)
 │  └─ capabilities/default.json
@@ -362,6 +371,22 @@ level defaults to *Ask*.
   and the answer misses the function. MLX 5-bit scored 89.7% at 302 tok/s
   and DWQ 4-bit 82.8%; 4-bit ships (349 tok/s, a human decision,
   2026-09-27). Making the agent robust to `scope` is the next tracker item.
+- **Models from Hugging Face** (2026-09-27; `llm/hub.ts`, `llm/custom.ts`,
+  `src-tauri/src/llm/custom.rs`). The API answers the app's origin with CORS
+  (`access-control-allow-origin` echoes it). `/api/models?…&expand[]=gated`
+  gives gating in search results, and `/api/models/<repo>?expand[]=sha&expand[]=gguf`
+  the current commit plus GGUF metadata (architecture, context length, chat
+  template). The tree at a commit gives each file's LFS sha256; small files
+  kept in git have only a git blob SHA-1, so an MLX model's JSON files go to
+  Rust inline, and Rust hashes and keeps what it was sent (no SHA-1 crate).
+  A small file's `resolve/<commit>` URL 307-redirects within huggingface.co
+  (`/api/resolve-cache/…`). Some MLX repos ship
+  `model.safetensors.index.json` that names only `model.safetensors`; the
+  single file wins (`load_weights`). The native engine runs Qwen3 only,
+  MLX-quantized (affine, uniform bits), with a ChatML template; untied LM
+  heads (Qwen3 8B) and sharded weights are supported. Checked end to end on
+  Qwen3 8B 4-bit (`test:llm`): add, chunked download, sha256, load, same
+  greedy text as mlx-lm, 116 tok/s on an M5 Max.
 - **A Tauri channel can deliver its last messages after the command
   resolves.** `chatNative` (engine.ts) therefore takes any text that hadn't
   streamed yet from the command's result and drops later pieces.
@@ -442,6 +467,7 @@ level defaults to *Ask*.
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |
 | Native MLX chat models (download, verify, load, stream, stop, decide; Apple Silicon) | Real | `src-tauri/src/llm/`, `src-tauri/src/mlx.rs`, `llm/native.ts` |
+| Add a model from Hugging Face (search, compatibility check, pin, verified download; GGUF anywhere, MLX Qwen3 on Apple Silicon) | Real | `llm/hub.ts`, `llm/custom.ts`, `screens/HubModels.tsx`, `src-tauri/src/llm/custom.rs` |
 | Appearance (system / light / dark) | Real | `state/theme.ts` |
 | Layout: collapsible nav (⌘B), Execution Trace on/off (⌘J) | Real, persisted | `state/layout.ts` |
 | Workflows, approvals, tool library, node editor, run | **Simulated** | `mock/workflows.ts`, `screens/Workflow*.tsx` |
@@ -836,6 +862,7 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Laya decisions: state ≤ 64 KB, question ≤ 2 KB, 2–16 options with `[a-z0-9_]` ids, text ≤ 1 KB; mask tokens stripped from all input | `laya/mod.rs` `validate`, `laya/prompt.rs` | Rust unit tests |
 | MLX chat models: closed catalog in Rust (commit, sizes, sha256), the same verified store as Laya; generation bounded (1–512 messages ≤ 512 KB, no NUL, max_tokens ≤ 8192, sampling ranges, grammar ≤ 8 KB, context 512–32768); roles are system/user/assistant only | `llm/catalog.rs`, `laya/store.rs`, `llm/mod.rs` `validate` | Rust unit tests; `test:llm` |
 | Sample knowledge bases: a closed list of ids; files only from the app's resource folder, copied like a user's | `samples.rs` | Rust unit tests |
+| Models added from Hugging Face: only public, ungated repos; pinned to the commit seen when picked; GGUF by its LFS sha256 (the webview's integrity gate); MLX through Rust: repo/commit syntax, a closed set of file names (config, tokenizer, template, safetensors; no pickle, no code), sizes and caps (32 GB a file, 64 GB a model, 16 MB inline, 32 models), config and template checked before any download, manifest written and re-validated by Rust, inline files re-hashed on every load. Search results and model data are shown as text, never Markdown or HTML; no model card is rendered | `llm/hub.ts`, `llm/custom.ts`, `src-tauri/src/llm/custom.rs`, `config.rs` | `hub.test.ts`, `custom.test.ts`, Rust unit tests, `security.test.ts`; e2e (search, inspect, add, remove) |
 | Only `llm/laya.ts` may `fetch`, and only `pinnedFileUrl(...)` (pinned HF commits); tokenizers built without its `http` feature | `llm/laya.ts`, `llm/models.ts`, `Cargo.toml` | `security.test.ts`, `models.test.ts` |
 | Pre-pinning model copies removed only after the user confirms | `engine.removeLegacyCopies`, Settings | `Settings.test.tsx` |
 | Retrieved passages fenced as untrusted data; a passage can't close its fence | `agent/prompt.ts` | `prompt.test.ts` |
@@ -860,6 +887,9 @@ webview can't set them. Only the e2e runner does.
       allowlist in `security.test.ts`.
 - [ ] New files under app data are created with private permissions
       (`create_private_dir` / `private_file`).
+- [ ] Anything that accepts a model from outside the catalog goes through
+      `llm/hub.ts` and, for MLX, `llm/custom.rs`: never a URL, path or hash the
+      webview made up without those checks.
 - [ ] New or updated catalog model: `url` pinned to a commit, with `bytes` and
       `sha256` taken from Hugging Face's `paths-info` (download it once and
       check). Move the old URL into `legacyUrls`.

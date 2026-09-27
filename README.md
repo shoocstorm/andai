@@ -1,27 +1,40 @@
-# Andai — a local-first agentic RAG agent
+# Andai — a local-first agentic RAG agent, driven by the Laya decision model
 
 > Contributors and coding agents: read **[AGENTS.md](AGENTS.md)** first. It has the grounding rules, architecture, conventions and testing strategy.
 > Users: see **[docs/features.md](docs/features.md)** and the product site in **[docs/andai-website/](docs/andai-website/index.html)**.
 
 Andai is a desktop AI agent that answers from **your own knowledge bases**, and the
-model runs on your computer (macOS or Windows). It does *agentic* RAG: instead of pasting the top-k
+model runs on your computer (macOS or Windows). It is more than agentic RAG: every
+step the agent takes is a measured choice. Instead of pasting the top-k
 chunks into a prompt, the agent works its knowledge base with tools. It searches,
 reads the lines around a hit, outlines a file, or follows a code symbol to its
 callers until it has enough evidence. Then it writes an answer that cites every
 passage it used.
 
-- **The on-device LLM** writes the answers and makes the agent's decisions.
-  On Apple Silicon Macs it runs natively on the GPU with **MLX**, in Rust
-  (Qwen3 1.7B: about 350 tokens/s on an M5 Max); everywhere else, and for the
-  GGUF models, with **wllama** (llama.cpp compiled to WebAssembly, 30–65
-  tokens/s for the same model).
-- **[ug](https://github.com/shoocstorm/ug)** is the knowledge engine and the agent's toolbox. It turns documents
-  and code into a local knowledge graph, and its commands (`search`,
+- **Laya decides; the LLM writes.** Laya is a small decision model, trained for
+  typed choices (SemIf-style): it scores every option in a single forward pass —
+  about 8–20 ms per decision on Apple Silicon, with calibrated probabilities shown
+  in the Execution Trace — and filters retrieved passages that don't help before
+  the prompt. Without it, the chat model itself decides through the same one-pass
+  letter readout.
+- **The on-device LLM** writes the answers. On Apple Silicon Macs it runs
+  natively on the GPU with **MLX**, in Rust (Qwen3 1.7B: about 350 tokens/s on
+  an M5 Max); everywhere else, and for the GGUF models, with **wllama**
+  (llama.cpp compiled to WebAssembly, 30–65 tokens/s for the same model).
+- **[ug (UltraGraph)](https://ultra-graph.web.app)** ([source](https://github.com/shoocstorm/ug)) is the knowledge
+  engine and the agent's toolbox: a local-first Rust engine that turns documents and code into an
+  interactive, queryable semantic knowledge graph. Its commands (`search`,
   `get_code`, `file_context`, `context`, `find_usages`, …) are the tools the
   agent calls.
 - **Tauri** hosts the UI. The UX ideas come from the earlier gpuix demo (see *Why Tauri*).
+- **Also in the browser:** an initial web build is live at
+  **[andai-agent.web.app](https://andai-agent.web.app)** (deployed with
+  `bun run deploy:web`). Same UI, minus the knowledge feature: the ug engine
+  runs natively, so knowledge bases are desktop-only.
 
-Nothing leaves the machine. The one exception is the first model download from Hugging Face.
+Nothing leaves the machine — in the desktop app. The one exception is the
+first model download from Hugging Face. (The web deployment additionally
+loads Google Analytics; the desktop app does not.)
 
 ### How a turn works
 
@@ -111,6 +124,7 @@ First launch:
 | Agentic tool loop (model-chosen ug tools, per-tool policy, approvals) | **Real**: `agent/loop.ts`, `llm/decide.ts`, `src-tauri/src/tools.rs` |
 | Persona (prompt, tone, temperature, max tokens, reasoning) | **Real**, persisted. *Auto-optimize* rewrites the prompt with the local model |
 | Model registry (download, load, unload, evict) | **Real**: Rust's verified store (MLX) or wllama `ModelManager` |
+| Add a model from Hugging Face (search, compatibility, pinned + verified download) | **Real**: `llm/hub.ts`, Rust checks MLX models in `src-tauri/src/llm/custom.rs` |
 | Workflows, approvals, tool library, node editor, run simulation | **Simulated**: mock data in `src/mock/workflows.ts` |
 
 ## Security

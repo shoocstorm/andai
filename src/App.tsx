@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useEffect } from 'react';
 import { stopTurn } from './agent/turn';
 import { inTauri } from './kb/api';
+import { initCustomModels } from './llm/custom';
 import { autoload } from './llm/engine';
 import { CommandCenter, composerRef } from './screens/CommandCenter';
 import { Knowledge } from './screens/Knowledge';
@@ -53,6 +54,7 @@ export function App() {
   useEffect(() => {
     void refreshKbs();
     void startKbEvents();
+    initCustomModels(); // before autoload: the last model may be one the user added
     void autoload();
   }, []);
 

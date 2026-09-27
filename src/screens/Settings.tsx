@@ -1,12 +1,14 @@
-import { Check, Cpu, Download, GitFork, HardDrive, Loader2, Monitor, Moon, Palette, Power, Radio, Sun, Trash2, X, Zap } from 'lucide-react';
+import { Check, Cpu, Download, GitFork, HardDrive, Loader2, Monitor, Moon, Palette, Plus, Power, Radio, Sun, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, Modal, fmtBytes } from '../components/ui';
 import { evictModel, loadDecider, loadModel, refreshLaya, refreshNative, removeLaya, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
+import { removeCustomModel } from '../llm/custom';
 import { availableModels, isMlx, LAYA_MODELS, layaById, modelById, type LayaDef, type ModelDef } from '../llm/models';
 import { clearChat } from '../state/chat';
 import { useKb } from '../state/kb';
 import { useTheme, type ThemeMode } from '../state/theme';
 import { toast } from '../state/ui';
+import { HubModels } from './HubModels';
 
 /**
  * The optional second model that scores the agent's next action
@@ -145,6 +147,8 @@ export function Settings() {
   const ug = useKb((s) => s.ug);
   const kbs = useKb((s) => s.kbs);
   const [legacyFor, setLegacyFor] = useState<ModelDef | null>(null);
+  const [hubOpen, setHubOpen] = useState(false);
+  const [removing, setRemoving] = useState<ModelDef | null>(null);
   const mlx = e.native.supported;
   useEffect(() => {
     void refreshNative();
@@ -167,6 +171,9 @@ export function Settings() {
           <span className="label" style={{ color: 'var(--text)', letterSpacing: '0.2em' }}>
             Model Registry
           </span>
+          <button className="btn secondary sm" onClick={() => setHubOpen(true)}>
+            <Plus size={13} /> Add from Hugging Face
+          </button>
         </div>
         {mlx && (
           <div className="st-mlx-note" role="note">
@@ -210,6 +217,12 @@ export function Settings() {
                   {m.thinking ? ' · reasoning' : ''}
                 </div>
                 <p className="muted">{m.note}</p>
+                {m.source && (
+                  <div className="st-source faint mono" title={`${m.source.repo} at commit ${m.source.commit}`}>
+                    <span className="pill">Hugging Face</span> {m.source.repo}@{m.source.commit.slice(0, 7)}
+                    {m.source.license ? ` · ${m.source.license}` : ''}
+                  </div>
+                )}
                 {e.legacy[m.id] && (
                   <div className="st-legacy">
                     <span>
@@ -248,7 +261,12 @@ export function Settings() {
                       {loading ? 'Loading' : cached ? 'Load' : 'Download & load'}
                     </button>
                   )}
-                  {cached && !loading && (
+                  {m.source && !loading && (
+                    <button className="btn ghost sm" aria-label={`Remove ${m.name}`} onClick={() => setRemoving(m)}>
+                      <Trash2 size={13} /> Remove
+                    </button>
+                  )}
+                  {cached && !loading && !m.source && (
                     <button
                       className="btn ghost sm"
                       title={isMlx(m) ? 'Delete the downloaded model files' : 'Delete the cached model file'}
@@ -264,6 +282,32 @@ export function Settings() {
             );
           })}
         </section>
+        <HubModels open={hubOpen} onClose={() => setHubOpen(false)} />
+        <Modal open={!!removing} onClose={() => setRemoving(null)}>
+          <h3>Remove {removing?.name}?</h3>
+          <p className="muted" style={{ margin: '4px 0 22px' }}>
+            This deletes its downloaded files ({removing?.size}) and removes it from the list. You can add it again from Hugging
+            Face.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <button className="btn ghost" onClick={() => setRemoving(null)}>
+              Cancel
+            </button>
+            <button
+              className="btn danger"
+              onClick={() => {
+                const m = removing;
+                setRemoving(null);
+                if (m)
+                  void removeCustomModel(m.id)
+                    .then(() => toast({ tone: 'info', title: `${m.name} removed` }))
+                    .catch((err: unknown) => toast({ tone: 'error', title: `Couldn’t remove ${m.name}`, body: String(err) }));
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        </Modal>
         <Modal open={!!legacyFor} onClose={() => setLegacyFor(null)}>
           <h3>Remove the old copy of {legacyFor?.name}?</h3>
           <p className="muted" style={{ margin: '4px 0 22px' }}>

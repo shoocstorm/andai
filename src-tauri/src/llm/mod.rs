@@ -13,6 +13,10 @@
 #[cfg_attr(not(mlx), allow(dead_code))]
 pub(crate) mod catalog;
 #[cfg_attr(not(mlx), allow(dead_code))]
+pub(crate) mod config;
+#[cfg_attr(not(mlx), allow(dead_code))]
+pub(crate) mod custom;
+#[cfg_attr(not(mlx), allow(dead_code))]
 mod grammar;
 #[cfg_attr(not(mlx), allow(dead_code))]
 pub(crate) mod template;
@@ -106,7 +110,45 @@ pub struct LlmStatus {
     supported: bool,
     chat: Option<String>,
     decider: Option<String>,
-    checkpoints: Vec<CheckpointStatus>,
+    checkpoints: Vec<LlmCheckpoint>,
+}
+
+/// A catalog model, or one the user added (`custom`, with what Rust read from it).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmCheckpoint {
+    #[serde(flatten)]
+    status: CheckpointStatus,
+    custom: Option<CustomInfo>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomInfo {
+    thinking: bool,
+    layers: usize,
+    bits: i32,
+    added_at: u64,
+}
+
+#[cfg(mlx)]
+fn custom_status(root: &std::path::Path, m: &custom::Manifest) -> LlmCheckpoint {
+    let mut status = CheckpointStatus::of(root, &m.checkpoint());
+    status.bytes = m.bytes();
+    status.downloaded = custom::is_complete(root, m);
+    LlmCheckpoint { status, custom: Some(CustomInfo { thinking: m.thinking, layers: m.layers, bits: m.bits, added_at: m.added_at }) }
+}
+
+/// A model by id: the closed catalog, else a model the user added (its manifest re-validated).
+#[cfg(mlx)]
+fn lookup(root: &std::path::Path, id: &str) -> Result<(crate::laya::catalog::Checkpoint, Option<custom::Manifest>), String> {
+    match catalog::checkpoint(id) {
+        Ok(c) => Ok((c.clone(), None)),
+        Err(_) => {
+            let m = custom::get(root, id)?;
+            Ok((m.checkpoint(), Some(m)))
+        }
+    }
 }
 
 /// Bounds on what the webview may ask the model to generate.
@@ -155,7 +197,10 @@ pub async fn llm_status(app: AppHandle, mlx: State<'_, Mlx>) -> Result<LlmStatus
     #[cfg(mlx)]
     {
         let root = root(&app)?;
-        let checkpoints = catalog::CHECKPOINTS.iter().map(|c| CheckpointStatus::of(&root, c)).collect();
+        let r = root.clone();
+        let mut checkpoints: Vec<LlmCheckpoint> = catalog::CHECKPOINTS.iter().map(|c| LlmCheckpoint { status: CheckpointStatus::of(&root, c), custom: None }).collect();
+        // Hashing a custom model's small files is cheap, but its folder is on disk: off the async runtime.
+        checkpoints.extend(blocking(move || Ok(custom::list(&r).iter().map(|m| custom_status(&r, m)).collect::<Vec<_>>())).await?);
         let [chat, decider] = mlx.loaded().llm;
         Ok(LlmStatus { supported: true, chat, decider, checkpoints })
     }
@@ -171,9 +216,12 @@ pub async fn llm_write_chunk(app: AppHandle, request: tauri::ipc::Request<'_>) -
     let (id, file, offset, bytes) = crate::laya::chunk_request(&request)?;
     #[cfg(mlx)]
     {
-        let c = catalog::checkpoint(&id)?;
         let root = root(&app)?;
-        blocking(move || store::write_chunk(&root, c, &file, offset, &bytes)).await
+        blocking(move || {
+            let (c, _) = lookup(&root, &id)?;
+            store::write_chunk(&root, &c, &file, offset, &bytes)
+        })
+        .await
     }
     #[cfg(not(mlx))]
     {
@@ -187,9 +235,12 @@ pub async fn llm_write_chunk(app: AppHandle, request: tauri::ipc::Request<'_>) -
 pub async fn llm_finish(app: AppHandle, checkpoint: String) -> Result<(), String> {
     #[cfg(mlx)]
     {
-        let c = catalog::checkpoint(&checkpoint)?;
         let root = root(&app)?;
-        blocking(move || store::finish(&root, c)).await
+        blocking(move || {
+            let (c, _) = lookup(&root, &checkpoint)?;
+            store::finish(&root, &c)
+        })
+        .await
     }
     #[cfg(not(mlx))]
     {
@@ -198,18 +249,21 @@ pub async fn llm_finish(app: AppHandle, checkpoint: String) -> Result<(), String
     }
 }
 
-/// Deletes a downloaded model (the UI confirms first), unloading it from any slot.
+/// Deletes a downloaded model (the UI confirms first), unloading it from any
+/// slot. A model the user added is forgotten too.
 #[tauri::command]
 pub async fn llm_remove(app: AppHandle, mlx: State<'_, Mlx>, checkpoint: String) -> Result<(), String> {
     #[cfg(mlx)]
     {
-        let c = catalog::checkpoint(&checkpoint)?;
-        if mlx.loaded().llm.iter().any(|l| l.as_deref() == Some(c.id)) {
+        let root = root(&app)?;
+        let (c, custom) = lookup(&root, &checkpoint)?;
+        if mlx.loaded().llm.iter().any(|l| l.as_deref() == Some(&*c.id)) {
             let t = mlx.thread(&app);
+            let id = c.id.to_string();
             blocking(move || {
                 t.run(move |m| {
                     for s in &mut m.llm {
-                        if s.as_ref().is_some_and(|(id, _)| id == c.id) {
+                        if s.as_ref().is_some_and(|(loaded, _)| *loaded == id) {
                             *s = None;
                         }
                     }
@@ -218,12 +272,36 @@ pub async fn llm_remove(app: AppHandle, mlx: State<'_, Mlx>, checkpoint: String)
             })
             .await?;
         }
-        let root = root(&app)?;
-        blocking(move || store::remove(&root, c)).await
+        blocking(move || match custom {
+            Some(m) => custom::remove(&root, &m.id),
+            None => store::remove(&root, &c),
+        })
+        .await
     }
     #[cfg(not(mlx))]
     {
         let _ = (app, mlx, checkpoint);
+        Err(UNSUPPORTED.into())
+    }
+}
+
+/// Adds a model from Hugging Face (custom.rs checks everything first); the
+/// webview then downloads its `files` like a catalog model's.
+#[tauri::command]
+pub async fn llm_add_custom(app: AppHandle, spec: custom::Spec) -> Result<LlmCheckpoint, String> {
+    #[cfg(mlx)]
+    {
+        let root = root(&app)?;
+        blocking(move || {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let m = custom::add(&root, &spec, now)?;
+            Ok(custom_status(&root, &m))
+        })
+        .await
+    }
+    #[cfg(not(mlx))]
+    {
+        let _ = (app, spec);
         Err(UNSUPPORTED.into())
     }
 }
@@ -247,8 +325,12 @@ pub async fn llm_load(app: AppHandle, mlx: State<'_, Mlx>, slot: Slot, checkpoin
     }
     #[cfg(mlx)]
     {
-        let c = catalog::checkpoint(&checkpoint)?;
-        let dir = store::resolve(&root(&app)?, c)?;
+        let root = root(&app)?;
+        let (c, custom) = lookup(&root, &checkpoint)?;
+        let dir = store::resolve(&root, &c)?;
+        if custom.as_ref().is_some_and(|m| !custom::is_complete(&root, m)) {
+            return Err(format!("{} isn't completely downloaded; download it again in Settings → Models.", c.repo));
+        }
         let t = mlx.thread(&app);
         blocking(move || {
             t.run(move |m| {
@@ -306,7 +388,6 @@ pub async fn llm_generate(
     validate(&messages, &params)?;
     #[cfg(mlx)]
     {
-        let text = template::render(&messages, params.thinking);
         let p = engine::Params {
             max_tokens: params.max_tokens as usize,
             temperature: params.temperature,
@@ -324,6 +405,9 @@ pub async fn llm_generate(
         let out = blocking(move || {
             t.run(move |m| {
                 let (_, engine) = m.llm[slot.index()].as_mut().ok_or("No MLX model is loaded; open Settings → Models to load one.")?;
+                // A template without Qwen3's thinking switch gets no empty think block:
+                // rendered as with thinking on, which adds none.
+                let text = template::render(&messages, params.thinking || !engine.think_switch);
                 let mut send = |piece: &str| {
                     let _ = on_text.send(piece.to_string());
                 };

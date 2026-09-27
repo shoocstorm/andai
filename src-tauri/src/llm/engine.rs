@@ -100,6 +100,8 @@ pub struct Engine {
     /// Token ids whose keys and values are in `cache`, in order.
     cached: Vec<u32>,
     pub n_ctx: usize,
+    /// The chat template has Qwen3's `enable_thinking` switch.
+    pub think_switch: bool,
     /// Each token id's raw bytes (`None`: a special or added token), built on first use by a grammar.
     token_bytes: Option<Arc<TokenBytes>>,
 }
@@ -143,6 +145,8 @@ impl Engine {
         let cfg = Config::from_json(&read_json(&dir.join("config.json"))?)?;
         let tok = tokenizers::Tokenizer::from_file(dir.join("tokenizer.json")).map_err(e)?;
         let tcfg = read_json(&dir.join("tokenizer_config.json"))?;
+        let jinja = std::fs::read_to_string(dir.join("chat_template.jinja")).ok();
+        let think_switch = super::config::check_template(super::config::chat_template(&tcfg, jinja.as_deref()).as_deref())?;
         // The end-of-turn token, and end-of-text in case a model emits it instead.
         let mut stop = Vec::new();
         for name in ["eos_token", "pad_token"] {
@@ -156,7 +160,7 @@ impl Engine {
         }
         let model = Model::load(dir, cfg)?;
         let cache = model.new_cache();
-        Ok(Self { model, tok, stop, cache, cached: Vec::new(), n_ctx, token_bytes: None })
+        Ok(Self { model, tok, stop, cache, cached: Vec::new(), n_ctx, think_switch, token_bytes: None })
     }
 
     /// Layer count and weight bits.
@@ -559,7 +563,7 @@ mod tests {
             return d.into();
         }
         let home = std::env::var_os("HOME").expect("HOME");
-        PathBuf::from(home).join(".cache/huggingface/hub").join(format!("models--{}", c.repo.replace('/', "--"))).join("snapshots").join(c.commit)
+        PathBuf::from(home).join(".cache/huggingface/hub").join(format!("models--{}", c.repo.replace('/', "--"))).join("snapshots").join(&*c.commit)
     }
 
     fn golden(id: &str) -> Value {
@@ -688,6 +692,58 @@ mod tests {
             "{id}: {} prompt tokens at {pps:.0} tok/s, {} generated at {tps:.0} tok/s; decision logprob Δ {worst:.3}; partial-reuse drift {drift:.3}",
             run.prompt_tokens, run.completion_tokens
         );
+    }
+
+    /// A model added from Hugging Face, end to end in Rust: the spec the webview
+    /// builds (llm/hub.ts), `custom::add`, a chunked download through the store
+    /// with its sha256 check, then load and generate. Qwen3 8B is untied (its own
+    /// LM head), which the catalog models aren't. Needs
+    /// `hf download mlx-community/Qwen3-8B-4bit --revision 545dc42…` (4.6 GB).
+    #[test]
+    #[ignore = "needs the Qwen3 8B MLX checkpoint"]
+    fn llm_custom_qwen3_8b_untied_matches_mlx_lm() {
+        use crate::laya::store;
+        use crate::llm::custom::{self, InlineFile, Spec, SpecFile};
+        use sha2::{Digest, Sha256};
+        let repo = "mlx-community/Qwen3-8B-4bit";
+        let commit = "545dc4251c05440727734bcd94334791f6ab0192";
+        let snap = PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cache/huggingface/hub/models--mlx-community--Qwen3-8B-4bit/snapshots").join(commit);
+        let read = |p: &str| std::fs::read(snap.join(p)).unwrap();
+        let hash = |b: &[u8]| Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect::<String>();
+        let big = |p: &str| {
+            let b = read(p);
+            SpecFile { path: p.into(), bytes: b.len() as u64, sha256: hash(&b) }
+        };
+        let text = |p: &str| InlineFile { path: p.into(), content: String::from_utf8(read(p)).unwrap() };
+        let spec = Spec { repo: repo.into(), commit: commit.into(), files: vec![big("model.safetensors"), big("tokenizer.json")], inline: vec![text("config.json"), text("tokenizer_config.json")] };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let m = custom::add(root, &spec, 1).unwrap();
+        assert_eq!((m.layers, m.bits, m.thinking), (36, 4, true));
+        let c = m.checkpoint();
+        for f in c.files.iter() {
+            let bytes = read(&f.path);
+            let mut offset = 0u64;
+            for chunk in bytes.chunks(16 << 20) {
+                offset = store::write_chunk(root, &c, &f.path, offset, chunk).unwrap();
+            }
+        }
+        assert!(!custom::is_complete(root, &m), "parts aren't a download");
+        store::finish(root, &c).unwrap();
+        assert!(custom::is_complete(root, &m));
+
+        let golden: Value = serde_json::from_str(include_str!("../../tests/fixtures/llm/golden-qwen3-8b-untied.json")).unwrap();
+        let mut engine = Engine::load(&store::dir(root, &c), 4096).unwrap();
+        assert!(engine.think_switch);
+        let t = Instant::now();
+        let out = engine.generate(golden["text"].as_str().unwrap(), &greedy(16), &mut |_| {}, &|| false).unwrap();
+        assert_eq!(out.text, golden["greedy_text"].as_str().unwrap(), "untied LM head: same greedy text as mlx-lm");
+        println!("qwen3-8b (custom): {} tokens in {:.0} ms, {:.0} tok/s", out.completion_tokens, t.elapsed().as_secs_f64() * 1e3, (out.completion_tokens - 1) as f64 / (out.gen_ms / 1e3));
+
+        // Tampering after the download: the model no longer counts as complete.
+        std::fs::write(store::dir(root, &c).join("config.json"), "{}").unwrap();
+        assert!(!custom::is_complete(root, &m));
     }
 
     #[test]

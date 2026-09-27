@@ -19,7 +19,7 @@ import { ModelManager, Wllama, WllamaAbortError, type ChatCompletionParams, type
 import { create } from 'zustand';
 import { verifyBlobs } from './integrity';
 import { downloadCheckpoint, downloadLaya, layaLoad, layaRemove, layaStatus, layaUnload, type LayaStatus } from './laya';
-import { isMlx, layaById, MODELS, modelById, type LayaDef, type MlxDef, type ModelDef, type WllamaDef } from './models';
+import { allModels, isMlx, layaById, MODELS, modelById, type LayaDef, type MlxDef, type ModelDef, type WllamaDef } from './models';
 import {
   asCompletion,
   genTokPerSec,
@@ -168,7 +168,7 @@ export async function refreshCache(): Promise<void> {
   }
   // MLX models live in Rust's verified store, keyed here by their pinned repo URL.
   const native = await refreshNative();
-  for (const def of MODELS) {
+  for (const def of allModels()) {
     if (isMlx(def) && native.checkpoints.some((c) => c.id === def.native && c.downloaded)) cached[def.url] = def.bytes;
   }
   useEngine.setState({ cached, legacy });

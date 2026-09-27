@@ -176,6 +176,11 @@ if (failure || !result) {
     check('MLX argument fill is held to its grammar', n.fill?.ok === true && /^\{/.test(n.fill.raw ?? ''), JSON.stringify(n.fill));
     console.log(`[e2e] mlx: ${n.backend} ${n.stats?.tokPerSec?.toFixed(0)} tok/s, first token ${n.stats?.firstTokenMs?.toFixed(0)} ms, load ${n.loadMs?.toFixed(0)} ms, fill ${n.fill?.ms?.toFixed(0)} ms`);
   }
+  const hub = result.hub ?? {};
+  check('Hugging Face search and inspect work from the app (CSP, CORS), pinned to a commit', !hub.error && hub.results > 0 && hub.gguf?.ok && /^[0-9a-f]{40}$/.test(hub.gguf.commit ?? '') && hub.gguf.recommended, JSON.stringify(hub).slice(0, 600));
+  if (mlx) {
+    check('Rust accepts a runnable MLX model from Hugging Face, and forgets it', hub.mlx?.ok && hub.mlx.layers === 28 && hub.mlx.downloaded === false && /^hf-/.test(hub.mlx.id ?? ''), JSON.stringify(hub.mlx));
+  }
   const sm = result.sample ?? {};
   check('a sample knowledge base arrives with its bundled files', !sm.error && sm.kind === 'mixed' && sm.sources?.length === 7 && sm.sources.every(([, , st]) => st === 'pending'), JSON.stringify(sm));
   if (a.turn?.agent) {

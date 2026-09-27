@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 const MARKER: &str = ".verified";
 
 pub fn dir(root: &Path, c: &Checkpoint) -> PathBuf {
-    root.join(c.id)
+    root.join(&*c.id)
 }
 
 fn part_path(root: &Path, c: &Checkpoint, file: &str) -> PathBuf {
@@ -63,8 +63,8 @@ fn sha256_file(path: &Path) -> std::io::Result<String> {
 }
 
 fn remove_parts(root: &Path, c: &Checkpoint) {
-    for f in c.files {
-        let _ = fs::remove_file(part_path(root, c, f.path));
+    for f in c.files.iter() {
+        let _ = fs::remove_file(part_path(root, c, &f.path));
     }
 }
 
@@ -72,8 +72,8 @@ fn remove_parts(root: &Path, c: &Checkpoint) {
 /// match, moves them into place and marks the checkpoint verified. Any
 /// mismatch removes every part: a bad download is never kept.
 pub fn finish(root: &Path, c: &Checkpoint) -> Result<(), String> {
-    for f in c.files {
-        let part = part_path(root, c, f.path);
+    for f in c.files.iter() {
+        let part = part_path(root, c, &f.path);
         let fail = |why: String| {
             remove_parts(root, c);
             Err(format!("{}: {why}. The download was discarded; try again.", f.path))
@@ -93,8 +93,8 @@ pub fn finish(root: &Path, c: &Checkpoint) -> Result<(), String> {
     }
     let d = dir(root, c);
     let _ = fs::remove_file(d.join(MARKER));
-    for f in c.files {
-        fs::rename(part_path(root, c, f.path), d.join(f.path)).map_err(|e| e.to_string())?;
+    for f in c.files.iter() {
+        fs::rename(part_path(root, c, &f.path), d.join(&*f.path)).map_err(|e| e.to_string())?;
     }
     private_file(&d.join(MARKER))
         .and_then(|mut m| m.write_all(c.commit.as_bytes()))
@@ -104,8 +104,8 @@ pub fn finish(root: &Path, c: &Checkpoint) -> Result<(), String> {
 /// Verified at download (marker for this commit) and still complete on disk.
 pub fn is_downloaded(root: &Path, c: &Checkpoint) -> bool {
     let d = dir(root, c);
-    fs::read_to_string(d.join(MARKER)).is_ok_and(|m| m == c.commit)
-        && c.files.iter().all(|f| fs::metadata(d.join(f.path)).is_ok_and(|m| m.len() == f.bytes))
+    fs::read_to_string(d.join(MARKER)).is_ok_and(|m| m == *c.commit)
+        && c.files.iter().all(|f| fs::metadata(d.join(&*f.path)).is_ok_and(|m| m.len() == f.bytes))
 }
 
 /// The folder to load from, or why it can't be loaded.
@@ -126,21 +126,14 @@ pub fn remove(root: &Path, c: &Checkpoint) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::catalog::CheckpointFile;
+    use super::super::catalog::f;
     use super::*;
 
     // sha256("hello") and sha256("abc")
     const HELLO: &str = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
     const ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-    const TEST: Checkpoint = Checkpoint {
-        id: "test-ckpt",
-        repo: "x/y",
-        commit: "0123456789abcdef0123456789abcdef01234567",
-        files: &[
-            CheckpointFile { path: "model.safetensors", bytes: 5, sha256: HELLO },
-            CheckpointFile { path: "tokenizer/tokenizer.json", bytes: 3, sha256: ABC },
-        ],
-    };
+    static TEST_FILES: [super::super::catalog::CheckpointFile; 2] = [f("model.safetensors", 5, HELLO), f("tokenizer/tokenizer.json", 3, ABC)];
+    static TEST: Checkpoint = super::super::catalog::pinned("test-ckpt", "x/y", "0123456789abcdef0123456789abcdef01234567", &TEST_FILES);
 
     fn download(root: &Path) {
         write_chunk(root, &TEST, "model.safetensors", 0, b"hel").unwrap();

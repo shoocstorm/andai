@@ -3,9 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { loadDecider, removeLaya, removeLegacyCopies, useEngine } from '../llm/engine';
-import { DEFAULT_MODEL, isMlx, MODELS } from '../llm/models';
+import { DEFAULT_MODEL, isMlx, MODELS, setCustomModels, type WllamaDef } from '../llm/models';
+import { removeCustomModel } from '../llm/custom';
 import { useTheme } from '../state/theme';
 import { Settings } from './Settings';
+
+vi.mock('../llm/custom', () => ({ removeCustomModel: vi.fn().mockResolvedValue(undefined), addHubModel: vi.fn() }));
 
 vi.mock('../llm/engine', async (original) => ({
   ...(await original<typeof import('../llm/engine')>()),
@@ -106,5 +109,40 @@ describe('Settings', () => {
     await user.click(screen.getByRole('button', { name: /^remove$/i }));
     expect(removeLegacyCopies).toHaveBeenCalledWith(DEFAULT_MODEL);
     act(() => useEngine.setState({ legacy: {} }));
+  });
+
+  it('opens the Hugging Face search, and removes an added model only after confirming', async () => {
+    const user = userEvent.setup();
+    const added: WllamaDef = {
+      id: 'hf-gguf-someone--tiny-q4-d7f544ee',
+      engine: 'wllama',
+      name: 'Tiny · Q4_K_M',
+      family: 'Q4_K_M · llama · Hugging Face',
+      size: '600 MB',
+      bytes: 6e8,
+      url: 'https://huggingface.co/someone/tiny/resolve/d7f544eead698dbd1f15126ef60b45a1e1933222/tiny-Q4_K_M.gguf',
+      sha256: 'b'.repeat(64),
+      legacyUrls: [],
+      note: 'Added from someone/tiny on Hugging Face.',
+      thinking: false,
+      n_ctx: 4096,
+      source: { repo: 'someone/tiny', commit: 'd7f544eead698dbd1f15126ef60b45a1e1933222', license: 'mit' },
+    };
+    setCustomModels([added]);
+    render(<Settings />);
+    const registry = within(screen.getByRole('region', { name: 'Model registry' }));
+    expect(registry.getByText('someone/tiny@d7f544e · mit', { exact: false })).toBeInTheDocument();
+    // Catalog models have no Remove; the added one does.
+    expect(registry.getAllByRole('button', { name: /^Remove / })).toHaveLength(1);
+    await user.click(registry.getByRole('button', { name: 'Remove Tiny · Q4_K_M' }));
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+    expect(removeCustomModel).not.toHaveBeenCalled();
+    await user.click(registry.getByRole('button', { name: 'Remove Tiny · Q4_K_M' }));
+    await user.click(screen.getByRole('button', { name: /^remove$/i }));
+    expect(removeCustomModel).toHaveBeenCalledWith(added.id);
+
+    await user.click(screen.getByRole('button', { name: /add from hugging face/i }));
+    expect(screen.getByRole('dialog', { name: 'Add a model from Hugging Face' })).toBeInTheDocument();
+    setCustomModels([]);
   });
 });

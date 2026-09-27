@@ -6,71 +6,10 @@
 use mlx_rs::fast::{self, ScaledDotProductAttentionMask};
 use mlx_rs::ops::indexing::{IndexOp, TryIndexMutOp};
 use mlx_rs::{ops, Array};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub type R<T> = Result<T, String>;
-
-pub fn e<E: std::fmt::Display>(err: E) -> String {
-    err.to_string()
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Config {
-    pub vocab: i32,
-    pub hidden: i32,
-    pub intermediate: i32,
-    pub layers: usize,
-    pub heads: i32,
-    pub kv_heads: i32,
-    pub head_dim: i32,
-    pub eps: f32,
-    pub theta: f32,
-    pub group_size: i32,
-    pub bits: i32,
-}
-
-impl Config {
-    /// Reads config.json, refusing what this port doesn't implement.
-    pub fn from_json(v: &Value) -> R<Self> {
-        let int = |k: &str| v[k].as_i64().map(|n| n as i32).ok_or_else(|| format!("model config: missing {k}"));
-        if v["model_type"].as_str() != Some("qwen3") {
-            return Err(format!("model config: expected a qwen3 model, got {}", v["model_type"]));
-        }
-        if !v["rope_scaling"].is_null() {
-            return Err("model config: only unscaled RoPE is supported".into());
-        }
-        if v["tie_word_embeddings"].as_bool() != Some(true) {
-            return Err("model config: only tied word embeddings are supported".into());
-        }
-        if v["attention_bias"].as_bool() == Some(true) {
-            return Err("model config: attention bias is not supported".into());
-        }
-        let q = &v["quantization"];
-        let (group_size, bits) = (q["group_size"].as_i64(), q["bits"].as_i64());
-        let (Some(group_size), Some(bits)) = (group_size, bits) else {
-            return Err("model config: expected a quantized checkpoint".into());
-        };
-        let (hidden, heads, kv_heads) = (int("hidden_size")?, int("num_attention_heads")?, int("num_key_value_heads")?);
-        if heads % kv_heads != 0 {
-            return Err("model config: heads must be a multiple of kv heads".into());
-        }
-        Ok(Self {
-            vocab: int("vocab_size")?,
-            hidden,
-            intermediate: int("intermediate_size")?,
-            layers: int("num_hidden_layers")? as usize,
-            heads,
-            kv_heads,
-            head_dim: v["head_dim"].as_i64().map(|n| n as i32).unwrap_or(hidden / heads),
-            eps: v["rms_norm_eps"].as_f64().unwrap_or(1e-6) as f32,
-            theta: v["rope_theta"].as_f64().unwrap_or(1_000_000.0) as f32,
-            group_size: group_size as i32,
-            bits: bits as i32,
-        })
-    }
-}
+pub use super::config::{e, Config, R};
 
 /// A quantized `[out, in]` weight: packed values, per-group scales and biases.
 struct QLinear {
@@ -165,6 +104,31 @@ pub struct Model {
     embed: QLinear,
     layers: Vec<Layer>,
     norm: Array,
+    /// Untied checkpoints only; tied ones use the embedding.
+    lm_head: Option<QLinear>,
+}
+
+/// The weight files: model.safetensors, or else the shards its index names
+/// (`model-00001-of-00002.safetensors`, …), merged. Some repos ship an index
+/// that just names model.safetensors; the single file wins.
+fn load_weights(dir: &Path) -> R<HashMap<String, Array>> {
+    let single = dir.join("model.safetensors");
+    let index = dir.join("model.safetensors.index.json");
+    if single.is_file() || !index.is_file() {
+        return Array::load_safetensors(single).map_err(e);
+    }
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&index).map_err(e)?).map_err(e)?;
+    let mut shards: Vec<&str> = v["weight_map"].as_object().ok_or("the weight index has no weight_map")?.values().filter_map(|f| f.as_str()).collect();
+    shards.sort_unstable();
+    shards.dedup();
+    let mut all = HashMap::new();
+    for shard in shards {
+        if !super::custom::is_shard_name(shard) {
+            return Err(format!("unexpected weight file {shard:?}"));
+        }
+        all.extend(Array::load_safetensors(dir.join(shard)).map_err(e)?);
+    }
+    Ok(all)
 }
 
 /// Takes named tensors out of the checkpoint, checking shapes; whatever is
@@ -196,8 +160,7 @@ impl Weights {
 
 impl Model {
     pub fn load(dir: &Path, cfg: Config) -> R<Self> {
-        let raw = Array::load_safetensors(dir.join("model.safetensors")).map_err(e)?;
-        let mut w = Weights(raw);
+        let mut w = Weights(load_weights(dir)?);
         let (d, hd) = (cfg.hidden, cfg.head_dim);
         let embed = w.qlinear("model.embed_tokens", cfg.vocab, d, &cfg)?;
         let mut layers = Vec::with_capacity(cfg.layers);
@@ -218,12 +181,17 @@ impl Model {
             });
         }
         let norm = w.take("model.norm.weight", &[d])?;
-        // A tied checkpoint may still carry an lm_head copy; mlx-lm drops it too.
-        w.0.retain(|k, _| !k.starts_with("lm_head."));
+        let lm_head = if cfg.tied {
+            // A tied checkpoint may still carry an lm_head copy; mlx-lm drops it too.
+            w.0.retain(|k, _| !k.starts_with("lm_head."));
+            None
+        } else {
+            Some(w.qlinear("lm_head", cfg.vocab, d, &cfg)?)
+        };
         if let Some(extra) = w.0.keys().next() {
             return Err(format!("unexpected tensor in checkpoint: {extra}"));
         }
-        let model = Self { cfg, embed, layers, norm };
+        let model = Self { cfg, embed, layers, norm, lm_head };
         model.materialize()?;
         Ok(model)
     }
@@ -232,6 +200,9 @@ impl Model {
     fn materialize(&self) -> R<()> {
         let q = |l: &QLinear| [l.w.clone(), l.scales.clone(), l.biases.clone()];
         let mut all: Vec<Array> = q(&self.embed).to_vec();
+        if let Some(h) = &self.lm_head {
+            all.extend(q(h));
+        }
         all.push(self.norm.clone());
         for l in &self.layers {
             for x in [&l.q, &l.k, &l.v, &l.o, &l.gate, &l.up, &l.down] {
@@ -287,46 +258,15 @@ impl Model {
         fast::rms_norm(&h, Some(&self.norm), c.eps).map_err(e)
     }
 
-    /// Hidden states `[.., D]` → logits over the vocabulary (tied embedding).
+    /// Hidden states `[.., D]` → logits over the vocabulary.
     pub fn logits(&self, h: &Array) -> R<Array> {
-        self.embed.call(h)
+        self.lm_head.as_ref().unwrap_or(&self.embed).call(h)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn cfg_json() -> Value {
-        serde_json::json!({
-            "model_type": "qwen3", "vocab_size": 151936, "hidden_size": 2048, "intermediate_size": 6144,
-            "num_hidden_layers": 28, "num_attention_heads": 16, "num_key_value_heads": 8, "head_dim": 128,
-            "rms_norm_eps": 1e-6, "rope_theta": 1000000, "rope_scaling": null, "tie_word_embeddings": true,
-            "quantization": {"group_size": 64, "bits": 4}
-        })
-    }
-
-    #[test]
-    fn reads_the_qwen3_config() {
-        let c = Config::from_json(&cfg_json()).unwrap();
-        assert_eq!((c.hidden, c.layers, c.heads, c.kv_heads, c.head_dim, c.bits, c.group_size), (2048, 28, 16, 8, 128, 4, 64));
-        assert_eq!(c.theta, 1_000_000.0);
-    }
-
-    #[test]
-    fn refuses_what_the_port_does_not_implement() {
-        for (k, v) in [
-            ("model_type", serde_json::json!("llama")),
-            ("rope_scaling", serde_json::json!({"type": "yarn"})),
-            ("tie_word_embeddings", serde_json::json!(false)),
-            ("quantization", Value::Null),
-            ("num_key_value_heads", serde_json::json!(5)),
-        ] {
-            let mut j = cfg_json();
-            j[k] = v;
-            assert!(Config::from_json(&j).is_err(), "{k}");
-        }
-    }
 
     #[test]
     fn the_kv_cache_grows_in_steps_and_trims() {

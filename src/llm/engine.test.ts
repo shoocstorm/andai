@@ -29,6 +29,7 @@ vi.mock('./models', () => {
   return {
     MODELS: [def],
     modelById: (id: string) => (id === 'tiny' ? def : undefined),
+    allModels: () => [def],
     layaById: () => undefined,
     isMlx: (d?: { engine?: string }) => d?.engine === 'mlx',
   };

@@ -9,12 +9,17 @@ import type { LayaCheckpoint } from './laya';
 
 export type NativeSlot = 'chat' | 'decider';
 
+/** A native model: from the catalog, or added by the user (`custom`, as Rust read it). */
+export type NativeCheckpoint = LayaCheckpoint & {
+  custom: { thinking: boolean; layers: number; bits: number; addedAt: number } | null;
+};
+
 export type NativeStatus = {
   supported: boolean;
   /** Checkpoint id loaded per slot. */
   chat: string | null;
   decider: string | null;
-  checkpoints: LayaCheckpoint[];
+  checkpoints: NativeCheckpoint[];
 };
 
 export type NativeParams = {

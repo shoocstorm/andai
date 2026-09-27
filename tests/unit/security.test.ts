@@ -24,9 +24,11 @@ const URL_ALLOWLIST = ['llm/models.ts', 'lib/firebase.ts'];
  * ModelManager; Laya and MLX chat checkpoints can't, so llm/laya.ts fetches
  * them itself, only from pinned Hugging Face commit URLs (models.ts
  * `pinnedFileUrl`), and Rust verifies every file's sha256 before keeping it
- * (laya/store.rs).
+ * (laya/store.rs). llm/hub.ts searches and inspects Hugging Face when the
+ * user adds a model (a product decision, AGENTS.md §1.4), through one guarded
+ * `get` fed only by models.ts's URL builders.
  */
-const NETWORK_ALLOWLIST = ['llm/laya.ts'];
+const NETWORK_ALLOWLIST = ['llm/laya.ts', 'llm/hub.ts'];
 /** The e2e harness names example.com to prove it gets blocked. */
 const HARNESS = ['smoke.ts'];
 
@@ -103,6 +105,17 @@ describe('egress (AGENTS.md §1.4)', () => {
     const calls = [...src.matchAll(/\bfetch\(([^,)]*)/g)].map((m) => m[1].trim());
     expect(calls).toEqual(['pinnedFileUrl(c.repo']);
     expect(src).not.toMatch(/XMLHttpRequest|WebSocket|sendBeacon|EventSource/);
+  });
+
+  it('the Hugging Face search fetches only huggingface.co, through one guard, from the catalog’s URL builders', () => {
+    const src = read('src/llm/hub.ts');
+    expect([...src.matchAll(/\bfetch\(([^,)]*)/g)].map((m) => m[1].trim())).toEqual(['url']);
+    expect(src).toMatch(/if \(!url\.startsWith\(HF_ORIGIN\)\) throw/);
+    const gets = [...src.matchAll(/\bget(?:Json)?\(([^,)]*)/g)].map((m) => m[1].trim()).filter((a) => a !== 'url: string' && a !== 'url'); // getJson forwards to get
+    expect(gets.length).toBeGreaterThan(0);
+    for (const arg of gets) expect(arg, arg).toMatch(/^(hubSearchUrl|hubModelUrl|hubTreeUrl|pinnedFileUrl)\(/);
+    expect(src).toContain("credentials: 'omit'");
+    expect(src).not.toMatch(/XMLHttpRequest|WebSocket|sendBeacon|EventSource|dangerouslySetInnerHTML|<Markdown/);
   });
 
   it('only the model catalog names a remote URL', () => {

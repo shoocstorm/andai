@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Andai — a private agentic RAG agent for your computer</title>
-  <meta name="description" content="Andai is a local-first agentic RAG agent: an AI model on your Mac or PC that works your own knowledge bases with tools and answers with cited sources. No cloud, no account, no API key." />
+  <meta name="description" content="Andai is a local-first agentic RAG agent driven by Laya, a decision model that picks each step: an AI model on your Mac or PC that works your own knowledge bases with tools and answers with cited sources. No cloud, no account, no API key." />
   <meta property="og:title" content="Andai — a private agentic RAG agent for your computer" />
-  <meta property="og:description" content="An on-device agent that searches your own knowledge bases and answers with cited sources. Nothing leaves your computer." />
+  <meta property="og:description" content="An on-device agent that searches your own knowledge bases and answers with cited sources — every step chosen by the Laya decision model. Nothing leaves your computer." />
   <meta property="og:image" content="img/command-center-dark.webp" />
   <meta name="color-scheme" content="dark light" />
   <link rel="icon" href="img/andai-icon.svg" type="image/svg+xml" />
@@ -241,19 +241,21 @@
         <svg class="icon i-sun"><use href="#i-sun"/></svg><svg class="icon i-moon"><use href="#i-moon"/></svg>
       </button>
       <a class="btn primary sm" href="https://github.com/shoocstorm/andai/releases/latest"><svg class="icon" style="width:16px;height:16px"><use href="#i-download"/></svg>Download</a>
+      <a class="btn ghost sm" href="https://andai-agent.web.app">Web demo</a>
     </div>
   </header>
 
   <main id="top">
     <div class="wrap hero">
-      <span class="eyebrow label blue"><span class="dot"></span>Agentic RAG · On-device · No cloud</span>
+      <span class="eyebrow label blue"><span class="dot"></span>Agentic RAG · Decided by Laya · On-device · No cloud</span>
       <h1>An agent for your knowledge,<br /><span class="grad">running on your computer.</span></h1>
-      <p class="lede">Andai is a local-first agentic RAG agent. It searches <strong>your own knowledge bases</strong>, shows every step it takes, and cites its sources. The model runs on your Mac or Windows PC, so your questions and files never leave it.</p>
+      <p class="lede">Andai is more than agentic RAG: a dedicated <strong>decision model</strong> — Laya — picks its every step. Instead of guessing its next move, it scores all options in one forward pass (SemIf-style) and shows you the probabilities. It searches <strong>your own knowledge bases</strong>, cites its sources, and runs entirely on your Mac or Windows PC.</p>
       <div class="ctas">
         <a class="btn primary" href="https://github.com/shoocstorm/andai/releases/latest"><svg class="icon"><use href="#i-download"/></svg>Download for macOS or Windows</a>
+        <a class="btn ghost" href="https://andai-agent.web.app">Try the web demo <svg class="icon"><use href="#i-arrow"/></svg></a>
         <a class="btn ghost" href="#how">See how it works <svg class="icon"><use href="#i-arrow"/></svg></a>
       </div>
-      <p class="fine">macOS (Apple Silicon and Intel) · Windows 10/11 x64 · Tested on macOS 26</p>
+      <p class="fine">macOS (Apple Silicon and Intel) · Windows 10/11 x64 · Tested on macOS 26<br />The web demo runs the chat in your browser; knowledge bases are desktop-only.</p>
 
       <div class="shot-stage">
         <div class="window">
@@ -280,11 +282,11 @@
         </div>
         <div class="grid">
           <article class="card"><div class="ic" style="color:var(--blue)"><svg class="icon"><use href="#i-cpu"/></svg></div><h3>On-device model</h3><p>Qwen3 runs inside the app: natively on the GPU with MLX on Apple Silicon Macs, with llama.cpp and WebGPU everywhere else. Download once, then work fully offline.</p></article>
-          <article class="card"><div class="ic" style="color:var(--violet)"><svg class="icon"><use href="#i-db"/></svg></div><h3>Knowledge from your files</h3><p>Drop in PDFs, Markdown, text, CSV or code. They're indexed into a local knowledge graph that follows headings, pages and symbols. Or start with a built-in sample and its suggested questions.</p></article>
+          <article class="card"><div class="ic" style="color:var(--violet)"><svg class="icon"><use href="#i-db"/></svg></div><h3>Knowledge from your files</h3><p>Drop in PDFs, Markdown, text, CSV or code. <a href="https://ultra-graph.web.app">ug (UltraGraph)</a> indexes them into a local semantic knowledge graph that follows headings, pages and symbols. Or start with a built-in sample and its suggested questions.</p></article>
           <article class="card"><div class="ic" style="color:var(--green)"><svg class="icon"><use href="#i-file"/></svg></div><h3>Cited, grounded answers</h3><p>Answers cite passages as [1], [2], each matched to a source you can see. If your documents don't say, Andai tells you.</p></article>
           <article class="card"><div class="ic" style="color:var(--amber)"><svg class="icon"><use href="#i-trace"/></svg></div><h3>Live execution trace</h3><p>Watch each step (analyze, retrieve, assemble, generate) with timings, sources, tokens per second and context use.</p></article>
           <article class="card"><div class="ic" style="color:var(--blue)"><svg class="icon"><use href="#i-user"/></svg></div><h3>A persona you control</h3><p>Edit the system prompt, pick a tone, tune temperature and length. Auto-optimize has the local model rewrite your prompt.</p></article>
-          <article class="card"><div class="ic" style="color:var(--violet)"><svg class="icon"><use href="#i-flow"/></svg></div><h3>Tools over your knowledge</h3><p>The agent picks its own read-only ug tools (search, read lines, file outline, symbol context, find usages and more), writes its own search phrases, and shows every choice with its probability. You set each tool to Auto, Ask or Off.</p></article>
+          <article class="card"><div class="ic" style="color:var(--violet)"><svg class="icon"><use href="#i-flow"/></svg></div><h3>Decided by Laya, run by tools</h3><p>No free-form tool calls: Laya, a dedicated decision model, scores every option in one forward pass — about 10 ms (SemIf-style, measured on an Apple M5 Max) — then a read-only ug tool runs: search, read lines, symbol context and more. Every probability lands in the trace; you set each tool to Auto, Ask or Off.</p></article>
         </div>
       </div>
     </section>
@@ -381,7 +383,7 @@
           <div>
             <span class="label blue"><svg class="icon" style="width:14px;height:14px;vertical-align:-2px"><use href="#i-shield"/></svg> Privacy by architecture</span>
             <h2>Nothing to trust us with.</h2>
-            <p style="color:var(--text-2);margin:0 0 18px">Andai has no servers. There's nothing to sign up for and nothing that phones home: no telemetry, analytics or accounts.</p>
+            <p style="color:var(--text-2);margin:0 0 18px">Andai has no servers. There's nothing to sign up for and nothing that phones home: no telemetry or accounts. That's the desktop app. The browser demo at <a href="https://andai-agent.web.app">andai-agent.web.app</a> additionally loads Google Analytics; the desktop app never does.</p>
             <ul class="ticks">
               <li><svg class="icon"><use href="#i-check"/></svg>The model runs inside the app</li>
               <li><svg class="icon"><use href="#i-check"/></svg>Documents are indexed on your computer</li>
@@ -413,9 +415,10 @@
         <div class="faq">
           <details><summary>Do I need an internet connection?</summary><p>Only to download a model the first time (980 MB for Qwen3 1.7B · MLX on an Apple Silicon Mac, 639 MB for Qwen3 0.6B). After that Andai works fully offline.</p></details>
           <details><summary>Can I try it without my own documents?</summary><p>Yes. The Knowledge screen offers three sample knowledge bases about a made-up ferry operator: its documents, its code, or both. One click indexes a sample on your computer in a few seconds, and the chat suggests questions it can answer.</p></details>
+          <details><summary>Is there a web version?</summary><p>Yes — an initial browser build is live at <a href="https://andai-agent.web.app">andai-agent.web.app</a>. The model runs in your browser and you can chat right away, but knowledge bases are desktop-only: indexing uses the native <a href="https://ultra-graph.web.app">ug</a> engine, which a web page can't run. The desktop app has no analytics; the browser demo loads Google Analytics.</p></details>
           <details><summary>Which computers does it run on?</summary><p>Andai is built for macOS, with separate builds for Apple Silicon and Intel, and for Windows 10 and 11 (x64). It's tested on macOS 26 on Apple Silicon. The Intel Mac build hasn't been tested on hardware yet, and the Windows build has only run through automated tests so far, not on a Windows PC. Windows needs the Microsoft Edge WebView2 runtime, which comes with Windows 11. On Apple Silicon Macs, the MLX models run natively on the GPU and are several times faster: Qwen3 1.7B writes about 350 tokens/s instead of 30–65, and starts answering in about 60 ms instead of 3 s (measured on an Apple M5 Max). You can also try a Laya decision model, which picks each next step in about 10 ms instead of about 0.6 s (measured on an Apple M5 Max); it can also drop retrieved passages that don't help, so the chat model has less to read.</p></details>
           <details><summary>What files can I add to a knowledge base?</summary><p>PDF, Markdown, plain text, CSV, and source code (TypeScript, JavaScript, Python, Java, Rust). Andai works on copies, so your originals are never changed.</p></details>
-          <details><summary>What do I need for knowledge bases?</summary><p>Indexing uses <a href="https://github.com/shoocstorm/ug">ug</a>, a local knowledge-graph engine. Install the <code>ug</code> CLI (for example in <code>~/.local/bin</code>, or anywhere on your PATH) and Andai finds it automatically.</p></details>
+          <details><summary>What do I need for knowledge bases?</summary><p>Indexing uses <a href="https://ultra-graph.web.app">ug (UltraGraph)</a>, a local knowledge-graph engine (<a href="https://github.com/shoocstorm/ug">source</a>). Install the <code>ug</code> CLI with <code>curl -fsSL https://ultra-graph.web.app/install.sh | sh</code> (or download it from <a href="https://github.com/shoocstorm/ug/releases/latest">Releases</a>), anywhere on your PATH, and Andai finds it automatically.</p></details>
           <details><summary>How good is a model that runs on a laptop?</summary><p>Small models like Qwen3 are fast and private, but less capable than large cloud models. Grounding answers in your own documents, with citations you can check, closes much of that gap for everyday questions.</p></details>
           <details><summary>macOS or Windows won't open the app.</summary><p>Current builds aren't signed yet. On macOS, right-click <code>Andai.app</code> and choose <em>Open</em>, or run <code>xattr -dr com.apple.quarantine /Applications/Andai.app</code>. On Windows, if SmartScreen warns, choose <em>More info</em> → <em>Run anyway</em>.</p></details>
           <details><summary>Are workflows and tools real?</summary><p>The knowledge-base tools are real: the agent chooses among eight read-only ug tools over your knowledge base, with your approval for any tool you set to Ask, and every call is in the Execution Trace. The Workflows screens are still a clearly labeled, simulated preview of what's coming.</p></details>
@@ -430,6 +433,7 @@
       <p class="lede" style="margin-bottom:30px">Download Andai, load a model, and ask your first question in minutes.</p>
       <div class="ctas">
         <a class="btn primary" href="https://github.com/shoocstorm/andai/releases/latest"><svg class="icon"><use href="#i-download"/></svg>Download for macOS or Windows</a>
+        <a class="btn ghost" href="https://andai-agent.web.app">Try the web demo</a>
         <a class="btn ghost" href="https://github.com/shoocstorm/andai/blob/main/docs/features.md">Read the feature guide</a>
       </div>
     </div>
@@ -437,12 +441,13 @@
 
   <footer>
     <div class="wrap">
-      <span><b class="grad" style="font-family:var(--font-display)">ANDAI</b> — a local-first agentic RAG agent</span>
+      <span><b class="grad" style="font-family:var(--font-display)">ANDAI</b> — a local-first agentic RAG agent, decided by Laya</span>
       <span class="spacer"></span>
       <a href="https://github.com/shoocstorm/andai/releases">Releases</a>
+      <a href="https://andai-agent.web.app">Web demo</a>
       <a href="https://github.com/shoocstorm/andai/blob/main/docs/features.md">Features</a>
       <a href="https://github.com/shoocstorm/andai">Source</a>
-      <span>Built with MLX · wllama · ug · Tauri</span>
+      <span>Built with MLX · wllama · <a href="https://ultra-graph.web.app">ug (UltraGraph)</a> · Tauri</span>
     </div>
   </footer>
 

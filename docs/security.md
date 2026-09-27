@@ -116,6 +116,14 @@ base (see *Agentic retrieval* in [features.md](features.md)).
   same way, by the app's native side: each file is written to a temporary
   name while it downloads and only kept once its size and sha256 match; if
   any file is off, the whole download is deleted.
+- **Models you add from Hugging Face** are pinned to the version you picked
+  and checked by sha256 like the built-in ones; only public models, and only
+  file formats that can't run code (GGUF, safetensors, JSON). For MLX models
+  the app's native side also checks every file name, size and the model's
+  configuration before downloading, and keeps its own record of the files,
+  which it re-checks before loading. Searching sends only your search text
+  to huggingface.co, with no cookies or account. A pinned, verified model can
+  still be a bad model: Andai hasn't reviewed third-party models.
 - **Sample knowledge bases** ship inside the app. Adding one copies its
   bundled files like your own; nothing is downloaded.
 - The check runs once per download. On a recent Apple Silicon Mac it took

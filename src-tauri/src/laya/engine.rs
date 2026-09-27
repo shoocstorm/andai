@@ -159,7 +159,7 @@ mod tests {
             .join(".cache/huggingface/hub")
             .join(format!("models--{}", c.repo.replace('/', "--")))
             .join("snapshots")
-            .join(c.commit)
+            .join(&*c.commit)
     }
 
     fn fixture() -> Value {
