@@ -6,7 +6,7 @@
 
 import { kbSearch, type SearchHit } from '../kb/api';
 import { budgets, buildHistory, buildSystem, CHARS_PER_TOKEN, keywords, planPassages, type ContextRecord } from './prompt';
-import { chat, isAbort, loadedModel, type ChatMessage } from '../llm/engine';
+import { chat, deciderLaya, isAbort, loadedModel, type ChatMessage } from '../llm/engine';
 import {
   addMessage,
   patchMessage,
@@ -22,7 +22,7 @@ import { recordSearch, useKb } from '../state/kb';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { runAgent } from './loop';
-import { checkRelevance, KEEP_TOP } from './relevance';
+import { checkRelevance, KEEP_TOP, scoringRequest, type PassageScorer } from './relevance';
 import { checkClaims, supportSummary } from './claims';
 import { decidesWithLaya } from '../llm/decide';
 
@@ -105,12 +105,15 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
     let hits: SearchHit[] = [];
     let searched = true;
     let clarify = false;
+    // The agent loop's passage scores, reused by the relevance check.
+    let scorer: PassageScorer | null = null;
     if (agent) {
       patchStep(id, 'plan', { status: 'running' });
       const res = await runAgent({ msgId: id, prompt, history, kb, k: kbState.k, maxChars: kbState.maxChars, signal, seed: opts.seed });
       hits = res.hits;
       searched = res.calls > 0;
       clarify = res.clarify;
+      scorer = res.scorer;
       patchMessage(id, { sources: hits });
       patchStep(id, 'plan', {
         status: 'done',
@@ -151,7 +154,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
       } else {
         patchStep(id, 'filter', { status: 'running', detail: `Scoring ${hits.length} passages…` });
         try {
-          const r = await checkRelevance(prompt, hits);
+          const r = await checkRelevance(scoringRequest(prompt, history), hits, scorer, deciderLaya()?.input.tokens);
           if (r) {
             hits = r.hits;
             // Sources are numbered as the prompt cites them, so they're set after the check.

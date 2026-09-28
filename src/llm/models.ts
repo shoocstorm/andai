@@ -219,7 +219,18 @@ export const recommendedModel = (mlx: boolean): ModelDef => modelById(mlx ? 'qwe
  * Rust catalog, which verifies every download; this is how they're shown.
  * Timings measured with `bun run test:laya` on an M5 Max (2026-09-26).
  */
-export type LayaDef = { id: string; name: string; family: string; note: string };
+export type LayaDef = {
+  id: string;
+  name: string;
+  family: string;
+  note: string;
+  /**
+   * Its input, in tokens (the checkpoint's `max_len`), and the most the question
+   * and options take of it (`head_max_len`); the state gets the rest and is cut
+   * from the end (src-tauri/src/laya/prompt.rs). Fixed by the pinned commit.
+   */
+  input: { tokens: number; head: number };
+};
 
 export const LAYA_MODELS: LayaDef[] = [
   {
@@ -227,12 +238,14 @@ export const LAYA_MODELS: LayaDef[] = [
     name: 'Laya Multilingual',
     family: 'mmBERT-base · 322M params · FP16',
     note: 'Decides in about 10 ms. Reads up to 1,024 tokens, in any language.',
+    input: { tokens: 1024, head: 256 },
   },
   {
     id: 'laya-en',
     name: 'Laya English',
     family: 'ModernBERT-large · 421M params · FP16',
     note: 'Decides in about 20 ms. English only, reads up to 512 tokens.',
+    input: { tokens: 512, head: 192 },
   },
 ];
 

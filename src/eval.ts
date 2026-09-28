@@ -55,6 +55,8 @@ function report(c: EvalCase, msg: Message | undefined, error: string | null, ms:
         // Laya: its own (Rust) time, apart from IPC, and its stop answer
         modelMs: a.decision.io?.response?.laya?.ms ?? null,
         stop: a.decision.stop?.probability ?? null,
+        truncated: a.decision.truncated ?? false,
+        stateChars: a.decision.io?.request.state?.length ?? null,
       },
       call: a.call && {
         tool: a.call.tool,
@@ -68,6 +70,10 @@ function report(c: EvalCase, msg: Message | undefined, error: string | null, ms:
         observation: a.call.observation ?? null,
         hits: a.call.hits ?? 0,
         ms: a.call.ms ?? null,
+        // Laya's scores for what it returned (item 15): read by the next decision.
+        scored: a.call.scored
+          ? { ms: a.call.scored.ms, rows: a.call.scored.rows, error: a.call.scored.error ?? null, items: a.call.scored.items.map(({ source, score, chunks, inputTokens, truncated }) => ({ source, score, chunks, inputTokens, truncated })) }
+          : null,
       },
     })),
     sources: (msg?.sources ?? []).map((h) => `${h.file}:${h.start_line}-${h.end_line}`),
@@ -75,7 +81,7 @@ function report(c: EvalCase, msg: Message | undefined, error: string | null, ms:
       ? {
           ms: msg.relevance.ms,
           tokensSaved: msg.relevance.tokensSaved,
-          items: msg.relevance.items.map((x) => ({ source: `${x.file}:${x.start_line}-${x.end_line}`, score: x.score, kept: x.kept })),
+          items: msg.relevance.items.map((x) => ({ source: `${x.file}:${x.start_line}-${x.end_line}`, score: x.score, kept: x.kept, inputTokens: x.inputTokens, truncated: x.truncated })),
         }
       : null,
     support: msg?.support ? { ms: msg.support.ms, items: msg.support.items.map(({ n, sentence, score, flagged }) => ({ n, sentence, score, flagged })) } : null,

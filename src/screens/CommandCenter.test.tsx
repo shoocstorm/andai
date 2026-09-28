@@ -360,6 +360,38 @@ describe('Command Center (agent mode)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); // after its exit animation
   });
 
+  it('shows Laya’s scores for what a tool call found, the pieces of a long passage, and a failed scoring', async () => {
+    const user = userEvent.setup();
+    const scored = {
+      model: 'Laya English',
+      ms: 41,
+      rows: 4,
+      items: [
+        { source: 'fleet.md:10-37', name: 'Dry-dock schedule', score: 0.82, chunks: 3, inputTokens: 480, truncated: false },
+        { source: 'log.md:1-5', name: 'Incident log', score: 0.03, chunks: 1, inputTokens: 120, truncated: true },
+      ],
+    };
+    turn([
+      { id: 's1', index: 0, at: 0, decision, action: 'kb_search', call: call({ observation: '2 passage(s): Dry-dock schedule; Incident log', scored }) },
+      { id: 's2', index: 1, at: 0, decision, action: 'kb_search', call: call({ observation: '1 passage(s)', scored: { model: 'Laya English', ms: 0, rows: 0, items: [], error: 'No Laya model is loaded.' } }) },
+    ]);
+    render(<CommandCenter />);
+    const trace = within(screen.getByText('Execution Trace').closest('aside')!);
+    await user.click(trace.getAllByRole('button', { name: 'Tool call' })[0]);
+    let dialog = within(screen.getByRole('dialog', { name: 'Tool call, step 1' }));
+    expect(dialog.getByText('Scored by Laya English')).toBeInTheDocument();
+    expect(dialog.getByText('2 passages in 4 pieces · 41 ms · most useful: “Dry-dock schedule” (82% likely to help)')).toBeInTheDocument();
+    expect(within(dialog.getByRole('list', { name: 'Passage scores' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'fleet.md:10-37 · 82% · best of 3 pieces',
+      'log.md:1-5 · 3% · cut to fit',
+    ]);
+    await user.click(dialog.getByRole('button', { name: /^close$/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await user.click(trace.getAllByRole('button', { name: 'Tool call' })[1]);
+    dialog = within(screen.getByRole('dialog', { name: 'Tool call, step 2' }));
+    expect(dialog.getByText(/Couldn’t score these passages \(No Laya model is loaded\.\)/)).toBeInTheDocument();
+  });
+
   it('explains a tool call in a dialog: what happened, what it was given, what it ran and found', async () => {
     const user = userEvent.setup();
     const output = JSON.stringify({

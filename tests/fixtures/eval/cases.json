@@ -65,6 +65,37 @@
       "prompt": "What does it add for a vehicle?",
       "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"],
       "facts": ["18\\.5"]
-    }
+    },
+    { "id": "large-drydock-kestrel", "kb": "large", "prompt": "How often does MV Kestrel go into dry dock?", "first": ["kb_search"], "facts": ["30 months"] },
+    { "id": "large-lifejackets-osprey", "kb": "large", "prompt": "How many child lifejackets does the Osprey have to carry?", "first": ["kb_search"], "facts": ["20 ?%|20 percent", "12 infant|twelve infant"] },
+    { "id": "large-fuel-dunmere", "kb": "large", "prompt": "What is the minimum fuel reserve for a Dunmere crossing?", "first": ["kb_search"], "facts": ["40 ?%|40 percent"] },
+    { "id": "large-rest-deckhand", "kb": "large", "prompt": "How much rest does a deckhand need between shifts?", "first": ["kb_search"], "facts": ["13 hours"] },
+    { "id": "large-wheelchair-harlow", "kb": "large", "prompt": "How early do I need to ask for wheelchair assistance at Harlow, and which gangway will I use?", "first": ["kb_search"], "facts": ["36 hours", "gangway b"] },
+    { "id": "large-pets-kestrel", "kb": "large", "prompt": "Where does my dog travel on the Kestrel?", "first": ["kb_search"], "facts": ["kennel"] },
+    { "id": "large-drill-missed", "kb": "large", "prompt": "Which man-overboard drill missed its target in 2025, and by how much?", "first": ["kb_search"], "facts": ["q3-11", "40 seconds"] },
+    { "id": "large-night-crew", "kb": "large", "prompt": "What is the minimum crew on the Kestrel at night, and who must hold the night-navigation endorsement?", "first": ["kb_search"], "facts": ["\\b7\\b|seven", "chief officer"] },
+    { "id": "large-long-request-oxygen", "kb": "large", "prompt": "Hello! I'm planning a trip to Pellin Island next month with my father, who is 82 and has a lung condition. He's generally fine walking short distances, and we'll be travelling as foot passengers from Harlow on a weekday morning sailing, coming back two days later in the afternoon. We've never taken the ferry before, so I've been reading through everything on your website about check-in, luggage and the cafés on board, and I think we have most of it covered. He uses a portable oxygen concentrator at home, but for the trip his doctor would rather he brings medical oxygen in cylinders as a backup in case the concentrator's battery runs low. What I really need to know is this: how many oxygen cylinders is he allowed to bring on board, and how far ahead of the sailing do we have to tell you about them?", "first": ["kb_search"], "facts": ["(two|2) (oxygen )?cylinders", "24 hours"] },
+    {
+      "id": "large-followup-osprey-drydock",
+      "kb": "large",
+      "history": [
+        {
+          "role": "user",
+          "content": "How often does MV Kestrel go into dry dock?"
+        },
+        {
+          "role": "assistant",
+          "content": "MV Kestrel, Tidewater's vehicle ferry, is dry-docked every 30 months [1]. Dry-docking is planned for the quiet months between November and February, and never for two route vessels in the same winter, so the timetable can keep running with one route vessel and the relief vessel [1]. Vessels under 45 metres go to Pellin Slipway and longer ones to the Dunmere graving dock, and a period normally takes nine to fourteen days including the passage to the yard [1]. At every second visit the Kestrel's bow thruster tunnel is shot-blasted and recoated, which adds about four days [1]. Before it returns to service, the chief engineer signs it off after a sea trial with full astern and a crash-stop test [1]. Between dry-docks, a diver inspects its hull, propellers and rudders every 6 months [2]."
+        }
+      ],
+      "prompt": "And the Osprey?",
+      "first": [
+        "kb_search"
+      ],
+      "facts": [
+        "24 months"
+      ]
+    },
+    { "id": "large-unanswerable", "kb": "large", "prompt": "How much is a deckhand paid?", "first": ["kb_search"], "facts": ["$notFound"] }
   ]
 }

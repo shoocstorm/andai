@@ -4,12 +4,12 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error — plain ESM script without type declarations
-import { diffCases, factRegexes, loadCases, scoreCase, scorecard } from '../../scripts/eval-lib.mjs';
+import { diffCases, factRegexes, loadCases, scoreCase, scorecard, scorecardByKb } from '../../scripts/eval-lib.mjs';
 
 const { notFound, cases } = loadCases(resolve(import.meta.dirname, '../fixtures/eval/cases.json'));
 
-type Step = { action: string; fallback?: string | null; decision?: { ms: number; promptTokens: number | null } | null; call?: Record<string, unknown> | null };
-const record = (over: { steps?: Step[]; answer?: string; sources?: string[]; error?: string | null; ms?: number } = {}) => ({
+type Step = { action: string; fallback?: string | null; decision?: { ms: number; promptTokens: number | null; truncated?: boolean } | null; call?: Record<string, unknown> | null };
+const record = (over: { steps?: Step[]; answer?: string; sources?: string[]; error?: string | null; ms?: number; relevance?: unknown } = {}) => ({
   id: 'q',
   ms: 2000,
   error: null,
@@ -27,22 +27,23 @@ const q = { id: 'q', kb: 'docs', prompt: '?', first: ['kb_search'], facts: ['48'
 const call = (over: Record<string, unknown> = {}) => ({ tool: 'kb_search', status: 'done', args: { query: 'x' }, argsFallback: false, hits: 2, error: null, observation: '', ...over });
 
 describe('agent eval question set', () => {
-  it('has 20–40 questions with unique ids, a known KB, expected first actions and valid regexes', () => {
+  it('has 20–50 questions with unique ids, a known KB, expected first actions and valid regexes', () => {
     // Items add questions that exercise what they change (docs/agentic-rag-improvements.md);
-    // past 40 a run takes long enough that it stops being run before every change.
+    // past 50 a run takes long enough that it stops being run before every change
+    // (45 questions: about a minute on the native engine with Laya, item 15).
     expect(cases.length).toBeGreaterThanOrEqual(20);
-    expect(cases.length).toBeLessThanOrEqual(40);
+    expect(cases.length).toBeLessThanOrEqual(50);
     expect(new Set(cases.map((c: { id: string }) => c.id)).size).toBe(cases.length);
     for (const c of cases) {
-      expect(['docs', 'code', 'mixed']).toContain(c.kb);
+      expect(['docs', 'code', 'mixed', 'large']).toContain(c.kb);
       expect(c.first.length).toBeGreaterThan(0);
       expect(() => factRegexes(c, notFound)).not.toThrow();
     }
   });
 
-  it('covers documents, code, mixed, small talk, follow-ups and an unanswerable question', () => {
+  it('covers documents, code, mixed, long documents, small talk, follow-ups and an unanswerable question', () => {
     const kbs = new Set(cases.map((c: { kb: string }) => c.kb));
-    expect([...kbs].sort()).toEqual(['code', 'docs', 'mixed']);
+    expect([...kbs].sort()).toEqual(['code', 'docs', 'large', 'mixed']);
     expect(cases.some((c: { first: string[] }) => c.first.includes('answer_now'))).toBe(true);
     expect(cases.some((c: { history?: unknown[] }) => c.history?.length)).toBe(true);
     expect(cases.some((c: { facts: string[] }) => c.facts.includes('$notFound'))).toBe(true);
@@ -116,6 +117,30 @@ describe('scorecard', () => {
       msPerDecision: 600,
       promptTokensPerDecision: 300,
     });
+  });
+});
+
+describe('Laya input cuts and the per-KB scorecard', () => {
+  it('counts decisions and scored passages that were cut to fit, and splits the scorecard by knowledge base', () => {
+    const cut = { truncated: true };
+    const a = scoreCase(
+      q,
+      record({
+        steps: [
+          { action: 'kb_search', decision: { ms: 10, promptTokens: 512, ...cut }, call: { tool: 'kb_search', status: 'done', hits: 2, scored: { items: [cut, { truncated: false }] } } },
+          { action: 'answer_now', decision: { ms: 10, promptTokens: 300 } },
+        ],
+        relevance: { items: [cut] },
+      }),
+      notFound,
+    );
+    expect(a).toMatchObject({ decisionsCut: 1, passagesCut: 2 });
+    const b = scoreCase({ ...q, id: 'b', kb: 'large' }, record(), notFound);
+    const card = scorecard([a, b]);
+    expect(card).toMatchObject({ decisionsCut: 1, passagesCut: 2, maxPromptTokensPerDecision: 512 });
+    const by = scorecardByKb([a, b]);
+    expect(Object.keys(by)).toEqual(['docs', 'large']);
+    expect(by.large).toMatchObject({ questions: 1, decisionsCut: 0 });
   });
 });
 

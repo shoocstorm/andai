@@ -9,6 +9,8 @@
 
 import { kbTool, type KbInfo, type SearchHit } from '../kb/api';
 import { countMatches } from '../kb/match';
+import { deciderLaya } from '../llm/engine';
+import { layaById } from '../llm/models';
 import { decide, decidesWithLaya, DecisionError, layaChoices, seededShuffle, type ArgChoice, type ArgPick, type Decision, type DecisionOption } from '../llm/decide';
 import {
   addAgentStep,
@@ -24,7 +26,8 @@ import {
 import { recordSearch } from '../state/kb';
 import { recordToolRun, requestApproval, useTools } from '../state/tools';
 import { addEvidence, mergeEvidence, type Found } from './evidence';
-import { agentState, needsLookup, type Observation } from './prompt';
+import { agentState, LAYA_CHARS_PER_TOKEN, needsLookup, type Observation, type StatePassage } from './prompt';
+import { DROP_BELOW, PassageScorer, passageText, scoringRequest, shownLines } from './relevance';
 import { fillArgs, parseObject } from './tools/argfill';
 import { available, policyOf } from './tools/registry';
 import { needsSymbol, SYMBOL_TYPES } from './tools/ug';
@@ -55,6 +58,14 @@ export const QUESTION = 'What should the assistant do next to fulfil the user’
 export const STOP = 'The tool results above already contain the information needed to answer the user’s request.';
 /** Answer when Laya says the results suffice at least this likely. */
 export const STOP_AT = 0.5;
+/**
+ * …and some passage found so far scores at least this (relevance.ts). The
+ * stop question reads one state for all results; each passage is scored in
+ * its own row, whole, so a "yes" when none of them helps is overruled (item 15).
+ */
+export const STOP_EVIDENCE = 0.5;
+/** A clipped passage scoring at least this is read whole before answering (`readWhole`, item 15). */
+export const READ_WHOLE_AT = 0.3;
 
 /** A tool that failed or found nothing may be retried (rephrased) up to this many calls per turn. */
 const MAX_CALLS_PER_TOOL = 2;
@@ -92,7 +103,18 @@ export const symbolsIn = (hits: SearchHit[]) => [...new Set(hits.filter((h) => S
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_CONSECUTIVE_ERRORS = 2;
 
-export type AgentResult = { hits: SearchHit[]; clarify: boolean; calls: number };
+/**
+ * Passages the argument writer reads, and the most of each: enough to write a
+ * follow-up query or pick a range. A Laya decision reads none: with the best
+ * passages' text in its state it stopped sooner and found fewer facts (item 15).
+ */
+const ARG_PASSAGES = 2;
+const ARG_PASSAGE_CHARS = 500;
+/** Tokens kept free of Laya's input besides the question and options' share (special tokens, estimate error). */
+const LAYA_SPARE_TOKENS = 16;
+
+/** `scorer` holds Laya's passage scores (with a Laya decider), for the relevance check to reuse. */
+export type AgentResult = { hits: SearchHit[]; clarify: boolean; calls: number; scorer: PassageScorer | null };
 
 type LoopInput = {
   msgId: string;
@@ -189,16 +211,60 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
   let consecutiveErrors = 0;
   let calls = 0;
   let index = 0;
+  // A passage read whole before answering (at most once a turn), then the answer.
+  let readWholeDone = false;
+  let answerNext = false;
 
-  const state = () =>
-    agentState({
-      prompt,
-      history,
-      kb: { name: kb.name, kind, nodes: kb.nodes, files: kb.sources.length },
-      observations,
-      step: calls,
-      maxSteps: settings.maxSteps,
-    });
+  // With Laya deciding, every passage is scored as a tool returns it
+  // (relevance.ts): each is read whole in its own row, however much the tools
+  // returned, and the scores steer the next decision (item 15).
+  const laya = deciderLaya();
+  const scorer = laya ? new PassageScorer(scoringRequest(prompt, history), laya.input.tokens) : null;
+  const base = () => ({
+    prompt,
+    history,
+    kb: { name: kb.name, kind, nodes: kb.nodes, files: kb.sources.length },
+    observations,
+    step: calls,
+    maxSteps: settings.maxSteps,
+  });
+  /** The passages found so far: by Laya's score, clear misses left out, or as found without scores. */
+  const passages = (n: number): StatePassage[] => {
+    const all = hits().map((h) => ({ h, s: scorer?.get(h) }));
+    const ranked = scorer ? all.filter((x) => x.s && x.s.score >= DROP_BELOW).sort((a, b) => b.s!.score - a.s!.score) : all;
+    return ranked.slice(0, n).map(({ h, s }) => ({
+      name: h.name || h.file,
+      source: `${h.file}:${h.start_line}-${h.end_line}`,
+      score: s?.score ?? null,
+      text: s?.best ?? passageText(h),
+      shows: shownLines(h),
+    }));
+  };
+  // What a decision reads. Laya cuts its input from the end, where the newest
+  // results are, so the state is fitted to it instead. Whether the results
+  // hold the answer is judged per passage, each read whole in its own row
+  // (the scores on the result lines, `STOP_EVIDENCE`, `READ_WHOLE_AT`),
+  // not from their text in this state (item 15).
+  const decisionState = () =>
+    laya ? agentState({ ...base(), budget: { tokens: laya.input.tokens - laya.input.head - LAYA_SPARE_TOKENS, charsPerToken: LAYA_CHARS_PER_TOKEN } }) : agentState(base());
+  // What the argument writer reads: the chat model has room for the passages' text.
+  const argState = () => agentState({ ...base(), passages: passages(ARG_PASSAGES), passageChars: ARG_PASSAGE_CHARS });
+  /** The best score of any passage so far; null without scores. */
+  const bestScore = () => {
+    const xs = hits().flatMap((h) => scorer?.get(h)?.score ?? []);
+    return xs.length ? Math.max(...xs) : null;
+  };
+  /**
+   * The passage to read whole before answering: the best-scoring one that the
+   * tool clipped (a search passage gets a share of the result budget, so a
+   * long section's end is cut off), or without scores the first clipped
+   * search passage. Its whole node, as Read lines takes it.
+   */
+  const clippedPassage = (): { hit: SearchHit; range: string; score: number | null } | null => {
+    const clipped = found.filter((f) => f.tool === 'kb_search' && shownLines(f.hit) && f.hit.end_line - f.hit.start_line < 400).map((f) => ({ hit: f.hit, score: scorer?.get(f.hit)?.score ?? null }));
+    const pick = scorer ? clipped.filter((c) => c.score != null && c.score >= READ_WHOLE_AT).sort((a, b) => b.score! - a.score!)[0] : clipped[0];
+    return pick ? { ...pick, range: `${pick.hit.file}:${pick.hit.start_line}-${pick.hit.end_line}` } : null;
+  };
   // What a `file` argument may name: indexed sources, then files the tools have shown.
   const knownFiles = () => [
     ...new Set([
@@ -215,6 +281,10 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
 
   while (true) {
     if (signal.aborted) throw aborted();
+    if (answerNext) {
+      step({ decision: null, action: ANSWER, note: 'Answering, with the passage read whole.' });
+      break;
+    }
     const tools = offered(available(kind, settings.policies), usage, denied);
     if (calls >= settings.maxSteps) {
       step({ decision: null, action: ANSWER, note: `Reached the limit of ${settings.maxSteps} tool calls for one turn.` });
@@ -253,7 +323,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
         const options = decisionOptions(tools, seed + index, found.length > 0);
         const withLaya = decidesWithLaya();
         const stopCheck = found.length > 0 && withLaya;
-        const d = await decide(state(), QUESTION, stopCheck ? options.filter((o) => o.id !== ANSWER) : options, signal, {
+        const d = await decide(decisionState(), QUESTION, stopCheck ? options.filter((o) => o.id !== ANSWER) : options, signal, {
           ...(stopCheck ? { stop: STOP } : {}),
           // Enum arguments ride in the same pass, a few ms, in case their tool is chosen.
           ...(withLaya ? { choices: argChoices(tools) } : {}),
@@ -262,8 +332,13 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
         picks = d.picks ?? [];
         action = d.chosen;
         if (d.stop && d.stop.probability >= STOP_AT) {
-          action = ANSWER;
-          note = `The tool results cover the request (${Math.round(d.stop.probability * 100)}% likely), so answering.`;
+          const best = bestScore();
+          if (best != null && best < STOP_EVIDENCE) {
+            note = `The results looked sufficient (${Math.round(d.stop.probability * 100)}% likely), but no passage found so far clearly helps (the best scored ${Math.round(best * 100)}%), so looking further.`;
+          } else {
+            action = ANSWER;
+            note = `The tool results cover the request (${Math.round(d.stop.probability * 100)}% likely), so answering.`;
+          }
         }
         if (action !== ANSWER && action !== CLARIFY && !tools.some((t) => t.id === action)) {
           throw new Error(`chose “${action}”, which wasn't offered`);
@@ -301,10 +376,26 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       action = searchTool.id;
     }
 
+    // About to answer from a passage the tool cut short: the rest of its
+    // section may hold the answer, and neither the decision nor the answer can
+    // see past the cut. Read it whole first (item 15).
+    let given: Record<string, unknown> | null = null;
+    const reader = tools.find((t) => t.id === 'kb_read_lines');
+    const whole = action === ANSWER && !readWholeDone && reader && calls < settings.maxSteps ? clippedPassage() : null;
+    if (whole && reader) {
+      readWholeDone = true;
+      answerNext = true;
+      const shows = shownLines(whole.hit)!;
+      fallback = 'read-whole';
+      note = `${note ? `${note} ` : ''}First reading “${whole.hit.name || whole.hit.file}” whole${whole.score != null ? ` (${Math.round(whole.score * 100)}% likely to help)` : ''}: the search showed ${shows.lines} of its ${shows.of} lines.`;
+      action = reader.id;
+      given = { range: whole.range };
+    }
+
     if (action === ANSWER || action === CLARIFY) {
       step({ decision, action, note, fallback, failedDecision });
       progress(action === CLARIFY ? 'Asking a clarifying question' : `Answering · ${calls} tool call${calls === 1 ? '' : 's'}`);
-      return { hits: mergeEvidence(found), clarify: action === CLARIFY, calls };
+      return { hits: mergeEvidence(found), clarify: action === CLARIFY, calls, scorer };
     }
 
     const tool = tools.find((t) => t.id === action)!;
@@ -316,7 +407,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     const asked = argChoices([tool]);
     if (asked.length && mine.length < asked.length && decidesWithLaya()) {
       try {
-        const r = await layaChoices(state(), asked);
+        const r = await layaChoices(decisionState(), asked);
         mine = r.picks;
         pickModel = decision?.model ?? r.model;
       } catch {
@@ -346,7 +437,9 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     progress(`Step ${s.index + 1} · ${tool.title}: writing arguments…`);
     let args: Record<string, unknown>;
     try {
-      const fill = await fillArgs(tool, { state: state(), kind, known: { files: knownFiles(), symbols: symbolsIn(hits()), ranges: rangesIn(hits()) }, fixed, signal });
+      const fill = given
+        ? { ok: true as const, args: given, raw: JSON.stringify(given), attempts: 0, model: null }
+        : await fillArgs(tool, { state: argState(), kind, known: { files: knownFiles(), symbols: symbolsIn(hits()), ranges: rangesIn(hits()) }, fixed, signal });
       if (fill.ok) {
         args = fill.args;
         patch({ args, argsRaw: sameJson(fill.raw, args) ? null : fill.raw, argModel: fill.model, argAttempts: fill.attempts });
@@ -421,6 +514,31 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       const added = addEvidence(found, tool.id, ev.hits);
       used(tool.id, ev.hits.length);
       if (tool.id === 'kb_search') recordSearch(out.ms, ev.hits.length);
+      // Score what's new before the next decision reads it. A failed score
+      // costs only the passages' text in the state, as without Laya.
+      let scored: ToolCallRecord['scored'];
+      let best: Observation['best'];
+      if (scorer && ev.hits.length) {
+        progress(`Step ${s.index + 1} · ${tool.title}: scoring what it found…`);
+        try {
+          const r = await scorer.score(hits());
+          const mine = ev.hits.map((h) => found.find((f) => f.hit.id === h.id)?.hit ?? h).flatMap((h) => {
+            const x = scorer.get(h);
+            return x ? [{ h, x }] : [];
+          });
+          const top = mine.length ? mine.reduce((a, b) => (b.x.score > a.x.score ? b : a)) : null;
+          if (top) best = { name: top.h.name || top.h.file, score: top.x.score };
+          scored = {
+            model: layaById(scorer.model)?.name ?? scorer.model,
+            ms: r.ms,
+            rows: r.rows,
+            items: mine.map(({ h, x }) => ({ source: `${h.file}:${h.start_line}-${h.end_line}`, name: h.name, score: x.score, chunks: x.chunks, inputTokens: x.inputTokens, truncated: x.truncated })),
+          };
+        } catch (e) {
+          if (signal.aborted) throw aborted();
+          scored = { model: laya?.name ?? '', ms: 0, rows: 0, items: [], error: errText(e) };
+        }
+      }
       const text = typeof out.output === 'string' ? out.output : JSON.stringify(out.output, null, 2);
       patch({
         status: 'done',
@@ -431,11 +549,12 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
         observation: ev.summary,
         ...(tool.id === 'kb_search' ? { found: countMatches(ev.hits) } : {}),
         hits: added,
+        ...(scored ? { scored } : {}),
         endedAt: Date.now(),
         ms: out.ms,
       });
       recordToolRun(tool.id, Date.now() - started, true);
-      observations.push({ tool: tool.id, args, summary: ev.summary });
+      observations.push({ tool: tool.id, args, summary: ev.summary, ...(best ? { best } : {}) });
       consecutiveErrors = 0;
     } catch (e) {
       if (signal.aborted) throw aborted();
@@ -451,5 +570,5 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     }
   }
   progress(`Answering · ${calls} tool call${calls === 1 ? '' : 's'}`);
-  return { hits: mergeEvidence(found), clarify: false, calls };
+  return { hits: mergeEvidence(found), clarify: false, calls, scorer };
 }

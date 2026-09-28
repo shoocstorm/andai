@@ -113,24 +113,27 @@ can't measure is left out of the comparison and kept in the baseline.
 
 ### Agent eval: `bun run eval:agent`, section `agent-eval`
 
-Not a speed suite only: it scores what the agent *does* on 30 fixed
-questions (`tests/fixtures/eval/cases.json`) over three knowledge bases built
-from `tests/fixtures/eval/` (documents, code, both). Each question lists the
+Not a speed suite only: it scores what the agent *does* on 45 fixed
+questions (`tests/fixtures/eval/cases.json`) over four knowledge bases built
+from `tests/fixtures/eval/` (documents, code, both, and long documents whose
+results outgrow Laya's input; item 15). The scorecard is also split by
+knowledge base, and counts Laya inputs cut to fit. Each question lists the
 acceptable first actions and regexes the answer must match. The option
 shuffle is seeded and the answer is greedy (temperature 0), so a run is
 repeatable. It needs ug and the model, so it isn't part of `bun run check`.
-Recorded on Apple M5 Max · 18 cores · 128 GB with Qwen3 0.6B.
+Recorded on Apple M5 Max · 18 cores · 128 GB with Qwen3 0.6B, on the
+45-question set (2026-09-28; every setup's section was re-recorded then).
 
 | Metric | Baseline | Tolerance | What it is |
 |---|---|---|---|
-| `first-action-accuracy` | 96.3% | 1.1 (higher) | First action taken (after any fallback) is one the question allows |
-| `fact-hit-rate` | 83.3% | 1.1 (higher) | Answers that match every fact regex, over questions with facts |
-| `grounded-rate` | 56.5% | 1.1 (higher) | Answers with sources that cite at least one `[n]`, and only listed ones |
+| `first-action-accuracy` | 100% | 1.1 (higher) | First action taken (after any fallback) is one the question allows |
+| `fact-hit-rate` | 85.0% | 1.1 (higher) | Answers that match every fact regex, over questions with facts |
+| `grounded-rate` | 57.5% | 1.1 (higher) | Answers with sources that cite at least one `[n]`, and only listed ones |
 | `wasted-calls-per-question` | 0.00 | 1.5 + 0.2 | Tool calls that errored, came back empty, or were skipped as repeats |
-| `decisions-per-question` | 1.85 | 1.25 + 0.1 | Decision readouts per turn |
-| `seconds-per-question` | 3.84 s | 1.5 + 1 s | Whole turn, answer included |
-| `ms-per-decision` | 668 ms | 1.5 + 100 ms | One decision readout |
-| `prompt-tokens-per-decision` | 302 | 1.25 | Size of the decision prompt |
+| `decisions-per-question` | 1.09 | 1.25 + 0.1 | Decision readouts per turn |
+| `seconds-per-question` | 5.41 s | 1.5 + 1 s | Whole turn, answer included |
+| `ms-per-decision` | 792 ms | 1.5 + 100 ms | One decision readout |
+| `prompt-tokens-per-decision` | 337 | 1.25 | Size of the decision prompt |
 
 Other model setups have their own sections, `agent-eval:<answers>[+<decider>]`,
 recorded the same day: Qwen3 1.7B answering with 0.6B deciding scored 96.3%

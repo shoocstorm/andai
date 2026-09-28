@@ -36,6 +36,14 @@ describe('mergeEvidence', () => {
     expect(mergeEvidence(found).map((h) => h.id)).toEqual(['r1', 'u1', 's2']);
   });
 
+  it('drops a search passage when the same lines were read whole afterwards (item 15)', () => {
+    const found: Found[] = [
+      { tool: 'kb_search', hit: hit('s1', 'crew.md', 40, 54, 'Minimum crew (clipped)') },
+      { tool: 'kb_read_lines', hit: hit('r1', 'crew.md', 40, 54, 'Minimum crew, the whole section') },
+    ];
+    expect(mergeEvidence(found).map((h) => h.id)).toEqual(['r1']);
+  });
+
   it('keeps passages without line numbers, and the earlier of two reads of the same range', () => {
     const found: Found[] = [
       { tool: 'kb_overview', hit: hit('o', '(overview)', 0, 0, 'Kind: code') },

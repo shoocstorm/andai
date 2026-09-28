@@ -306,6 +306,22 @@ export function MatchBadge({ h, peers, compact = false }: { h: SearchHit; peers:
   );
 }
 
+/**
+ * Laya's scores for one call's passages in a line: how many rows it took (a
+ * long passage is scored in pieces, agent/relevance.ts), how long, and the
+ * one the next decision was told about.
+ */
+export function scoredLine(s: NonNullable<ToolCallRecord['scored']>): string {
+  const best = s.items.length ? s.items.reduce((a, b) => (b.score > a.score ? b : a)) : null;
+  const n = s.items.length;
+  return [
+    `${n} passage${n === 1 ? '' : 's'}${s.rows > n ? ` in ${s.rows} pieces` : ''} · ${s.ms} ms`,
+    best ? `most useful: “${best.name || best.source}” (${Math.round(best.score * 100)}% likely to help)` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 function ResultList({ hits }: { hits: SearchHit[] }) {
   if (!hits.length) return <div className="ag-small faint">No passages in the output.</div>;
   return (
@@ -458,6 +474,25 @@ export function ToolCallDialog({ s, open, onClose }: { s: AgentStep; open: boole
           {c.observation && (
             <Field k="What the agent saw next">
               <div className="ag-small selectable">{c.observation}</div>
+            </Field>
+          )}
+          {c.scored && (
+            <Field k={`Scored by ${c.scored.model || 'Laya'}`}>
+              {c.scored.error ? (
+                <div className="ag-small ag-note selectable">Couldn’t score these passages ({c.scored.error}); the next decision saw only the line above.</div>
+              ) : (
+                <>
+                  <div className="ag-small">{scoredLine(c.scored)}</div>
+                  <ul className="ag-small tc-scores" aria-label="Passage scores">
+                    {c.scored.items.map((x, i) => (
+                      <li key={i}>
+                        <span className="mono">{x.source}</span> · {Math.round(x.score * 100)}%{x.chunks > 1 ? ` · best of ${x.chunks} pieces` : ''}
+                        {x.truncated && <span className="ag-note"> · cut to fit</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </Field>
           )}
           {results && (

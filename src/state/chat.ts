@@ -81,6 +81,18 @@ export type ToolCallRecord = {
   found?: Found;
   /** Passages this call added to the answer's context, or added text to (agent/evidence.ts). */
   hits?: number;
+  /**
+   * Laya's scores for the passages this call returned, read by the next
+   * decision (agent/relevance.ts): each passage in pieces that fit a row
+   * (`chunks`), scored by its best one. `error` when scoring failed.
+   */
+  scored?: {
+    model: string;
+    ms: number;
+    rows: number;
+    items: { source: string; name: string; score: number; chunks: number; inputTokens: number; truncated: boolean }[];
+    error?: string;
+  };
 };
 
 /** One loop iteration: a decision, and the tool call it led to (none for answer/clarify). */
@@ -97,9 +109,10 @@ export type AgentStep = {
   /**
    * Set when the loop didn't take the decision as chosen: it wasn't trusted
    * (search once, or answer), or it picked a tool whose argument nothing has
-   * shown yet: a symbol (look symbols up first) or a line range (search first).
+   * shown yet: a symbol (look symbols up first) or a line range (search first);
+   * or it was about to answer from a passage the search had cut short (read it whole first).
    */
-  fallback?: 'low-confidence' | 'decision-failed' | 'needs-symbol' | 'needs-range';
+  fallback?: 'low-confidence' | 'decision-failed' | 'needs-symbol' | 'needs-range' | 'read-whole';
   /** A decision that was sent but couldn't be read: the error, its time and the call, when it got that far. */
   failedDecision?: { error: string; ms: number; model?: string; io?: DecisionIO };
   call?: ToolCallRecord;

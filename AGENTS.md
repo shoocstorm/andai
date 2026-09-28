@@ -132,8 +132,11 @@ Andai/
 [`decide` (llm/decide.ts: Laya via Rust `laya_decide`, else the wllama decision slot or chat model) → `fillArgs` (chat
 model, GBNF from the tool schema) → `validate` → policy gate (Auto / Ask →
 approval card) → `kbTool` (Rust `kb_tool` → `ug <cmd> --json`) →
-`tool.observe` → `addEvidence`] × up to `maxSteps` → `mergeEvidence` →
-relevance check (with Laya: `checkRelevance` drops passages scored < 0.10
+`tool.observe` → `addEvidence` → with Laya, `PassageScorer` scores the new
+passages (one `laya_relevance` row per passage, a long one in pieces)] ×
+up to `maxSteps`; before answering from a passage the search clipped, it is
+read whole → `mergeEvidence` →
+relevance check (with Laya: `checkRelevance` reuses the loop's scores and drops passages scored < 0.10
 past the top 2) → `buildSystem` (tool results fenced as passages) + `buildHistory` → `engine.chat` (native
 MLX `llm_generate`, streamed over a channel, or wllama) → answer → claim check (with Laya: `checkClaims`
 scores each `[n]`-cited sentence against its passage and notes those < 0.10 under the answer). Every decision and call
@@ -451,8 +454,36 @@ level defaults to *Ask*.
   probability wrong while looking plausible, so parity tests are mandatory.
 - **Laya's input budget:** options share `head_max_len` tokens (256
   multilingual, 192 English; each option at most 48), and the state gets the
-  rest of `max_len` (1024 / 512), cut from the end. The agent's ~476-token
-  state with 9 options fits both; `truncated` in the trace says when not.
+  rest of `max_len` (1024 / 512), cut from the end, which is where the newest
+  results are. So the decision state is fitted in TS instead (`agentState`'s
+  `budget`, from `LayaDef.input`): the request (up to half, a long one keeps
+  its start and end), the knowledge base and the step count always fit, then
+  the newest results, then the conversation. Laya's tokenizers read 4.1–4.3
+  characters per token of prose and 3.2–3.4 of paths and result lines; a
+  993-character state budgeted at 3.2 still overflowed Laya English, so
+  budgets use 2.9 (`LAYA_CHARS_PER_TOKEN`). `truncated` in the trace says
+  when something was cut anyway (an option longer than its share: 3
+  decisions in the item 15 eval).
+- **The decision never reads the results' text; each passage is scored
+  whole in its own row** (item 15, 2026-09-28). A state can't hold the
+  results (a search returns up to 6,000 characters, a read up to 8,000), and
+  putting the best passages' text in it made Laya's stop question say
+  "enough" sooner and cost facts. Instead `PassageScorer` asks Laya's
+  relevance question per passage as each tool returns (a passage longer than
+  a row is split into overlapping pieces, scored by the best), the result
+  line says which passage is most useful and how likely it helps, and the
+  loop overrules a "results suffice" when no passage scored ≥ 0.5
+  (`STOP_EVIDENCE`). The relevance check before the answer reuses the scores.
+- **ug search clips each passage to a share of the result budget** (about
+  750 characters with `k` 8 and 6,000 characters), so a long section's end,
+  and the fact in it, never reaches the decision or the answer: the item 15
+  eval's large-document misses were mostly this, not Laya's window. Before
+  answering from a clipped search passage (fewer than 80% of its node's
+  lines, scored ≥ 0.3 with Laya, or the first one without), the loop reads
+  that node whole with Read lines, once a turn (`read-whole` in the trace).
+- **Score a short follow-up with the question before it.** Against "And the
+  Osprey?" alone, an accessibility section scored 96% and the dry-dock
+  schedule 1% (`scoringRequest`).
 - **Laya agent eval (2026-09-26, `bun run eval:agent`, Qwen3 0.6B answering,
   34 questions, seed fixed; `eval/laya-*.json`):**
 
@@ -697,7 +728,7 @@ bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and r
 bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
 bun run perf             # bundle size (CI too) + micro-benchmarks vs. perf/baseline.json
 bun run bench:engine     # engine probe: GPU layers, threads, prompt and generation tok/s per wllama setting (needs a downloaded model); BENCH_MODEL=qwen3-1.7b-mlx for native MLX
-bun run eval:agent       # agent eval: 27 questions through the real agent → scorecard vs. perf/baseline.json (needs ug + model); read and compare reports with bun run eval:view
+bun run eval:agent       # agent eval: 45 questions (4 knowledge bases, one of long documents) through the real agent → scorecard vs. perf/baseline.json (needs ug + model); read and compare reports with bun run eval:view
 ```
 
 **Run the e2e tests with the default model, `qwen3-0.6b`** (don't set

@@ -48,6 +48,9 @@ export function scoreCase(c, r, notFound) {
     decisions: decisions.length,
     decisionMs: decisions.map((d) => d.ms),
     decisionPromptTokens: decisions.map((d) => d.promptTokens).filter((t) => t != null),
+    // Laya cuts what doesn't fit its input (AGENTS.md §2, Laya's input budget): decisions, and passages it scored.
+    decisionsCut: decisions.filter((d) => d.truncated).length,
+    passagesCut: [...(r.relevance?.items ?? []), ...calls.flatMap((x) => x.scored?.items ?? [])].filter((x) => x.truncated).length,
     seconds: r.ms / 1000,
     error: r.error,
   };
@@ -75,7 +78,16 @@ export function scorecard(scored) {
     secondsPerQuestion: mean(scored.map((s) => s.seconds)),
     msPerDecision: mean(scored.flatMap((s) => s.decisionMs)),
     promptTokensPerDecision: mean(scored.flatMap((s) => s.decisionPromptTokens)),
+    maxPromptTokensPerDecision: scored.some((s) => s.decisionPromptTokens.length) ? Math.max(...scored.flatMap((s) => s.decisionPromptTokens)) : null,
+    decisionsCut: sum('decisionsCut'),
+    passagesCut: sum('passagesCut'),
   };
+}
+
+/** The scorecard per knowledge base (`kb` key), so a question set that grew can still be compared by part. */
+export function scorecardByKb(scored) {
+  const kbs = [...new Set(scored.map((s) => s.kb))];
+  return Object.fromEntries(kbs.map((kb) => [kb, scorecard(scored.filter((s) => s.kb === kb))]));
 }
 
 /** Questions whose outcome differs between two reports: first action, its correctness, or the facts. */

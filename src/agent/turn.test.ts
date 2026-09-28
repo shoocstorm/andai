@@ -37,6 +37,7 @@ const agent = vi.hoisted(() => ({
   // layaChoices: the scope it picks on its own pass, or an error
   ownPick: 'focused' as string | Error,
   ownPasses: 0,
+  fillStates: [] as string[],
 }));
 
 vi.mock('../llm/decide', async (orig) => ({
@@ -84,7 +85,8 @@ vi.mock('../llm/decide', async (orig) => ({
 }));
 
 vi.mock('./tools/argfill', () => ({
-  fillArgs: async (tool: { id: string; schema: unknown }, ctx: { known?: { files?: string[]; symbols?: string[]; ranges?: string[] }; fixed?: Record<string, string> }) => {
+  fillArgs: async (tool: { id: string; schema: unknown }, ctx: { state: string; known?: { files?: string[]; symbols?: string[]; ranges?: string[] }; fixed?: Record<string, string> }) => {
+    agent.fillStates.push(ctx.state);
     agent.fillFixed.push(ctx.fixed);
     agent.fillFiles.push(ctx.known?.files);
     agent.fillSymbols.push(ctx.known?.symbols);
@@ -104,9 +106,12 @@ const rel = vi.hoisted(() => ({
   support: null as number[] | null,
   supportFail: null as Error | null,
   claims: [] as unknown[][],
+  /** Rows per layaRelevance call. */
+  calls: [] as number[],
 }));
 vi.mock('../llm/laya', () => ({
   layaRelevance: async (_request: string, passages: unknown[]) => {
+    rel.calls.push(passages.length);
     if (rel.fail) throw rel.fail;
     const scores = rel.scores ?? passages.map(() => 0.9);
     return { scores, inputTokens: scores.map(() => 100), truncated: scores.map(() => false), ms: 20, model: 'laya-multilingual' };
@@ -121,10 +126,11 @@ vi.mock('../llm/laya', () => ({
 
 vi.mock('../llm/engine', async () => {
   const { create } = await import('zustand');
-  const { MODELS } = await import('../llm/models');
+  const { MODELS, LAYA_MODELS } = await import('../llm/models');
   const useEngine = create(() => ({ tokPerSec: 42 as number | null }));
   return {
     useEngine,
+    deciderLaya: () => (agent.laya ? LAYA_MODELS[0] : null),
     loadedModel: () => (engine.loaded ? MODELS[0] : undefined),
     isAbort: (e: unknown) => e instanceof Error && e.name === 'AbortError',
     chat: async function* (messages: never, opts: { signal: AbortSignal } & Record<string, unknown>) {
@@ -184,7 +190,9 @@ const hit: SearchHit = {
   node_type: 'Concept',
   file: 'README.md',
   start_line: 11,
-  end_line: 33,
+  // Short enough not to count as clipped: a longer node with this one line
+  // would be read whole before answering (loop.ts, item 15).
+  end_line: 13,
   snippet: 'serve.json adds the COOP/COEP headers wllama needs',
 };
 
@@ -224,6 +232,7 @@ beforeEach(() => {
     fillFixed: [],
     ownPick: 'focused',
     ownPasses: 0,
+    fillStates: [],
   });
 });
 
@@ -371,7 +380,7 @@ describe('runTurn (fixed pipeline)', () => {
     await runTurn('headers?');
     const call = engine.seen[0];
     expect(call.messages[0].role).toBe('system');
-    expect(call.messages[0].content).toContain('[1] README.md (lines 11-33)');
+    expect(call.messages[0].content).toContain('[1] README.md (lines 11-13)');
     expect(call.messages.at(-1)).toEqual({ role: 'user', content: 'headers?' });
     expect(call.opts).toMatchObject({ temperature: 0.2, maxTokens: 300, thinking: true });
   });
@@ -478,12 +487,12 @@ describe('runTurn (agent mode)', () => {
     // counted by how ug found them, for the trace's one-line summary
     expect(call.found).toEqual({ total: 1, by: {} });
     expect(assistant().sources).toHaveLength(1);
-    expect(engine.seen[0].messages[0].content).toContain('[1] README.md (lines 11-33)');
+    expect(engine.seen[0].messages[0].content).toContain('[1] README.md (lines 11-13)');
     // the trace's "Assemble context" dialog shows exactly what was sent
     const ctx = assistant().context!;
     expect(ctx.system).toBe(engine.seen[0].messages[0].content);
     expect(ctx.messages.map((x) => x.role)).toEqual(engine.seen[0].messages.map((x) => x.role));
-    expect(ctx.passages).toEqual([expect.objectContaining({ n: 1, status: 'in', source: 'README.md:11-33' })]);
+    expect(ctx.passages).toEqual([expect.objectContaining({ n: 1, status: 'in', source: 'README.md:11-13' })]);
     expect(ctx.history).toEqual({ sent: 0, of: 0, chars: 0 });
     // the second decision saw the first result
     expect(agent.seenStates[1]).toContain('kb_search {"query":"wllama COOP COEP headers","scope":"broad"} → 1 passage');
@@ -520,10 +529,10 @@ describe('runTurn (agent mode)', () => {
   it('reads lines only around what was found: the hit padded by 20 lines', async () => {
     // A probe asked for lines 100–200 of a file it hadn't seen (docs/agentic-rag-improvements.md, item 3).
     agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_read_lines' }, { chosen: 'answer_now' }];
-    agent.fills.kb_read_lines = { range: 'README.md:1-53' };
+    agent.fills.kb_read_lines = { range: 'README.md:1-33' };
     await runTurn('what does the readme say about headers?');
-    expect(agent.fillRanges[1]).toEqual(['README.md:1-53']);
-    expect(agent.tool[1].call).toMatchObject({ tool: 'kb_get_code', file: 'README.md', start: 1, end: 53 });
+    expect(agent.fillRanges[1]).toEqual(['README.md:1-33']);
+    expect(agent.tool[1].call).toMatchObject({ tool: 'kb_get_code', file: 'README.md', start: 1, end: 33 });
   });
 
   it('searches first when Read lines is chosen before any line range turned up', async () => {
@@ -783,6 +792,118 @@ describe('runTurn (agent mode)', () => {
     expect(agent.ownPasses).toBe(1);
     expect(agent.fillFixed[0]).toEqual({ scope: 'focused' });
     expect(steps()[0].call!.argChoices?.[0]).toMatchObject({ arg: 'scope', value: 'focused', model: 'Laya Multilingual' });
+  });
+
+  describe('passages scored as they arrive (with Laya, item 15)', () => {
+    const fact = 'The Kestrel is dry-docked every 30 months.';
+    const long = { ...hit, id: 'long', name: 'Dry-dock schedule', file: 'fleet.md', start_line: 10, end_line: 37, snippet: fact };
+    const noise = { ...hit, id: 'noise', name: 'Incident log', file: 'log.md', start_line: 1, end_line: 5, snippet: 'On 2 February a vehicle rolled forward.' };
+    beforeEach(() => {
+      rel.scores = null;
+      rel.fail = null;
+      rel.calls = [];
+    });
+
+    it('tells the next decision which passage is most useful, in a state fitted to Laya’s input, without the passages’ text', async () => {
+      agent.laya = true;
+      agent.output = { kb_search: { items: [noise, long] } };
+      rel.scores = [0.03, 0.93];
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.9 }];
+      await runTurn('How often is the Kestrel dry-docked?');
+      const state = agent.seenStates[1];
+      expect(state).toContain('most useful: “Dry-dock schedule” (93% likely to help)');
+      // with the text, Laya stopped sooner and found fewer facts (item 15)
+      expect(state).not.toContain('<passage>');
+      expect(state).not.toContain(fact);
+      // Laya Multilingual: 1,024 tokens less the options' 256 and a spare 16, at 2.9 characters a token
+      expect(state.length).toBeLessThanOrEqual((1024 - 256 - 16) * 2.9);
+      expect(steps()[0].call!.scored).toMatchObject({ model: 'Laya Multilingual', rows: 2, items: [{ source: 'log.md:1-5', score: 0.03 }, { source: 'fleet.md:10-37', score: 0.93, chunks: 1 }] });
+    });
+
+    it('scores each passage once: the relevance check before the answer reuses the scores', async () => {
+      agent.laya = true;
+      const four = [1, 2, 3, 4].map((i) => ({ ...hit, id: `h${i}`, file: `f${i}.md`, snippet: `passage ${i}` }));
+      agent.output = { kb_search: { items: four } };
+      rel.scores = [0.9, 0.05, 0.01, 0.8];
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.9 }];
+      await runTurn('What headers does wllama need?');
+      expect(rel.calls).toEqual([4]);
+      expect(assistant().relevance!.items.map((x) => x.kept)).toEqual([true, true, false, true]);
+    });
+
+    it('decides as before when scoring fails: the call still counts, only the passages’ text is missing', async () => {
+      agent.laya = true;
+      agent.output = { kb_search: { items: [long] } };
+      rel.fail = new Error('No Laya model is loaded.');
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.9 }];
+      await runTurn('How often is the Kestrel dry-docked?');
+      expect(steps()[0].call).toMatchObject({ status: 'done', scored: { error: 'No Laya model is loaded.', items: [] } });
+      expect(agent.seenStates[1]).not.toContain('<passage>');
+      expect(agent.seenStates[1]).toContain('1 passage(s)');
+    });
+
+    it('gives the argument writer the passages found so far, and no Laya budget', async () => {
+      agent.laya = true;
+      agent.output = { kb_search: { items: [long] }, kb_read_lines: { items: [] } };
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_read_lines', stop: 0.1 }, { chosen: 'answer_now', stop: 0.9 }];
+      agent.fills = { ...agent.fills, kb_read_lines: { range: 'fleet.md:1-57' } };
+      await runTurn('How often is the Kestrel dry-docked?');
+      expect(agent.fillStates[0]).not.toContain('<passage>');
+      expect(agent.fillStates[1]).toContain(`Dry-dock schedule @ fleet.md:10-37 · 90% likely to help · shows 1 of its 28 lines\n${fact}`);
+    });
+
+    it('overrules a “the results suffice” when no passage scored as helping, and keeps looking', async () => {
+      agent.laya = true;
+      agent.output = { kb_search: { items: [noise] } };
+      rel.scores = [0.08];
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.65 }, { chosen: 'kb_overview', stop: 0.9 }];
+      await runTurn('How many child lifejackets does the Osprey carry?');
+      expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search', 'kb_overview']);
+      expect(steps()[1].note).toMatch(/looked sufficient \(65% likely\), but no passage found so far clearly helps \(the best scored 8%\), so looking further/);
+    });
+
+    it('answers on “the results suffice” once a passage scored as helping', async () => {
+      agent.laya = true;
+      agent.output = { kb_search: { items: [{ ...long, end_line: 11 }] } };
+      rel.scores = [0.7];
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.65 }];
+      await runTurn('How often is the Kestrel dry-docked?');
+      expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
+      expect(steps().at(-1)!.action).toBe('answer_now');
+    });
+
+    it('reads a clipped passage whole before answering from it, then answers', async () => {
+      agent.laya = true;
+      agent.output = { kb_search: { items: [noise, long] }, kb_get_code: { slices: [{ file: 'fleet.md', start_line: 10, end_line: 37, code: `…\n${fact}` }] } };
+      rel.scores = [0.03, 0.55];
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.7 }];
+      await runTurn('How often is the Kestrel dry-docked?');
+      // the whole node, not a padded range, and no argument writing
+      expect(agent.tool.map((t) => t.call)).toEqual([expect.objectContaining({ tool: 'kb_search' }), expect.objectContaining({ tool: 'kb_get_code', file: 'fleet.md', start: 10, end: 37 })]);
+      expect(agent.fillStates).toHaveLength(1);
+      expect(steps()[1]).toMatchObject({ action: 'kb_read_lines', fallback: 'read-whole' });
+      expect(steps()[1].note).toMatch(/First reading “Dry-dock schedule” whole \(55% likely to help\): the search showed 1 of its 28 lines\./);
+      expect(steps().at(-1)).toMatchObject({ action: 'answer_now', decision: null });
+      expect(steps()).toHaveLength(3);
+    });
+
+    it('reads nothing whole when the clipped passages are clear misses', async () => {
+      agent.laya = true;
+      agent.output = { kb_search: { items: [long] } };
+      rel.scores = [0.1];
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.3 }, { chosen: 'answer_now' }];
+      await runTurn('How often is the Kestrel dry-docked?');
+      expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search', 'kb_overview']);
+    });
+
+    it('without Laya, decides from the same state as before: no passages, no budget, no scoring', async () => {
+      agent.output = { kb_search: { items: [long] } };
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+      await runTurn('How often is the Kestrel dry-docked?');
+      expect(rel.calls).toEqual([]);
+      expect(agent.seenStates[1]).not.toContain('<passage>');
+      expect(steps()[0].call!.scored).toBeUndefined();
+    });
   });
 
   it('lets the chat model write the scope when Laya can’t pick it', async () => {

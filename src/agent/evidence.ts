@@ -54,8 +54,11 @@ export function addEvidence(found: Found[], tool: string, hits: SearchHit[]): nu
 export function mergeEvidence(found: Found[]): SearchHit[] {
   const reads = found.filter((f) => READS.has(f.tool));
   const same = (a: SearchHit, b: SearchHit) => inside(a, b) && inside(b, a);
-  // Covered by another read; of two reads of the same range, the earlier stays.
-  const covered = (f: Found) => reads.some((r) => r !== f && inside(f.hit, r.hit) && !(same(f.hit, r.hit) && found.indexOf(f) < found.indexOf(r)));
+  // Covered by another read; of two reads of the same range, the earlier
+  // stays. A search passage whose lines were then read is always covered: it's
+  // the clipped copy of the read (the loop reads such passages whole, item 15).
+  const covered = (f: Found) =>
+    reads.some((r) => r !== f && inside(f.hit, r.hit) && !(READS.has(f.tool) && same(f.hit, r.hit) && found.indexOf(f) < found.indexOf(r)));
   const kept = found.filter((f) => !covered(f));
   const rank = (f: Found) => (READS.has(f.tool) ? 0 : f.tool === 'kb_search' ? 2 : 1);
   return kept

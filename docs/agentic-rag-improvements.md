@@ -32,6 +32,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 12 | [Intent gate with Laya](#12-intent-gate-with-laya) | probed 2026-09-27 · fails the bar on both checkpoints; not shipped |
 | 13 | [Answer claim check](#13-answer-claim-check) | done 2026-09-27 · AUC 0.67 / 0.82; flags 3 of 42 and 8 of 41 cited sentences on the eval, 14 / 27 ms |
 | 14 | [Let the decision model choose the first step on code](#14-let-the-decision-model-choose-the-first-step-on-code) | measured 2026-09-27 · fewer facts on every setup; not shipped |
+| 15 | [Decide on what was found, not on what fits](#15-decide-on-what-was-found-not-on-what-fits) | done 2026-09-28 · facts 75.0% → 85.0% (Laya English), 82.5% → 87.5% (Multilingual), 65.0% → 72.5% (Qwen deciding) |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
 not shipped: 4, 9; 8 changed the recommendation (a small decision model with
@@ -651,4 +652,78 @@ reads the matching text") instead of "almost always needs a search".
 **Next to try:** when Find symbols returns a symbol, read its source in the
 same step (or offer Read symbol source as the only next code tool), so a
 symbol-first start ends with code in the prompt; then re-measure this item.
+
+## 15. Decide on what was found, not on what fits
+
+**Why.** Laya reads 512 or 1,024 tokens and cuts the state from the end,
+where the newest results are, while one search returns up to 6,000
+characters (raised from the app, 2026-09-28: "it has to cap seriously on
+the search result, barely putting 1/10 of it into the state"). In fact the
+state never held the results' text: each call was one line of names and
+locations, so the stop question ("the results already contain the
+information needed") was answered from section titles. The eval's knowledge
+bases were too small to show it (every document under 1 KB), so this item
+adds one of long documents.
+
+**What shipped.**
+- **A long-document eval set:** `tests/fixtures/eval/large/` (four
+  documents, 2.7–6.4 KB, facts late in long sections, similar-looking
+  distractors) and 11 questions, including an 808-character request and a
+  follow-up after a long answer; 45 questions in all. The scorecard counts
+  Laya inputs cut to fit and splits by knowledge base.
+- **Per-passage scores** (`relevance.ts` `PassageScorer`): as each tool
+  returns, Laya's relevance question is asked of every new passage in its
+  own row, a long one in overlapping pieces scored by the best; cached per
+  turn, so the check before the answer rescores nothing. The result line
+  names the most useful passage and its score. Rows ≤ 24 per call.
+- **Stop gate:** a "results suffice" ≥ 0.5 is overruled while no passage
+  scored ≥ 0.5 (`STOP_EVIDENCE`). Laya said 65% "enough" after a search
+  whose passages all scored ≤ 8%.
+- **Read a clipped passage whole** before answering from it (`read-whole`):
+  ug clips each search passage to a share of `max_chars` (~750 characters),
+  which cut the fact off in 3 of Laya Multilingual's 4 large-set misses
+  before this item (the fourth section was never retrieved). Scored ≥ 0.3
+  with Laya, the first clipped one without; once a turn; then answer.
+- **Budgeted decision state** (`agentState` `budget`): fitted to Laya's
+  input, request (≤ half, start and end kept) and step count first, oldest
+  results left out first. The largest decision input fell from 495 to 375
+  tokens on Laya English.
+- **Follow-ups scored with the question before them** (`scoringRequest`).
+- **The argument writer reads the two best passages** (≤ 500 characters
+  each), fenced like `buildSystem`'s.
+- **A bug it exposed:** a search passage and a read of the same lines were
+  both kept (`mergeEvidence` spared the earlier one); now the read wins.
+
+**Measured, not shipped:** the best passages' *text* in Laya's decision
+state (as much as fitted: ~500 characters on English, ~1,900 on
+Multilingual). Laya stopped sooner (1.80 against 2.29 decisions per question
+on English) and found fewer facts: 80.0% against 85.0% (English), 85.0%
+against 87.5% (Multilingual). The argument writer's passages were measured
+the same way: without them 82.5% (English), 87.5% (Multilingual), 72.5%
+(Qwen), so they add one English question and nothing else.
+
+**Result** (Qwen3 1.7B MLX answering, seed 7, M5 Max; `eval/item15-before-*`
+against `eval/item15-a1r-*`, a repeat that matched its first run on every
+question):
+
+| Decider | Facts | Large set | Original 29 | Grounded | Decisions / q | s / q |
+|---|---|---|---|---|---|---|
+| Laya English | 75.0% → 85.0% | 4 → 9 of 11 | 26 → 25 | 80.0% → 85.0% | 1.76 → 2.29 | 0.87 → 1.05 |
+| Laya Multilingual | 82.5% → 87.5% | 7 → 8 | 26 → 27 | 84.1% → 81.8% | 2.00 → 1.96 | 0.89 → 0.92 |
+| Qwen3 0.6B MLX | 65.0% → 72.5% | 3 → 6 | 23 → 23 | 77.5% → 80.0% | 1.02 → 1.02 | 0.63 → 0.65 |
+
+Lost: `mixed-context-createbooking` on Laya English (it went to Symbol
+context and answered without `withRetry`); Multilingual gained it. Still
+missed on the large set: `wheelchair-harlow` (the argument writer reads a
+range just past the fact), the 808-character request on English (answered
+without a lookup) and Multilingual's `pets-kestrel` (the Pets section is
+never retrieved). Timing varies between runs on this machine: the same
+Multilingual code measured 0.92 and 1.35 s per question with identical
+answers, and two earlier runs of 17 minutes were the machine, not the code
+(a clean rerun took one).
+
+**Next to try:** the argument writer's Read lines range is still free to
+miss (hold it to the node of the best-scoring passage); the relevance
+statement asks whether a passage *helps*, not whether it *answers*, so a
+second fixed statement for the stop gate is worth a probe.
 

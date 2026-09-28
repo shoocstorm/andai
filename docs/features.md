@@ -108,12 +108,32 @@ pasting in whatever one search returns:
   before it's kept. Not available on Intel Macs or Windows. Once a tool has
   found something, Laya also answers a yes/no question in the same pass, *do
   the results already cover the request?*, and the agent answers when it
-  says yes. In our agent eval (34 questions, Qwen3 0.6B writing the answers)
+  says yes and at least one passage found so far scored as helping (below). In our agent eval (34 questions, Qwen3 0.6B writing the answers)
   Laya Multilingual made questions faster overall, 3.4 s against 4.2 s with
   Qwen3 0.6B deciding, but its answers had the expected facts slightly less
   often (82.8% against 86.2%) and it searched on greetings and small talk.
   Laya English was slower overall (5.1 s). Qwen3 0.6B stays the most
   accurate decision model; Laya Multilingual is the fastest.
+- **Every passage read whole (with a Laya decision model).** Laya reads at
+  most 512 or 1,024 tokens, far less than a search returns, so it doesn't
+  decide from the results' text. As each tool returns, Laya scores every
+  passage on its own, together with the question (a long passage is split
+  into overlapping pieces and scored by its best one). The next decision
+  sees which passage is most useful and how likely it helps, and a
+  "the results suffice" is overruled while no passage scores at least 50%.
+  The Execution Trace shows the scores under each tool call (*Scored by*).
+  A short follow-up ("And the Osprey?") is scored together with the
+  question before it.
+- **Clipped passages read whole.** A search shows each passage only up to
+  its share of the result size, so the end of a long section can be cut
+  off. Before answering from such a passage, the agent reads its whole
+  section first (*Read lines*, once per answer; the trace says why). This
+  works with every decision model. In our agent eval's long-document
+  questions (11 of 45), answers had the expected facts in 81.8% of them with
+  Laya English (36.4% before), 72.7% with Laya Multilingual (63.6%) and
+  54.5% with Qwen3 0.6B deciding (27.3%), with Qwen3 1.7B answering on MLX,
+  on an Apple M5 Max. With Laya it costs about 0.05–0.2 s more per
+  question, mostly from the extra read.
 - **Relevance check (with a Laya decision model).** Before retrieved
   passages go into the chat model's prompt, Laya scores how likely each one
   helps answer the question and drops the clear misses (below 10%). The top

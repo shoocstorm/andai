@@ -20,7 +20,7 @@ import { spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { diffCases, loadCases, scoreCase, scorecard } from './eval-lib.mjs';
+import { diffCases, loadCases, scoreCase, scorecard, scorecardByKb } from './eval-lib.mjs';
 import { devOnPort } from './dev-port.mjs';
 import { keepCheckpoint, seedCheckpoint } from './checkpoint-cache.mjs';
 import { byLine, compare } from './perf-lib.mjs';
@@ -60,7 +60,13 @@ const copies = (key, dirs) => {
     }),
   );
 };
-const kbs = { docs: copies('docs', ['docs']), code: copies('code', ['code']), mixed: copies('mixed', ['docs', 'code']) };
+const kbs = {
+  docs: copies('docs', ['docs']),
+  code: copies('code', ['code']),
+  mixed: copies('mixed', ['docs', 'code']),
+  // Long documents, so that results outgrow Laya's input (item 15).
+  large: copies('large', ['large']),
+};
 const used = new Set(cases.map((c) => c.kb));
 for (const key of Object.keys(kbs)) if (!used.has(key)) delete kbs[key];
 const files = Object.values(kbs).flat();
@@ -132,7 +138,7 @@ const out = value('--out') ?? join(root, 'eval', `agent-eval-${stamp}.json`);
 mkdirSync(resolve(out, '..'), { recursive: true });
 writeFileSync(
   out,
-  `${JSON.stringify({ at: new Date().toISOString(), model, decider, seed, engine: start?.engine ?? null, only: only ?? null, notFound, cases, scorecard: card, scored, records }, null, 2)}\n`,
+  `${JSON.stringify({ at: new Date().toISOString(), model, decider, seed, engine: start?.engine ?? null, only: only ?? null, notFound, cases, scorecard: card, byKb: scorecardByKb(scored), scored, records }, null, 2)}\n`,
 );
 
 const pct = (v) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`);
@@ -145,6 +151,11 @@ console.log(`tool calls              ${card.calls}  wasted ${card.wastedCalls} (
 console.log(`invalid arguments       ${card.argsInvalid}   "No symbol named" ${card.noSymbolErrors}   fallbacks ${card.fallbacks}   turn errors ${card.errors}`);
 console.log(`decisions / question    ${num(card.decisionsPerQuestion)}   ${num(card.msPerDecision, 0)} ms and ${num(card.promptTokensPerDecision, 0)} prompt tokens each`);
 console.log(`seconds / question      ${num(card.secondsPerQuestion)}`);
+console.log(`cut to fit (Laya)       ${card.decisionsCut} decisions, ${card.passagesCut} scored passages   largest decision input ${card.maxPromptTokensPerDecision ?? '—'} tokens`);
+console.log('\nby knowledge base        first    facts    grounded  decisions/q  s/q');
+for (const [kb, c] of Object.entries(scorecardByKb(scored))) {
+  console.log(`  ${`${kb} (${c.questions})`.padEnd(22)}${pct(c.firstActionAccuracy).padStart(6)}   ${pct(c.factHitRate).padStart(6)}   ${pct(c.groundedRate).padStart(6)}    ${num(c.decisionsPerQuestion).padStart(5)}      ${num(c.secondsPerQuestion)}`);
+}
 const misses = scored.filter((s) => !s.firstOk || s.factsOk === false);
 if (misses.length) {
   console.log('\nmissed:');
