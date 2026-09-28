@@ -126,6 +126,26 @@ describe('fillArgs', () => {
     expect(retry.messages.at(-1)!.content).toMatch(/That was not valid: .*missing scope/);
   });
 
+  it('records every attempt as sent and answered, for the trace', async () => {
+    eng.replies = ['{"query":"x"}', '{"query":"headers","scope":"focused"}'];
+    const fill = await fillArgs(tool('kb_search'), ctx);
+    expect(fill.io.schema).toEqual(schemaFor(tool('kb_search')));
+    expect(fill.io.calls).toHaveLength(2);
+    const [first, second] = fill.io.calls;
+    // exactly what went to the engine, parameters and all
+    expect(first.messages).toEqual(eng.seen[0].messages);
+    expect(first.params).toEqual({ max_tokens: 200, temperature: 0, grammar: schemaGrammar(tool('kb_search').schema!), chat_template_kwargs: { enable_thinking: false } });
+    expect(first).toMatchObject({ model: expect.any(String), reply: '{"query":"x"}', errors: expect.arrayContaining(['missing scope']) });
+    expect(second).toMatchObject({ reply: '{"query":"headers","scope":"focused"}', errors: [] });
+    expect(second.messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+  });
+
+  it('records a failed engine call with its error and no reply', async () => {
+    eng.throwNext = new Error('Failed to initialize samplers');
+    const fill = await fillArgs(tool('kb_search'), ctx);
+    expect(fill.io.calls).toEqual([expect.objectContaining({ reply: '', errors: ['Failed to initialize samplers'] })]);
+  });
+
   it('recovers on the retry', async () => {
     eng.replies = ['{"query":"x"}', '{"query":"headers","scope":"focused"}'];
     expect(await fillArgs(tool('kb_search'), ctx)).toMatchObject({ ok: true, attempts: 2 });
@@ -195,7 +215,7 @@ describe('fillArgs', () => {
   });
 
   it('needs no model for a tool without arguments', async () => {
-    expect(await fillArgs(tool('kb_overview'), ctx)).toEqual({ ok: true, args: {}, raw: '{}', attempts: 0, model: null });
+    expect(await fillArgs(tool('kb_overview'), ctx)).toEqual({ ok: true, args: {}, raw: '{}', attempts: 0, model: null, io: { schema: null, calls: [] } });
     expect(eng.seen).toHaveLength(0);
   });
 

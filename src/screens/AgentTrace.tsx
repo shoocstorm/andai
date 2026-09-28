@@ -74,6 +74,91 @@ export function DecisionSummary({ agent }: { agent: AgentStep[] | undefined }) {
   );
 }
 
+/**
+ * What the argument writer (the chat model) was sent and replied, attempt by
+ * attempt: the messages as sent (system prompt, then the state, the tool and
+ * its schema), the decoding parameters, the raw reply and why a reply was
+ * rejected. All of it is text from the model and the user's files: plain text only.
+ */
+export function ArgWriterIO({ io }: { io: NonNullable<ToolCallRecord['argIO']> }) {
+  const ms = io.calls.reduce((n, x) => n + x.ms, 0);
+  const model = io.calls.find((x) => x.model)?.model;
+  const summary = io.calls.length
+    ? [model, `${io.calls.length} attempt${io.calls.length === 1 ? '' : 's'}`, fmtMs(ms), io.calls.at(-1)!.errors.length ? 'rejected' : 'accepted'].filter(Boolean).join(' · ')
+    : 'no request to the chat model';
+  return (
+    <details className="ag-raw tc-writer">
+      <summary>How the arguments were written: {summary}</summary>
+      <section className="tc-writer-body" aria-label="What the argument writer saw">
+        {io.note && <div className="ag-small ag-note">{io.note}</div>}
+        {!io.calls.length && !io.note && <div className="ag-small faint">No request to the chat model: the tool takes no arguments.</div>}
+        {io.calls.map((call, i) => {
+          const { grammar, ...params } = call.params;
+          return (
+            <div key={i} className="ag-call ag-io tc-attempt" aria-label={`Attempt ${i + 1}`}>
+              <div className="ag-small">
+                <b>Attempt {i + 1}</b>
+                {[call.model, `${fmtMs(call.ms)}`, call.promptTokens != null && `${call.promptTokens.toLocaleString()} prompt tokens`]
+                  .filter(Boolean)
+                  .map((x) => ` · ${x}`)
+                  .join('')}
+                {' · '}
+                {call.errors.length ? <span className="ag-err">rejected</span> : <span>accepted</span>}
+              </div>
+              <Field k="Input: prompt" copy={call.messages.map((m) => `[${m.role}]\n${m.content}`).join('\n\n')}>
+                {call.messages.map((m, j) => (
+                  <div key={j} className="ag-msg">
+                    <div className="mono faint ag-msg-role">{m.role}</div>
+                    <pre className="ag-pre selectable">{m.content}</pre>
+                  </div>
+                ))}
+              </Field>
+              <Field k="Input: parameters" copy={JSON.stringify(call.params)}>
+                <pre className="ag-pre selectable">{JSON.stringify(params, null, 2)}</pre>
+                {typeof grammar === 'string' && (
+                  <details className="ag-raw">
+                    <summary>Grammar the reply was held to (GBNF, {grammar.length.toLocaleString()} characters)</summary>
+                    <pre className="ag-pre selectable">{grammar}</pre>
+                  </details>
+                )}
+              </Field>
+              <Field k="Output: raw reply" copy={call.reply || undefined}>
+                {call.reply ? <pre className="ag-pre selectable">{call.reply}</pre> : <div className="ag-small ag-err">No reply: the call failed.</div>}
+              </Field>
+              {call.errors.length > 0 && (
+                <Field k="Why it was rejected">
+                  <ul className="ag-small ag-err">
+                    {call.errors.map((e, j) => (
+                      <li key={j} className="selectable">
+                        {e}
+                      </li>
+                    ))}
+                  </ul>
+                </Field>
+              )}
+            </div>
+          );
+        })}
+        {io.schema && (
+          <details className="ag-raw">
+            <summary>Schema the arguments were held to (JSON)</summary>
+            <pre className="ag-pre selectable">{JSON.stringify(io.schema, null, 2)}</pre>
+          </details>
+        )}
+      </section>
+    </details>
+  );
+}
+
+/** Who set each argument, in a line: the argument writer (and in how many tries), Laya's typed picks, or the agent itself. */
+export function argsBy(c: ToolCallRecord): string {
+  const parts: string[] = [];
+  if (c.argModel) parts.push(`Written by ${c.argModel}${c.argAttempts > 1 ? ` in ${c.argAttempts} attempts` : ''}`);
+  else if (c.argIO?.note && !c.argIO.calls.length) parts.push('Set by the agent, not written by a model');
+  for (const p of c.argChoices ?? []) parts.push(`${p.arg} picked by ${p.model} (${pct(p.probability)})`);
+  return parts.join(' · ');
+}
+
 /** The prompt as plain text, one block per message: easy to read and to paste back. */
 export const ioPromptText = (io: DecisionIO) => io.request.messages.map((m) => `[${m.role}]\n${m.content}`).join('\n\n');
 
@@ -392,76 +477,57 @@ export function ToolCallDialog({ s, open, onClose }: { s: AgentStep; open: boole
         </ol>
       </section>
 
-      <div className="dd-grid">
-        <section className="dd-section" aria-label="What it was given">
-          <h4 className="label">What it was given</h4>
-          {c.args && Object.keys(c.args).length ? (
-            <dl className="tc-args">
-              {Object.entries(c.args).map(([k, v]) => (
-                <div key={k} className="tc-arg">
-                  <dt>
-                    <span className="mono">{k}</span>
-                    {props[k]?.description && <span className="faint"> {props[k].description}</span>}
-                  </dt>
-                  <dd className="selectable">{typeof v === 'string' ? v : JSON.stringify(v)}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <div className="ag-small faint">{c.args ? 'No arguments.' : 'No valid arguments.'}</div>
-          )}
-          {c.argModel && (
-            <div className="faint ag-small tc-by">
-              Written by {c.argModel}
-              {c.argAttempts > 1 ? ` in ${c.argAttempts} attempts` : ''}
-            </div>
-          )}
-          {c.argChoices?.map((p) => (
-            <div key={p.arg} className="faint ag-small tc-by">
-              <span className="mono">{p.arg}</span> picked by {p.model} ({pct(p.probability)})
-            </div>
-          ))}
-          {c.argsRaw && (
+      <section className="dd-section" aria-label="What it was given">
+        <h4 className="label">What it was given</h4>
+        {c.args && Object.keys(c.args).length ? (
+          <dl className="tc-args">
+            {Object.entries(c.args).map(([k, v]) => (
+              <div key={k} className="tc-arg">
+                <dt>
+                  <span className="mono">{k}</span>
+                  {props[k]?.description && <span className="faint"> {props[k].description}</span>}
+                </dt>
+                <dd className="selectable">{typeof v === 'string' ? v : JSON.stringify(v)}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <div className="ag-small faint">{c.args ? 'No arguments.' : 'No valid arguments.'}</div>
+        )}
+        <div className="faint ag-small tc-by">{argsBy(c)}</div>
+        {c.argIO ? (
+          <ArgWriterIO io={c.argIO} />
+        ) : (
+          c.argsRaw && (
             <details className="ag-raw">
               <summary>Model’s raw reply{c.argAttempts > 1 ? ` (${c.argAttempts} attempts)` : ''}</summary>
               <pre className="ag-pre selectable">{c.argsRaw}</pre>
             </details>
-          )}
-        </section>
-        <section className="dd-section" aria-label="What it ran">
-          <h4 className="label">What it ran</h4>
-          {c.argv ? (
-            <Field k="Command" copy={shellCommand(c.argv)}>
-              <pre className="ag-pre selectable">{shellCommand(c.argv)}</pre>
-            </Field>
-          ) : (
-            <div className="ag-small faint">No command ran.</div>
-          )}
-          <dl className="tc-facts ag-small">
-            <dt>Policy</dt>
-            <dd>
-              {c.policy === 'ask' ? 'Ask' : c.policy === 'auto' ? 'Auto (read-only)' : 'Off'}
-              {c.approval && ` · ${c.approval}`}
-            </dd>
-            <dt>Started</dt>
-            <dd>{fmtTime(c.startedAt)}</dd>
-            {c.ms != null && (
-              <>
-                <dt>Took</dt>
-                <dd>{fmtMs(c.ms)}</dd>
-              </>
-            )}
-            {c.outputBytes != null && (
-              <>
-                <dt>Output</dt>
-                <dd>
-                  {c.outputBytes.toLocaleString()} bytes{c.truncated && <span className="ag-note"> · cut at the size cap</span>}
-                </dd>
-              </>
-            )}
-          </dl>
-        </section>
-      </div>
+          )
+        )}
+      </section>
+
+      <section className="dd-section" aria-label="What it ran">
+        <h4 className="label">What it ran</h4>
+        {c.argv ? (
+          <Field k="Command" copy={shellCommand(c.argv)}>
+            <pre className="ag-pre selectable">{shellCommand(c.argv)}</pre>
+          </Field>
+        ) : (
+          <div className="ag-small faint">No command ran.</div>
+        )}
+        <div className="ag-small faint tc-facts-line">
+          {[
+            `Policy: ${c.policy === 'ask' ? 'Ask' : c.policy === 'auto' ? 'Auto (read-only)' : 'Off'}${c.approval ? `, ${c.approval}` : ''}`,
+            `started ${fmtTime(c.startedAt)}`,
+            c.ms != null && `took ${fmtMs(c.ms)}`,
+            c.outputBytes != null && `${c.outputBytes.toLocaleString()} bytes of output`,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+          {c.truncated && <span className="ag-note"> · cut at the size cap</span>}
+        </div>
+      </section>
 
       {(c.observation || c.error || results) && (
         <section className="dd-section tc-found" aria-label="What it found">
@@ -517,6 +583,11 @@ export function ToolCallDialog({ s, open, onClose }: { s: AgentStep; open: boole
         </details>
       )}
       <div className="dd-foot">
+        {c.argIO && (
+          <CopyButton text={JSON.stringify(c.argIO, null, 2)} label="Copy argument call">
+            Copy argument call
+          </CopyButton>
+        )}
         <CopyButton text={JSON.stringify({ step: s.index + 1, ...c }, null, 2)} label="Copy tool call">
           Copy tool call
         </CopyButton>

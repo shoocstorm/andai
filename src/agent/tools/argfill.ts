@@ -35,9 +35,29 @@ const HELD = [
   ['range', 'ranges', 'Line ranges seen so far'],
 ] as const;
 
+/**
+ * One request to the argument writer, exactly as sent, and what came back:
+ * the Execution Trace shows it (tool call dialog, "What the argument writer saw").
+ */
+export type ArgCall = {
+  model: string | null;
+  messages: ChatMessage[];
+  /** Sampling and decoding parameters as sent, grammar included. */
+  params: Record<string, unknown>;
+  /** The reply as written, before parsing; empty when the call failed. */
+  reply: string;
+  /** Why the reply was rejected (parse or schema errors, or the engine's); empty when it was accepted. */
+  errors: string[];
+  ms: number;
+  promptTokens: number | null;
+};
+
+/** Every request of one fill, and the schema the arguments were held to. */
+export type FillIO = { schema: ObjectSchema | null; calls: ArgCall[] };
+
 export type Fill =
-  | { ok: true; args: Record<string, unknown>; raw: string; attempts: number; model: string | null }
-  | { ok: false; errors: string[]; raw: string; attempts: number; model: string | null };
+  | { ok: true; args: Record<string, unknown>; raw: string; attempts: number; model: string | null; io: FillIO }
+  | { ok: false; errors: string[]; raw: string; attempts: number; model: string | null; io: FillIO };
 
 const MAX_ATTEMPTS = 2;
 /** Up to this many known files (or symbols) become an enum for a `file` (or `symbol`) argument; past it they're only listed. */
@@ -111,39 +131,44 @@ export function fillMessages(tool: ToolDef, ctx: FillContext, previous?: { raw: 
   return msgs;
 }
 
+/** The writer's decoding parameters: greedy, short, held to the schema's grammar, no thinking. */
+export const fillParams = (grammar: string) => ({ max_tokens: 200, temperature: 0, grammar, chat_template_kwargs: { enable_thinking: false } });
+
 export async function fillArgs(tool: ToolDef, ctx: FillContext): Promise<Fill> {
   const schema = schemaFor(tool, ctx.known, ctx.fixed);
-  if (!schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null };
+  const io: FillIO = { schema, calls: [] };
+  if (!schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null, io };
   let previous: { raw: string; errors: string[] } | undefined;
   let model: string | null = null;
-  const grammar = schemaGrammar(schema);
+  const params = fillParams(schemaGrammar(schema));
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const messages = fillMessages(tool, ctx, previous);
+    const started = performance.now();
+    const call: ArgCall = { model, messages, params, reply: '', errors: [], ms: 0, promptTokens: null };
+    io.calls.push(call);
     let raw: string;
     try {
-      const { response, def } = await complete('chat', {
-        messages: fillMessages(tool, ctx, previous),
-        max_tokens: 200,
-        temperature: 0,
-        grammar,
-        chat_template_kwargs: { enable_thinking: false },
-        abortSignal: ctx.signal,
-      });
+      const { response, def } = await complete('chat', { messages, ...params, abortSignal: ctx.signal });
       model = def.name;
       raw = response.choices?.[0]?.message?.content ?? '';
+      Object.assign(call, { model, reply: raw, ms: Math.round(performance.now() - started), promptTokens: response.usage?.prompt_tokens ?? null });
     } catch (e) {
       // An engine failure is a failed fill, so the loop's fallback still applies; an abort is not.
       if (ctx.signal?.aborted) throw e;
-      return { ok: false, errors: [e instanceof Error ? e.message : String(e)], raw: '', attempts: attempt, model };
+      const errors = [e instanceof Error ? e.message : String(e)];
+      Object.assign(call, { errors, ms: Math.round(performance.now() - started) });
+      return { ok: false, errors, raw: '', attempts: attempt, model, io };
     }
     let errors: string[];
     try {
       const v = validate(schema, parseObject(raw));
-      if (v.ok) return { ok: true, args: v.value, raw, attempts: attempt, model };
+      if (v.ok) return { ok: true, args: v.value, raw, attempts: attempt, model, io };
       errors = v.errors;
     } catch (e) {
       errors = [e instanceof Error ? e.message : String(e)];
     }
-    if (attempt === MAX_ATTEMPTS) return { ok: false, errors, raw, attempts: attempt, model };
+    call.errors = errors;
+    if (attempt === MAX_ATTEMPTS) return { ok: false, errors, raw, attempts: attempt, model, io };
     previous = { raw, errors };
   }
   throw new Error('unreachable');

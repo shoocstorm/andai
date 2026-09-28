@@ -438,11 +438,17 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     let args: Record<string, unknown>;
     try {
       const fill = given
-        ? { ok: true as const, args: given, raw: JSON.stringify(given), attempts: 0, model: null }
+        ? { ok: true as const, args: given, raw: JSON.stringify(given), attempts: 0, model: null, io: { schema: tool.schema ?? null, calls: [] } }
         : await fillArgs(tool, { state: argState(), kind, known: { files: knownFiles(), symbols: symbolsIn(hits()), ranges: rangesIn(hits()) }, fixed, signal });
       if (fill.ok) {
         args = fill.args;
-        patch({ args, argsRaw: sameJson(fill.raw, args) ? null : fill.raw, argModel: fill.model, argAttempts: fill.attempts });
+        patch({
+          args,
+          argsRaw: sameJson(fill.raw, args) ? null : fill.raw,
+          argModel: fill.model,
+          argAttempts: fill.attempts,
+          argIO: given ? { ...fill.io, note: 'No argument writer: the agent set the range to the whole section the search had clipped.' } : fill.io,
+        });
       } else if (tool.id === 'kb_search') {
         // The fixed pipeline's query: the question itself.
         args = { query: prompt.slice(0, 300), scope: fixed.scope ?? 'broad' };
@@ -451,9 +457,12 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
           argsRaw: fill.raw,
           argModel: fill.model,
           argAttempts: fill.attempts,
+          argIO: { ...fill.io, note: 'The writer’s arguments were invalid, so the agent searched with the question as written.' },
           error: `Arguments were invalid (${fill.errors.join('; ')}); searched with the question as written.`,
         });
       } else {
+        // Kept for the trace: a failed fill is where seeing the exchange matters most.
+        patch({ argsRaw: fill.raw || null, argModel: fill.model, argAttempts: fill.attempts, argIO: fill.io });
         throw new Error(`Could not produce valid arguments: ${fill.errors.join('; ')}`);
       }
     } catch (e) {

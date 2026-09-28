@@ -7,6 +7,7 @@ import type { SupportRecord } from '../agent/claims';
 import type { ContextRecord } from '../agent/prompt';
 import type { Found } from '../kb/match';
 import type { DecisionIO } from '../llm/decide';
+import type { FillIO } from '../agent/tools/argfill';
 
 /**
  * `retrieve` belongs to the fixed pipeline; `plan` to agent mode, whose tool
@@ -60,6 +61,12 @@ export type ToolCallRecord = {
   /** Model that wrote the arguments, and how many tries it took. */
   argModel: string | null;
   argAttempts: number;
+  /**
+   * What the argument writer (the chat model) was sent and replied, every
+   * attempt; `note` says where the arguments came from when not (only) from it:
+   * set by the agent, or the question as written after a failed fill.
+   */
+  argIO?: FillIO & { note?: string };
   /** Arguments Laya picked as typed choices (the chat model wrote the rest). */
   argChoices?: { arg: string; value: string; probability: number; model: string }[];
   policy: Policy;

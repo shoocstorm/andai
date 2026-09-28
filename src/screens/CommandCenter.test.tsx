@@ -360,6 +360,64 @@ describe('Command Center (agent mode)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); // after its exit animation
   });
 
+  it('shows what the argument writer saw: each attempt’s prompt, parameters, grammar, raw reply and why it was rejected', async () => {
+    const user = userEvent.setup();
+    const params = { max_tokens: 200, temperature: 0, grammar: 'root ::= "{" ws query ws "}"', chat_template_kwargs: { enable_thinking: false } };
+    const argIO = {
+      schema: { type: 'object' as const, properties: { query: { type: 'string' as const } }, required: ['query'], additionalProperties: false as const },
+      calls: [
+        {
+          model: 'Qwen3 1.7B · MLX',
+          messages: [
+            { role: 'system' as const, content: 'You fill in the arguments for one tool call.' },
+            { role: 'user' as const, content: 'User request:\nWhat headers?\n\nTool: Knowledge search.' },
+          ],
+          params,
+          reply: '{"query":"x"}',
+          errors: ['missing scope'],
+          ms: 84,
+          promptTokens: 412,
+        },
+        { model: 'Qwen3 1.7B · MLX', messages: [{ role: 'user' as const, content: 'That was not valid: missing scope.' }], params, reply: '{"query":"wllama COOP headers","scope":"broad"}', errors: [], ms: 90, promptTokens: 450 },
+      ],
+    };
+    turn([{ id: 's1', index: 0, at: 0, decision, action: 'kb_search', call: call({ argIO, argAttempts: 2 }) }]);
+    render(<CommandCenter />);
+    await user.click(within(screen.getByText('Execution Trace').closest('aside')!).getByRole('button', { name: 'Tool call' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Tool call, step 1' }));
+    // folded under the arguments, with who wrote them and a one-line summary
+    expect(within(dialog.getByRole('region', { name: 'What it was given' })).getByText('Written by Qwen3 0.6B in 2 attempts')).toBeInTheDocument();
+    const fold = dialog.getByText('How the arguments were written: Qwen3 1.7B · MLX · 2 attempts · 174 ms · accepted').closest('details')!;
+    expect(fold).not.toHaveAttribute('open');
+    await user.click(dialog.getByText(/How the arguments were written/));
+    expect(fold).toHaveAttribute('open');
+    const writer = within(dialog.getByRole('region', { name: 'What the argument writer saw' }));
+    const first = within(writer.getByLabelText('Attempt 1'));
+    expect(first.getByText(/Attempt 1/).parentElement).toHaveTextContent('Attempt 1 · Qwen3 1.7B · MLX · 84 ms · 412 prompt tokens · rejected');
+    expect(first.getByText('You fill in the arguments for one tool call.')).toBeInTheDocument();
+    expect(first.getByText((_, el) => el?.tagName === 'PRE' && el.textContent === 'User request:\nWhat headers?\n\nTool: Knowledge search.')).toBeInTheDocument();
+    // parameters as sent, the grammar folded away
+    expect(first.getByText((_, el) => el?.tagName === 'PRE' && /"temperature": 0/.test(el.textContent ?? '') && /"max_tokens": 200/.test(el.textContent ?? ''))).toBeInTheDocument();
+    await user.click(first.getByText(/Grammar the reply was held to/));
+    expect(first.getByText('root ::= "{" ws query ws "}"')).toBeInTheDocument();
+    expect(first.getByText('{"query":"x"}')).toBeInTheDocument();
+    expect(first.getByText('missing scope')).toBeInTheDocument();
+    expect(within(writer.getByLabelText('Attempt 2')).getByText(/accepted/)).toBeInTheDocument();
+    await user.click(dialog.getByRole('button', { name: 'Copy argument call' }));
+    expect(JSON.parse(await navigator.clipboard.readText())).toEqual(argIO);
+  });
+
+  it('says when the agent set a tool’s arguments without the argument writer', async () => {
+    const user = userEvent.setup();
+    turn([{ id: 's1', index: 0, at: 0, decision, action: 'kb_read_lines', call: call({ argIO: { schema: null, calls: [], note: 'No argument writer: the agent set the range to the whole section the search had clipped.' } }) }]);
+    render(<CommandCenter />);
+    await user.click(within(screen.getByText('Execution Trace').closest('aside')!).getByRole('button', { name: 'Tool call' }));
+    expect(screen.getByText('How the arguments were written: no request to the chat model')).toBeInTheDocument();
+    const writer = within(screen.getByRole('region', { name: 'What the argument writer saw' }));
+    expect(writer.getByText(/No argument writer: the agent set the range/)).toBeInTheDocument();
+    expect(writer.queryByLabelText('Attempt 1')).toBeNull();
+  });
+
   it('shows Laya’s scores for what a tool call found, the pieces of a long passage, and a failed scoring', async () => {
     const user = userEvent.setup();
     const scored = {

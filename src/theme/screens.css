@@ -2391,18 +2391,25 @@ tr:hover .kn-remove {
 .tc-by {
   margin-top: 8px;
 }
-.tc-facts {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 14px;
-  margin: 12px 0 0;
+.tc-facts-line {
+  margin-top: 8px;
 }
-.tc-facts dt {
-  color: var(--text-3);
+/* The argument writer's exchange: folded under the arguments, one attempt after another. */
+.tc-writer {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 12px;
 }
-.tc-facts dd {
-  margin: 0;
+.tc-writer[open] {
+  padding-bottom: 12px;
+}
+.tc-writer > summary {
+  font-size: 12.5px;
   color: var(--text-2);
+}
+.tc-writer-body {
+  margin-top: 8px;
 }
 .tc-found {
   margin-top: 18px;
@@ -3218,4 +3225,9 @@ button.cc-chip:focus-visible {
 }
 .dd-grid + .dd-section[aria-label='Messages sent'] {
   margin-top: 14px;
+}
+.tc-attempt + .tc-attempt {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
 }

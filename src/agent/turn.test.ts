@@ -91,12 +91,16 @@ vi.mock('./tools/argfill', () => ({
     agent.fillFiles.push(ctx.known?.files);
     agent.fillSymbols.push(ctx.known?.symbols);
     agent.fillRanges.push(ctx.known?.ranges);
-    if (!tool.schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null };
-    if (agent.fillFail) return { ok: false, errors: [agent.fillFail], raw: 'nope', attempts: 2, model: 'Qwen3 0.6B' };
+    if (!tool.schema) return { ok: true, args: {}, raw: '{}', attempts: 0, model: null, io: { schema: null, calls: [] } };
+    const io = (reply: string, errors: string[] = []) => ({
+      schema: tool.schema,
+      calls: [{ model: 'Qwen3 0.6B', messages: [{ role: 'user', content: ctx.state }], params: { temperature: 0 }, reply, errors, ms: 5, promptTokens: 100 }],
+    });
+    if (agent.fillFail) return { ok: false, errors: [agent.fillFail], raw: 'nope', attempts: 2, model: 'Qwen3 0.6B', io: io('nope', [agent.fillFail]) };
     // a list is consumed one fill per call
     const f = agent.fills[tool.id];
     const args = (Array.isArray(f) ? f.shift() : f) as Record<string, unknown>;
-    return { ok: true, args, raw: JSON.stringify(args), attempts: 1, model: 'Qwen3 0.6B' };
+    return { ok: true, args, raw: JSON.stringify(args), attempts: 1, model: 'Qwen3 0.6B', io: io(JSON.stringify(args)) };
   },
 }));
 
@@ -885,6 +889,26 @@ describe('runTurn (agent mode)', () => {
       expect(steps()[1].note).toMatch(/First reading “Dry-dock schedule” whole \(55% likely to help\): the search showed 1 of its 28 lines\./);
       expect(steps().at(-1)).toMatchObject({ action: 'answer_now', decision: null });
       expect(steps()).toHaveLength(3);
+    });
+
+    it('records what the argument writer saw, and says when the agent set the arguments itself', async () => {
+      agent.laya = true;
+      agent.output = { kb_search: { items: [noise, long] }, kb_get_code: { slices: [] } };
+      rel.scores = [0.03, 0.55];
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'kb_overview', stop: 0.7 }];
+      await runTurn('How often is the Kestrel dry-docked?');
+      const [search, read] = steps().map((x) => x.call);
+      expect(search!.argIO).toMatchObject({ calls: [{ model: 'Qwen3 0.6B', params: { temperature: 0 }, errors: [] }] });
+      expect(search!.argIO!.calls[0].messages[0].content).toContain('User request:\nHow often is the Kestrel dry-docked?');
+      expect(read!.argIO).toMatchObject({ calls: [], note: expect.stringMatching(/No argument writer: the agent set the range/) });
+    });
+
+    it('keeps the writer’s failed attempts on the trace', async () => {
+      agent.laya = true;
+      agent.fillFail = 'missing scope';
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now', stop: 0.9 }];
+      await runTurn('How often is the Kestrel dry-docked?');
+      expect(steps()[0].call!.argIO).toMatchObject({ calls: [{ reply: 'nope', errors: ['missing scope'] }], note: expect.stringMatching(/searched with the question as written/) });
     });
 
     it('reads nothing whole when the clipped passages are clear misses', async () => {

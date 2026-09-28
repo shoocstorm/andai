@@ -185,8 +185,13 @@ pasting in whatever one search returns:
   second dialog that says what the call did in plain sentences (who wrote
   the arguments, whether it ran on its own or waited for your approval, how
   long ug took, how many passages went into the answer), then each argument
-  with what it means, the ug command, and the passages it found by file and
-  line, with the raw output folded away. **Copy trace** exports a turn as JSON.
+  with what it means and who set it. **How the arguments were written**
+  unfolds what the chat model was sent to write them, attempt by attempt:
+  the system prompt, the state it read, the tool's schema, the parameters
+  (temperature, token limit, the grammar the reply was held to), its raw
+  JSON reply and why a reply was rejected, with **Copy argument call**. Then
+  the ug command, and the passages it found by file and line, with the raw
+  output folded away. **Copy trace** exports a turn as JSON.
 - **Read-only and on your computer.** Every tool only reads the selected
   knowledge base. Andai re-checks each call before running it, limits its
   time and output, and never lets a tool reach the network.
