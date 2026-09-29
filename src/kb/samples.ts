@@ -20,10 +20,10 @@ export const SAMPLES: SampleDef[] = [
     id: 'tidewater-docs',
     name: 'Tidewater Ferries · Documents',
     kind: 'document',
-    blurb: 'An operations handbook, a refund policy and release notes.',
+    blurb: 'Seven documents: handbooks, a refund policy, a maintenance manual, a passenger guide, an incident log.',
     questions: [
       'How long before departure do I need to cancel to get a full refund?',
-      'At what wind speed are sailings cancelled?',
+      'Where does my dog travel on the Kestrel?',
       'Which of the ferries can take my car?',
     ],
   },

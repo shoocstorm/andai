@@ -14,12 +14,13 @@ describe('sample knowledge bases', () => {
 
   it('suggest only eval questions asked of the same kind of knowledge base', () => {
     const { cases } = JSON.parse(readFileSync(join(root, 'tests/fixtures/eval/cases.json'), 'utf8')) as { cases: { kb: string; prompt: string; history?: unknown[] }[] };
-    const kb = { document: 'docs', code: 'code', mixed: 'mixed' } as const;
+    // The documents sample holds the eval's `docs` and `large` files (src-tauri/src/samples.rs).
+    const kb = { document: ['docs', 'large'], code: ['code'], mixed: ['mixed'] } as const;
     for (const s of SAMPLES) {
       for (const q of s.questions) {
         const c = cases.find((x) => x.prompt === q);
         expect(c, q).toBeDefined();
-        expect(c!.kb, q).toBe(kb[s.kind]);
+        expect(kb[s.kind], q).toContain(c!.kb);
         expect(c!.history ?? [], q).toEqual([]);
       }
     }

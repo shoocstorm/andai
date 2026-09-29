@@ -218,8 +218,9 @@ pasting in whatever one search returns:
 - **Multiple knowledge bases.** Keep separate collections (e.g. *Specs*,
   *Research*) and choose which one grounds the chat from the composer.
 - **Sample knowledge bases** to try the agent before adding your own files:
-  *Tidewater Ferries*, a made-up ferry operator, as **documents** (a
-  handbook, a refund policy, release notes), as **code** (its booking service
+  *Tidewater Ferries*, a made-up ferry operator, as **documents** (seven:
+  operations and crew handbooks, a refund policy, a fleet maintenance
+  manual, a passenger services guide, a 2025 incident log and release notes), as **code** (its booking service
   in TypeScript), or **both**. One click adds a sample, indexes it on your
   computer in a few seconds and grounds the chat in it, and the Command
   Center then suggests questions the sample can answer. Offered on the

@@ -65,6 +65,7 @@
     "category": "Productivity",
     "resources": {
       "../tests/fixtures/eval/docs/": "samples/docs/",
+      "../tests/fixtures/eval/large/": "samples/large/",
       "../tests/fixtures/eval/code/": "samples/code/"
     },
     "windows": {

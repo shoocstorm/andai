@@ -25,7 +25,7 @@ pub struct Sample {
 }
 
 pub const SAMPLES: &[Sample] = &[
-    Sample { id: "tidewater-docs", name: "Tidewater Ferries · Documents", folders: &["docs"] },
+    Sample { id: "tidewater-docs", name: "Tidewater Ferries · Documents", folders: &["docs", "large"] },
     Sample { id: "tidewater-code", name: "Tidewater Ferries · Code", folders: &["code"] },
     Sample { id: "tidewater-mixed", name: "Tidewater Ferries · Docs + code", folders: &["docs", "code"] },
 ];
@@ -129,7 +129,9 @@ mod tests {
         let mixed = kinds("tidewater-mixed");
         assert!(!docs.is_empty() && docs.iter().all(|k| k == "MD"), "{docs:?}");
         assert!(!code.is_empty() && code.iter().all(|k| k == "CODE"), "{code:?}");
-        assert_eq!(mixed.len(), docs.len() + code.len());
+        assert!(mixed.iter().any(|k| k == "MD") && mixed.iter().any(|k| k == "CODE"), "{mixed:?}");
+        // The documents sample holds the long documents too (`large/`), not only the short ones the mixed one shares.
+        assert_eq!(docs.len(), 7, "{docs:?}");
     }
 
     #[test]
