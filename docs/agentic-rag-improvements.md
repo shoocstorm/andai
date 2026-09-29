@@ -34,6 +34,9 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 14 | [Let the decision model choose the first step on code](#14-let-the-decision-model-choose-the-first-step-on-code) | measured 2026-09-27 · fewer facts on every setup; not shipped |
 | 15 | [Decide on what was found, not on what fits](#15-decide-on-what-was-found-not-on-what-fits) | done 2026-09-28 · facts 75.0% → 85.0% (Laya English), 82.5% → 87.5% (Multilingual), 65.0% → 72.5% (Qwen deciding) |
 | 16 | [Code plans, Laya judges](#16-code-plans-laya-judges) | measured 2026-09-28 · 25–45% faster, not more accurate; shipped off (`plan`), search-again kept as an option |
+| 17 | [Baselines on the 100-question set](#17-baselines-on-the-100-question-set) | done 2026-09-29 · Laya English 79.6% facts, Laya Multilingual 82.8% |
+| 18 | [Say when nothing found clearly helps](#18-say-when-nothing-found-clearly-helps) | measured 2026-09-29 · one gained, one lost; not shipped |
+| 19 | [Fetch the symbol the request names](#19-fetch-the-symbol-the-request-names) | done 2026-09-29 · Laya English 79.6% → 80.6%, Multilingual unchanged |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
 not shipped: 4, 9; 8 changed the recommendation (a small decision model with
@@ -803,4 +806,83 @@ agent behaves as after item 15. Search again also works without the plan
 back; each starts the dev app with two MLX models on the GPU, and the Mac
 overheated to a black screen and had to be powered off. Run one eval at a
 time, with a pause between runs, and prefer `--only` (AGENTS.md §6).
+
+## 17. Baselines on the 100-question set
+
+**Why.** The set grew from 45 to 100 questions (item 1), and every later
+item is judged against a baseline on it.
+
+**Done (2026-09-29).** Qwen3 1.7B MLX answering, seed 7, Apple M5 Max,
+recorded with `--update` (`eval/base100-1.7b-mlx+{en,multi}.json`):
+
+| Decider | First action | Facts | Grounded | Decisions / q | ms / decision | s / q |
+|---|---|---|---|---|---|---|
+| Laya English | 96.0% | 79.6% | 86.2% | 2.21 | 24 | 1.05 |
+| Laya Multilingual | 93.0% | 82.8% | 83.8% | 1.88 | 15 | 0.89 |
+
+By knowledge base, facts: docs 96.4% / 100%, code 81.0% / 85.7%, mixed
+60.0% / 60.0%, large 72.4% / 75.9% (English / Multilingual). Mixed is the
+weak spot. Of the misses there, `code-weather-refund`, `mixed-refund-50h`,
+`code-followup-delay` and `mixed-context-createbooking` had the needed code
+in the prompt and the answer still missed the fact, so they're answer
+misses, not retrieval misses. The four unanswerable questions that fail
+mostly say "not explicitly mentioned" and then guess ("power sockets
+suggest Wi-Fi is available").
+
+## 18. Say when nothing found clearly helps
+
+**Why.** Unanswerable questions got guesses built on related passages, and
+Laya's per-passage scores (item 15) already tell whether anything found
+helps.
+
+**What was measured.** With Laya English, when no passage found in the
+turn scored ≥ 0.25, `buildSystem` added after the passages: "A check of
+every passage found none that clearly answers this question (the best
+scored N%). If the passages don't state the answer, say that the knowledge
+base doesn't say, and don't guess or infer one from related details." The
+threshold came from the item 17 report: unanswerable questions' best scores
+were 0.04–0.22, and only one question answered right scored below 0.26
+(`doc-late-vehicle`, 0.256). Laya Multilingual got no threshold: its
+unanswerable questions scored up to 0.80, and two questions it answered
+right scored 0.18 and 0.23.
+
+**Result (`eval/i17-1.7b-mlx+en.json`), not shipped.** Facts: gained
+`doc-unanswerable-parking`, lost `mixed-unanswerable-author` ("written by
+the developer of the project"). `large-lost-property` and
+`mixed-unanswerable` became honest "not stated" answers without passing
+their regex, and `large-unanswerable-wifi` got worse: it said the Kestrel has
+Wi-Fi in the saloon (no fixture mentions Wi-Fi). Grounded fell 86.2% →
+81.9%, all four from honest "not stated" answers with no `[n]`: the
+`grounded` metric counts an answer with sources and no citation as
+ungrounded, so it penalizes a correct refusal. Nothing was gained on
+balance, so the code was removed. **Next to try:** score "not stated"
+answers as grounded when the question is unanswerable, before measuring
+refusal changes again.
+
+## 19. Fetch the symbol the request names
+
+**Why.** On code and mixed knowledge bases, a question that names a
+function often gets the passages around it but not its code (`mixed-cancel`:
+"What does cancelBooking do to work out the refund?" found `refunds.ts` and
+the policy, never `cancelBooking`), and "who calls refundFraction?" was
+answered from the definition without a call site (Qwen3 0.6B MLX,
+2026-09-29). Rule 2 of item 16's plan does this, but only with the plan on.
+
+**Done (2026-09-29).** Before answering, on code and mixed knowledge bases,
+the loop takes the first identifier the request names (`namedIdentifiers`)
+whose code the results don't show whole, and reads its source (Read symbol
+source), or its usages when the request asks who calls it (`CALLERS`). Once
+a turn, after any read-whole, with any decision model, without a decision
+or argument writer (`named-symbol` on the trace). Against item 17
+(`eval/i17-*`):
+
+| Decider | Facts | Grounded | Changed |
+|---|---|---|---|
+| Laya English | 79.6% → 80.6% | 86.2% → 81.9% (item 18's refusals) | `mixed-cancel` gained; 3 "who calls" answers added Find usages |
+| Laya Multilingual | 82.8% → 82.8% | 83.8% → 83.8% | 3 "who calls" answers added Find usages; no answer changed |
+
+The English run also carried item 18; its gains and losses are listed
+there. The Multilingual run measured 1.77 s against 0.89 s per question with
+ms per decision doubled too (decisions are untouched by this change), so the
+machine was slowing down; heavy runs stopped there.
 

@@ -124,7 +124,9 @@ repeatable. It needs ug and the model, so it isn't part of `bun run check`.
 Recorded on Apple M5 Max · 18 cores · 128 GB with Qwen3 0.6B, on the
 45-question set (2026-09-28). The set has since grown to 100 questions
 (2026-09-28), so these baselines no longer describe it: re-record each
-setup's section with `--update`, one run at a time (AGENTS.md §6).
+setup's section with `--update`, one run at a time (AGENTS.md §6). Done on
+2026-09-29 for Qwen3 1.7B MLX with Laya English and Laya Multilingual
+(`agent-eval:qwen3-1.7b-mlx+laya-*`: 79.6% and 82.8% facts; tracker item 17).
 
 | Metric | Baseline | Tolerance | What it is |
 |---|---|---|---|

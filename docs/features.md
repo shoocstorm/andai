@@ -134,6 +134,14 @@ pasting in whatever one search returns:
   54.5% with Qwen3 0.6B deciding (27.3%), with Qwen3 1.7B answering on MLX,
   on an Apple M5 Max. With Laya it costs about 0.05–0.2 s more per
   question, mostly from the extra read.
+- **Named code read before answering.** On a code or mixed knowledge base,
+  when your question names a function or other symbol (`cancelBooking`,
+  `refundFraction()`) and the results don't show its code whole, the agent
+  reads its source before answering (*Read symbol source*), or finds its
+  callers when you ask who calls it (*Find usages*). Once per answer, with
+  any decision model; the trace says why. In our agent eval (100 questions,
+  Qwen3 1.7B answering on MLX, Apple M5 Max) it gained one answer with Laya
+  English and changed none with Laya Multilingual.
 - **Relevance check (with a Laya decision model).** Before retrieved
   passages go into the chat model's prompt, Laya scores how likely each one
   helps answer the question and drops the clear misses (below 10%). The top

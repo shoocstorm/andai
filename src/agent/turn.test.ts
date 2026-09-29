@@ -798,6 +798,48 @@ describe('runTurn (agent mode)', () => {
     expect(steps()[0].call!.argChoices?.[0]).toMatchObject({ arg: 'scope', value: 'focused', model: 'Laya Multilingual' });
   });
 
+  describe('a symbol the request names, before answering (code and mixed)', () => {
+    const calls = () => agent.tool.map((t) => t.call);
+
+    it('reads its source when the search didn’t return its code, without an argument writer', async () => {
+      useKb.setState({ kbs: [kb({ kind: 'mixed' })] });
+      agent.output = { kb_search: { items: [hit] }, kb_get_code: { slices: [] } };
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+      await runTurn('What does cancelBooking do to work out the refund?');
+      expect(calls()).toEqual([expect.objectContaining({ tool: 'kb_search' }), expect.objectContaining({ tool: 'kb_get_code', symbol: 'cancelBooking' })]);
+      expect(steps()[1]).toMatchObject({ action: 'kb_get_code', fallback: 'named-symbol' });
+      expect(steps()[1].note).toMatch(/First reading the source of `cancelBooking`: the request names it/);
+      expect(steps()[1].call!.argIO!.note).toMatch(/took the symbol the request names/);
+      expect(steps().at(-1)).toMatchObject({ action: 'answer_now', decision: null, note: 'Answering, with what was fetched first.' });
+      expect(agent.fillStates).toHaveLength(1);
+    });
+
+    it('finds its usages when the request asks who calls it', async () => {
+      useKb.setState({ kbs: [kb({ kind: 'code' })] });
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+      await runTurn('Who calls refundFraction, and on which line?');
+      expect(calls()[1]).toMatchObject({ tool: 'kb_find_usages', symbol: 'refundFraction' });
+    });
+
+    it('fetches nothing when the search showed the symbol whole', async () => {
+      useKb.setState({ kbs: [kb({ kind: 'code' })] });
+      const fn = { ...hit, id: 'fn', name: 'cancelBooking', node_type: 'Function', file: 'booking.ts', start_line: 35, end_line: 37, snippet: 'export function cancelBooking(b) {\n  return refundFraction(hours);\n}' };
+      agent.output = { kb_search: { items: [fn] } };
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+      await runTurn('What does cancelBooking do?');
+      expect(calls().map((c) => c.tool)).toEqual(['kb_search']);
+    });
+
+    it('fetches nothing on a document knowledge base, or when the request names no identifier', async () => {
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+      await runTurn('What does cancelBooking do?');
+      useKb.setState({ kbs: [kb({ kind: 'code' })] });
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+      await runTurn('How are refunds worked out?');
+      expect(calls().map((c) => c.tool)).toEqual(['kb_search', 'kb_search']);
+    });
+  });
+
   describe('passages scored as they arrive (with Laya, item 15)', () => {
     const fact = 'The Kestrel is dry-docked every 30 months.';
     const long = { ...hit, id: 'long', name: 'Dry-dock schedule', file: 'fleet.md', start_line: 10, end_line: 37, snippet: fact };

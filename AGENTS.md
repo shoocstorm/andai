@@ -135,7 +135,8 @@ approval card) → `kbTool` (Rust `kb_tool` → `ug <cmd> --json`) →
 `tool.observe` → `addEvidence` → with Laya, `PassageScorer` scores the new
 passages (one `laya_relevance` row per passage, a long one in pieces)] ×
 up to `maxSteps`; before answering from a passage the search clipped, it is
-read whole → `mergeEvidence` →
+read whole, and on code a symbol the request names is fetched (source, or
+usages for "who calls") → `mergeEvidence` →
 relevance check (with Laya: `checkRelevance` reuses the loop's scores and drops passages scored < 0.10
 past the top 2) → `buildSystem` (tool results fenced as passages) + `buildHistory` → `engine.chat` (native
 MLX `llm_generate`, streamed over a channel, or wllama) → answer → claim check (with Laya: `checkClaims`
@@ -481,6 +482,25 @@ level defaults to *Ask*.
   answering from a clipped search passage (fewer than 80% of its node's
   lines, scored ≥ 0.3 with Laya, or the first one without), the loop reads
   that node whole with Read lines, once a turn (`read-whole` in the trace).
+- **Fetch a symbol the request names before answering** (code and mixed,
+  2026-09-29): a search often returns the passages around `cancelBooking`
+  but not its code. When the request names an identifier (`namedIdentifiers`)
+  whose code isn't among the results whole, the loop reads its source (Read
+  symbol source), or its usages when the request asks who calls it, once a
+  turn, without a decision or argument writer (`named-symbol` in the trace).
+  100-question eval, Qwen3 1.7B MLX answering: Laya English facts 79.6% →
+  80.6% (`mixed-cancel` gained, none lost), Laya Multilingual unchanged
+  (three "who calls" answers, already right, gained a Find usages call).
+- **Telling the answer that nothing found clearly helps didn't help**
+  (2026-09-29). With Laya English, when no passage scored ≥ 0.25 (every
+  unanswerable question scored 0.04–0.22), the prompt said so and asked for
+  "the knowledge base doesn't say" over a guess: 1 unanswerable question
+  gained, 1 lost, and the 1.7B still invented Wi-Fi on the Kestrel.
+  Grounded fell 86.2% → 81.9%, but only because honest "not stated"
+  answers cite nothing (`grounded` counts an answer with sources and no
+  `[n]` as ungrounded). Laya Multilingual can't gate it: its unanswerable
+  questions scored up to 0.80 and two answered-right ones 0.18 and 0.23.
+  Not shipped.
 - **Rules can plan the follow-ups, but didn't add facts** (tracker item 16,
   2026-09-28). `agent/plan.ts` reads clipped passages, fetches named symbols
   and answers from Laya's scores without a decision; it cut tool calls by a

@@ -117,9 +117,10 @@ export type AgentStep = {
    * Set when the loop didn't take the decision as chosen: it wasn't trusted
    * (search once, or answer), or it picked a tool whose argument nothing has
    * shown yet: a symbol (look symbols up first) or a line range (search first);
-   * or it was about to answer from a passage the search had cut short (read it whole first).
+   * or it was about to answer from a passage the search had cut short (read it whole first),
+   * or without the code of a symbol the request names (fetch it first).
    */
-  fallback?: 'low-confidence' | 'decision-failed' | 'needs-symbol' | 'needs-range' | 'read-whole';
+  fallback?: 'low-confidence' | 'decision-failed' | 'needs-symbol' | 'needs-range' | 'read-whole' | 'named-symbol';
   /** A rule chose this step (agent/plan.ts: the evidence plan or search-again), not the decision model. */
   planned?: boolean;
   /** A decision that was sent but couldn't be read: the error, its time and the call, when it got that far. */

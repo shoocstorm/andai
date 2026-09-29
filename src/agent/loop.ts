@@ -27,7 +27,7 @@ import { recordSearch } from '../state/kb';
 import { recordToolRun, requestApproval, useTools } from '../state/tools';
 import { addEvidence, mergeEvidence, type Found } from './evidence';
 import { agentState, LAYA_CHARS_PER_TOKEN, needsLookup, type Observation, type StatePassage } from './prompt';
-import { planNext, searchAgainStep, type PlanInput } from './plan';
+import { CALLERS, namedIdentifiers, planNext, searchAgainStep, type PlanInput } from './plan';
 import { DROP_BELOW, PassageScorer, passageText, scoringRequest, shownLines } from './relevance';
 import { fillArgs, parseObject } from './tools/argfill';
 import { available, policyOf } from './tools/registry';
@@ -212,8 +212,10 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
   let consecutiveErrors = 0;
   let calls = 0;
   let index = 0;
-  // A passage read whole before answering (at most once a turn), then the answer.
+  // Before answering: a clipped passage read whole, and the code of a symbol
+  // the request names (each at most once a turn); then the answer.
   let readWholeDone = false;
+  let namedDone = false;
   let answerNext = false;
 
   // With Laya deciding, every passage is scored as a tool returns it
@@ -266,6 +268,25 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     const pick = scorer ? clipped.filter((c) => c.score != null && c.score >= READ_WHOLE_AT).sort((a, b) => b.score! - a.score!)[0] : clipped[0];
     return pick ? { ...pick, range: `${pick.hit.file}:${pick.hit.start_line}-${pick.hit.end_line}` } : null;
   };
+  /**
+   * On code and mixed knowledge bases, a symbol the request names whose code
+   * the tools haven't shown whole: its source, or its usages when the request
+   * asks who calls it. A search often returns the passages around a named
+   * function but not the function (`cancelBooking`), or no call site for
+   * "who calls refundFraction?" (2026-09-29, after the 100-question eval).
+   */
+  const namedSymbol = (tools: ToolDef[]): { tool: ToolDef; name: string } | null => {
+    if (kind === 'document') return null;
+    const callers = CALLERS.test(prompt);
+    const tool = tools.find((t) => t.id === (callers ? 'kb_find_usages' : 'kb_get_code'));
+    if (!tool) return null;
+    for (const name of namedIdentifiers(prompt)) {
+      if (done.has(argKey(tool.id, { symbol: name }))) continue;
+      if (!callers && found.some((f) => f.hit.name === name && SYMBOL_TYPES.has(f.hit.node_type) && !shownLines(f.hit))) continue;
+      return { tool, name };
+    }
+    return null;
+  };
   // What a `file` argument may name: indexed sources, then files the tools have shown.
   const knownFiles = () => [
     ...new Set([
@@ -282,10 +303,6 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
 
   while (true) {
     if (signal.aborted) throw aborted();
-    if (answerNext) {
-      step({ decision: null, action: ANSWER, note: 'Answering, with the passage read whole.' });
-      break;
-    }
     const tools = offered(available(kind, settings.policies), usage, denied);
     if (calls >= settings.maxSteps) {
       step({ decision: null, action: ANSWER, note: `Reached the limit of ${settings.maxSteps} tool calls for one turn.` });
@@ -329,10 +346,13 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       searches: [...done.keys()].filter((k) => k.startsWith('kb_search ')).map((k) => Object.fromEntries(JSON.parse(k.slice('kb_search '.length)))),
       searchAgain: settings.searchAgain,
     });
-    const ruled = !scorer || !found.length ? null : settings.plan !== 'off' ? planNext(evidence()) : settings.searchAgain ? searchAgainStep(evidence()) : null;
+    const ruled = answerNext || !scorer || !found.length ? null : settings.plan !== 'off' ? planNext(evidence()) : settings.searchAgain ? searchAgainStep(evidence()) : null;
     const planned = ruled != null;
     let given: Record<string, unknown> | null = null;
-    if (ruled) {
+    if (answerNext) {
+      // What was fetched before answering is in; answer (unless the other fetch applies, below).
+      action = ANSWER;
+    } else if (ruled) {
       action = ruled.action;
       note = ruled.note;
       given = ruled.args ?? null;
@@ -402,9 +422,12 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
 
     // About to answer from a passage the tool cut short: the rest of its
     // section may hold the answer, and neither the decision nor the answer can
-    // see past the cut. Read it whole first (item 15).
+    // see past the cut. Read it whole first (item 15). Then, on code, fetch a
+    // symbol the request names if its code isn't in yet (`namedSymbol`).
     const reader = tools.find((t) => t.id === 'kb_read_lines');
-    const whole = action === ANSWER && !planned && !readWholeDone && reader && calls < settings.maxSteps ? clippedPassage() : null;
+    const before = action === ANSWER && !planned && calls < settings.maxSteps;
+    const whole = before && !readWholeDone && reader ? clippedPassage() : null;
+    const named = before && !whole && !namedDone ? namedSymbol(tools) : null;
     if (whole && reader) {
       readWholeDone = true;
       answerNext = true;
@@ -413,6 +436,15 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       note = `${note ? `${note} ` : ''}First reading “${whole.hit.name || whole.hit.file}” whole${whole.score != null ? ` (${Math.round(whole.score * 100)}% likely to help)` : ''}: the search showed ${shows.lines} of its ${shows.of} lines.`;
       action = reader.id;
       given = { range: whole.range };
+    } else if (named) {
+      namedDone = true;
+      answerNext = true;
+      fallback = 'named-symbol';
+      note = `${note ? `${note} ` : ''}First ${named.tool.id === 'kb_find_usages' ? `finding who uses \`${named.name}\`` : `reading the source of \`${named.name}\``}: the request names it, and its code isn’t among the results yet.`;
+      action = named.tool.id;
+      given = { symbol: named.name };
+    } else if (answerNext && action === ANSWER) {
+      note = 'Answering, with what was fetched first.';
     }
 
     if (action === ANSWER || action === CLARIFY) {
@@ -470,7 +502,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
           argsRaw: sameJson(fill.raw, args) ? null : fill.raw,
           argModel: fill.model,
           argAttempts: fill.attempts,
-          argIO: given ? { ...fill.io, note: planned ? `No argument writer: a rule set them (${Object.keys(given).join(', ')}): ${note ?? ''}` : 'No argument writer: the agent set the range to the whole section the search had clipped.' } : fill.io,
+          argIO: given ? { ...fill.io, note: planned ? `No argument writer: a rule set them (${Object.keys(given).join(', ')}): ${note ?? ''}` : fallback === 'named-symbol' ? 'No argument writer: the agent took the symbol the request names.' : 'No argument writer: the agent set the range to the whole section the search had clipped.' } : fill.io,
         });
       } else if (tool.id === 'kb_search') {
         // The fixed pipeline's query: the question itself.

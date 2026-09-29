@@ -39,7 +39,8 @@ export const PLAN_MAX_READS = 2;
 /** Knowledge searches in one turn, at most, counting the one that searched again. */
 export const PLAN_MAX_SEARCHES = 2;
 
-const CALLERS = /\b(who|which|what)\b[^?]*\b(calls?|callers?|uses|usages?|references?|invokes?)\b|\bcallers? of\b|\bwhere is\b[^?]*\b(called|used)\b/i;
+/** The request asks who calls or uses something. */
+export const CALLERS = /\b(who|which|what)\b[^?]*\b(calls?|callers?|uses|usages?|references?|invokes?)\b|\bcallers? of\b|\bwhere is\b[^?]*\b(called|used)\b/i;
 
 /**
  * Identifiers the request names, in order: backticked text, camelCase,
