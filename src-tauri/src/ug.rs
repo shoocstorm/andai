@@ -691,6 +691,109 @@ pub async fn kb_search(
     .map_err(|e| e.to_string())?
 }
 
+/// Most of a source's text the source dialog is sent; a larger file is cut here.
+const MAX_VIEW_BYTES: usize = 512 * 1024;
+/// Budget for ug's report on one file: its outline comes first, relations after.
+const STRUCTURE_CHARS: u32 = 30_000;
+
+/// One source as the source dialog shows it: its metadata, its text, and what ug
+/// indexed from it.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceView {
+    pub source: Source,
+    /// The knowledge base's copy as text, up to `MAX_VIEW_BYTES`. `None` for a
+    /// PDF: its text exists only in ug's index (the outline's page entries).
+    pub text: Option<String>,
+    pub text_truncated: bool,
+    /// ug's `file_context` report: facts, outline and related files.
+    pub structure: Option<Value>,
+    /// Why there's no structure (not indexed yet, ug missing, ug failed).
+    pub structure_error: Option<String>,
+}
+
+/// The source the knowledge base lists under exactly this name. The webview
+/// names a file; only one `kb.json` lists is ever read (AGENTS.md §9).
+fn listed_source<'a>(meta: &'a KbMeta, file: &str) -> Result<&'a Source, String> {
+    if !valid_source_name(file) {
+        return Err("invalid file name".into());
+    }
+    meta.sources.iter().find(|s| s.file == file).ok_or_else(|| format!("“{file}” isn't in this knowledge base."))
+}
+
+/// Up to `cap` bytes of a regular file as text. A symlink is refused, not
+/// followed: `docs/` only ever holds copies Andai wrote.
+fn read_text_capped(path: &Path, cap: usize) -> Result<(String, bool), String> {
+    let meta = fs::symlink_metadata(path).map_err(|e| format!("Can't read the stored copy: {e}"))?;
+    if !meta.is_file() {
+        return Err("The stored copy isn't a regular file.".into());
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .and_then(|f| f.take(cap as u64 + 1).read_to_end(&mut bytes))
+        .map_err(|e| format!("Can't read the stored copy: {e}"))?;
+    let truncated = bytes.len() > cap;
+    bytes.truncate(cap);
+    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    if truncated {
+        // The cut can split a character; drop the replacement it leaves.
+        while text.ends_with('\u{FFFD}') {
+            text.pop();
+        }
+    }
+    Ok((text, truncated))
+}
+
+/// ug's arguments for one file's report. The file goes by its node id
+/// (`file:<name>`), so a name that starts with `-` can't parse as a flag.
+fn structure_args(slug: &str, file: &str) -> Vec<String> {
+    vec![
+        "file_context".into(),
+        format!("file:{file}"),
+        "--max-chars".into(),
+        STRUCTURE_CHARS.to_string(),
+        "-k".into(),
+        "1".into(),
+        "-n".into(),
+        format!("{PROJECT_PREFIX}{slug}"),
+        "--json".into(),
+    ]
+}
+
+/// Everything the source dialog shows about one source: metadata from
+/// `kb.json`, the stored copy's text, and ug's outline and relations for it.
+#[tauri::command]
+pub async fn kb_source(app: AppHandle, slug: String, file: String) -> Result<SourceView, String> {
+    let dir = kb_dir(&app, &slug)?;
+    let meta = read_meta(&dir)?;
+    let source = listed_source(&meta, &file)?.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let docs = dir.join("docs");
+        let (text, text_truncated) = if source.kind == "PDF" {
+            (None, false)
+        } else {
+            let (t, cut) = read_text_capped(&docs.join(&source.file), MAX_VIEW_BYTES)?;
+            (Some(t), cut)
+        };
+        let report = if source.status != "indexed" {
+            Err("Not indexed yet: its structure appears once ug has indexed it.".to_string())
+        } else {
+            ug_path().ok_or_else(|| UG_MISSING.to_string()).and_then(|bin| {
+                let args = structure_args(&slug, &source.file);
+                crate::tools::run(&bin, &args, &docs, std::time::Duration::from_secs(20), 1024 * 1024)
+            })
+        };
+        let (structure, structure_error) = match report {
+            Ok(out) if out.output.is_object() => (Some(out.output), None),
+            Ok(_) => (None, Some("ug's report on this file was too large to read.".into())),
+            Err(e) => (None, Some(e)),
+        };
+        Ok(SourceView { source, text, text_truncated, structure, structure_error })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -739,6 +842,39 @@ mod tests {
         for bad in ["", "..", "../x", "a/b", "a b", "a.b", &"x".repeat(65)] {
             assert!(!valid_slug(bad), "{bad:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn the_source_dialog_reads_only_listed_sources() {
+        let m = meta(vec![source("indexed")], None);
+        assert_eq!(listed_source(&m, "a.md").unwrap().file, "a.md");
+        for bad in ["kb.json", "../kb.json", "b.md", "docs/a.md", ""] {
+            assert!(listed_source(&m, bad).is_err(), "{bad:?} should be refused");
+        }
+    }
+
+    #[test]
+    fn source_text_is_capped_and_never_follows_a_symlink() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("a.md");
+        fs::write(&file, "héllo").unwrap();
+        assert_eq!(read_text_capped(&file, 64).unwrap(), ("héllo".into(), false));
+        // A cut inside "é" (2 bytes) drops the half character instead of showing U+FFFD.
+        assert_eq!(read_text_capped(&file, 2).unwrap(), ("h".into(), true));
+        #[cfg(unix)]
+        {
+            let link = d.path().join("link.md");
+            std::os::unix::fs::symlink(&file, &link).unwrap();
+            assert!(read_text_capped(&link, 64).is_err());
+        }
+        assert!(read_text_capped(d.path(), 64).is_err(), "a directory isn't a source");
+    }
+
+    #[test]
+    fn structure_args_name_the_file_by_id_so_it_cannot_be_a_flag() {
+        let a = structure_args("kb", "--base-url.md");
+        assert_eq!(a[..2], ["file_context", "file:--base-url.md"]);
+        assert!(a.ends_with(&["-n".into(), "andai-kb".into(), "--json".into()]));
     }
 
     #[test]
@@ -984,7 +1120,20 @@ mod tests {
             .arg(docs.path());
         let result = run_json(search);
         let listed = ug_projects().iter().any(|p| p["name"] == project.as_str());
+        let slug = project.strip_prefix(PROJECT_PREFIX).unwrap();
+        let structure = crate::tools::run(
+            &ug_path().unwrap(),
+            &structure_args(slug, "notes.md"),
+            docs.path(),
+            std::time::Duration::from_secs(20),
+            1024 * 1024,
+        );
         cleanup();
+
+        // The source dialog's outline: the file's headings, with their lines.
+        let report = structure.expect("file_context JSON").output;
+        let outline = serde_json::to_string(&report["files"][0]["items"]).unwrap();
+        assert!(outline.contains("\"Isolation\"") && outline.contains("\"outline\""), "outline should list the headings: {outline}");
 
         let items = result.expect("search JSON")["items"].as_array().cloned().unwrap_or_default();
         assert!(listed, "project should appear in `ug list --json`");

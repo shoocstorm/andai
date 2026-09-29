@@ -228,6 +228,15 @@ pasting in whatever one search returns:
 - **Kind: documents, code or mixed**, set automatically from your files and
   changeable next to the source list. It decides which agent tools apply:
   the code tools (symbols, callers) are offered only for code.
+- **Look inside a source.** Click a file's name in the source list to open
+  it: **Overview** (size, tokens, lines, where it was added from, when it was
+  added and indexed, language), **Content** (Markdown rendered or as numbered
+  text, code with line numbers; a PDF shows the text ug indexed from each
+  page) and **Structure** (the sections, pages or code symbols ug split it
+  into, with their lines, plus related files such as imports and files in the
+  same folder). Clicking an outline entry shows its lines; clicking a related
+  file in the same knowledge base opens it. Files over 512 KB show their
+  first 512 KB.
 - **Retrieval controls:** how many passages to retrieve (4 / 8 / 16 / 32) and
   how much text to give the model per question.
 - Remove a source or delete a whole knowledge base at any time. Your original

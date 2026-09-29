@@ -11,11 +11,13 @@ import {
   kbList,
   kbRemoveSource,
   kbSetKind,
+  kbSource,
   ugStatus,
   type KbInfo,
   type KbKind,
   type UgStatus,
 } from '../kb/api';
+import type { SourceView } from '../kb/source';
 import { toast } from './ui';
 
 type KbState = {
@@ -176,6 +178,15 @@ export async function setKind(slug: string, kind: KbKind | null) {
     upsert(await kbSetKind(slug, kind));
   } catch (e) {
     toast({ tone: 'error', title: 'Could not change the knowledge base kind', body: errText(e) });
+  }
+}
+
+/** Loads what the source dialog shows about one source; throws a message the dialog can show. */
+export async function viewSource(slug: string, file: string): Promise<SourceView> {
+  try {
+    return await kbSource(slug, file);
+  } catch (e) {
+    throw new Error(errText(e));
   }
 }
 

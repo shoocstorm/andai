@@ -98,6 +98,7 @@ Andai/
 │  ├─ agent/evidence.ts      PURE: merges what the tools found into the answer's passages (same node, covered ranges, order)
 │  ├─ agent/tools/           tool registry (code only), ug tools, argument filling, schema validation + GBNF
 │  ├─ kb/api.ts              typed wrappers over the Rust ug bridge + hit dedupe
+│  ├─ kb/source.ts          PURE: reads ug's file_context report (outline, facts, related files) for the source dialog
 │  ├─ kb/samples.ts          the bundled sample knowledge bases (Tidewater Ferries) and their suggested questions
 │  ├─ state/                 zustand stores: chat, kb, tools, persona, theme, layout, ui (persisted where noted)
 │  ├─ screens/, shell/, components/
@@ -631,7 +632,7 @@ level defaults to *Ask*.
 |---|---|---|
 | Chat, streaming, stop, think folding | Real | `llm/engine.ts`, `agent/turn.ts` |
 | Reasoning chips, Execution Trace, stats | Real (actual step timings, tokens, tok/s; every decision and tool call) | `agent/turn.ts`, `agent/loop.ts`, `screens/AgentTrace.tsx` |
-| Knowledge bases: create, ingest, index, search, delete | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts` |
+| Knowledge bases: create, ingest, index, search, delete; view a source's details, content and structure | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts`, `screens/SourceDialog.tsx` |
 | Sample knowledge bases (Tidewater Ferries: documents, code, both), suggested questions | Real (bundled files, indexed by the user's ug) | `src-tauri/src/samples.rs`, `kb/samples.ts`, `screens/Knowledge.tsx` |
 | Laya decision model (download, verify, load, decide, stop question, relevance check, search scope, claim check; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
 | Agent tool loop: decisions, 8 ug tools, per-tool policy, approvals, decision model, Tools screen | Real | `agent/loop.ts`, `agent/tools/`, `llm/decide.ts`, `state/tools.ts`, `screens/Tools.tsx`, `src-tauri/src/tools.rs` |
@@ -1041,6 +1042,7 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Laya decisions: state ≤ 64 KB, question ≤ 2 KB, 2–16 options with `[a-z0-9_]` ids, text ≤ 1 KB; mask tokens stripped from all input | `laya/mod.rs` `validate`, `laya/prompt.rs` | Rust unit tests |
 | Laya relevance and claim checks: a fixed statement in Rust (`RELEVANT`, `SUPPORTS`), never text from the webview; 1–24 passages or claims, request ≤ 4 KB, statement ≤ 2 KB, passage ≤ 16 KB, source ≤ 512 bytes | `laya/mod.rs` `validate_passages`, `validate_claims` | Rust unit tests |
 | MLX chat models: closed catalog in Rust (commit, sizes, sha256), the same verified store as Laya; generation bounded (1–512 messages ≤ 512 KB, no NUL, max_tokens ≤ 8192, sampling ranges, grammar ≤ 8 KB, context 512–32768); roles are system/user/assistant only | `llm/catalog.rs`, `laya/store.rs`, `llm/mod.rs` `validate` | Rust unit tests; `test:llm` |
+| Source dialog (`kb_source`): the file must be one `kb.json` lists (bare name, exact match), read from the KB's own `docs/` copy, never through a symlink, at most 512 KB; its outline comes from `ug file_context file:<name>` (a node id, so a name can't parse as a flag) under `tools::run` (scrubbed env, 20 s, 1 MB cap). Text is shown through `<Markdown>` or as plain text | `ug.rs` `kb_source`, `screens/SourceDialog.tsx` | Rust unit tests; `test:ug` checks the outline against real ug; `SourceDialog.test.tsx` |
 | Sample knowledge bases: a closed list of ids; files only from the app's resource folder, copied like a user's | `samples.rs` | Rust unit tests |
 | Models added from Hugging Face: only public, ungated repos; pinned to the commit seen when picked; GGUF by its LFS sha256 (the webview's integrity gate); MLX through Rust: repo/commit syntax, a closed set of file names (config, tokenizer, template, safetensors; no pickle, no code), sizes and caps (32 GB a file, 64 GB a model, 16 MB inline, 32 models), config and template checked before any download, manifest written and re-validated by Rust, inline files re-hashed on every load. Search results and model data are shown as text, never Markdown or HTML; no model card is rendered | `llm/hub.ts`, `llm/custom.ts`, `src-tauri/src/llm/custom.rs`, `config.rs` | `hub.test.ts`, `custom.test.ts`, Rust unit tests, `security.test.ts`; e2e (search, inspect, add, remove) |
 | Only `llm/laya.ts` may `fetch`, and only `pinnedFileUrl(...)` (pinned HF commits); tokenizers built without its `http` feature | `llm/laya.ts`, `llm/models.ts`, `Cargo.toml` | `security.test.ts`, `models.test.ts` |

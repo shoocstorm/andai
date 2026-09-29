@@ -24,6 +24,7 @@
     "allow-kb-set-kind",
     "allow-kb-add-sample",
     "allow-kb-tool",
+    "allow-kb-source",
     "allow-laya-status",
     "allow-laya-write-chunk",
     "allow-laya-finish",

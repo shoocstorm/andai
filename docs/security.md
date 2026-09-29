@@ -89,6 +89,10 @@ base (see *Agentic retrieval* in [features.md](features.md)).
   files `0600`). On Windows the folder is inside your user profile
   (`%APPDATA%`) and inherits its permissions: your account, SYSTEM and
   administrators can read it. Andai doesn't set tighter permissions there yet.
+- Viewing a source (click its name on the Knowledge screen) reads only
+  Andai's own copy of a file the knowledge base lists, never an arbitrary
+  path, and shows it as inert text: no images load and links can only be
+  copied.
 
 ### Andai only shows its own interface
 

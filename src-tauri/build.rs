@@ -17,6 +17,7 @@ const COMMANDS: &[&str] = &[
     "kb_set_kind",
     "kb_add_sample",
     "kb_tool",
+    "kb_source",
     "laya_status",
     "laya_write_chunk",
     "laya_finish",

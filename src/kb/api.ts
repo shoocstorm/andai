@@ -1,5 +1,6 @@
 // Typed wrappers over the Rust `ug` bridge (src-tauri/src/ug.rs).
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import type { SourceView } from './source';
 
 export type Source = {
   file: string;
@@ -68,6 +69,9 @@ export const kbAddFiles = (slug: string, paths: string[]) =>
 export const kbRemoveSource = (slug: string, file: string) => call<KbInfo>('kb_remove_source', { slug, file });
 export const kbDelete = (slug: string) => call<void>('kb_delete', { slug });
 export const kbIndex = (slug: string) => call<KbInfo>('kb_index', { slug });
+
+/** A source's metadata, stored text and ug's outline of it, for the source dialog; Rust reads only files `kb.json` lists. */
+export const kbSource = (slug: string, file: string) => call<SourceView>('kb_source', { slug, file });
 
 export const kbSetKind = (slug: string, kind: KbKind | null) => call<KbInfo>('kb_set_kind', { slug, kind });
 /** Adds a bundled sample (kb/samples.ts) as a knowledge base, or returns the one already added. Index it next. */

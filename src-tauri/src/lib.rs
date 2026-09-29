@@ -111,6 +111,7 @@ pub fn run() {
             ug::kb_set_kind,
             samples::kb_add_sample,
             tools::kb_tool,
+            ug::kb_source,
             laya::laya_status,
             laya::laya_write_chunk,
             laya::laya_finish,

@@ -20,6 +20,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Bar, Modal, Segmented, Slider, fmtAgo, fmtBytes } from '../components/ui';
 import { inTauri, kbPickFiles, openUgWebsite, type KbInfo, type KbKind, type Source } from '../kb/api';
 import { SAMPLES, type SampleDef } from '../kb/samples';
+import { SourceDialog } from './SourceDialog';
 import { addFiles, addSample, createKb, deleteKb, indexKb, removeSource, setKind, useKb } from '../state/kb';
 import { toast, useUi } from '../state/ui';
 
@@ -201,8 +202,9 @@ const KIND_ICON: Record<Source['kind'], typeof FileText> = {
   CODE: Code2,
 };
 
-function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) {
+export function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) {
   const grounding = useKb((s) => s.grounding);
+  const [viewing, setViewing] = useState<string | null>(null);
   const healthy = kb.sources.filter((s) => s.status === 'indexed').length;
   const indexing = kb.status === 'indexing';
   return (
@@ -248,10 +250,16 @@ function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) {
             return (
               <tr key={s.file}>
                 <td>
-                  <div className="kn-name" title={s.original}>
+                  <button
+                    type="button"
+                    className="kn-name"
+                    title={`View ${s.file}: details, content and structure`}
+                    aria-label={`View ${s.file}`}
+                    onClick={() => setViewing(s.file)}
+                  >
                     <Icon size={20} strokeWidth={1.6} color="var(--text-2)" />
                     <span className="ellipsis">{s.file}</span>
-                  </div>
+                  </button>
                 </td>
                 <td>
                   <span className="kn-type">{s.kind}</span>
@@ -286,6 +294,7 @@ function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) {
           <AlertTriangle size={15} /> {kb.lastError}
         </div>
       )}
+      <SourceDialog kb={kb} file={viewing} onClose={() => setViewing(null)} />
     </div>
   );
 }
