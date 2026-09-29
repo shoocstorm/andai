@@ -39,7 +39,9 @@ model download nothing leaves the machine: no account, no API key, no cloud.
   exact system prompt.
 - **Execution Trace.** A side panel with each step's status and timing,
   each decision and tool call (see below), the sources used, live throughput (tokens/second) and how much of the model's
-  context window the turn used. Hide it for a focused view (`⌘J`).
+  context window the turn used. It starts hidden; open it with the panel
+  button or `⌘J`. While it's hidden and the agent is working, the button
+  pulses and the header shows the current step.
 - **Conversation memory.** Earlier turns are carried into follow-up questions
   (within the model's context budget), and your history is kept between launches.
 

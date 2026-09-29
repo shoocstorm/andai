@@ -213,6 +213,20 @@ describe('Command Center', () => {
     });
     render(<CommandCenter />);
     expect(screen.getByRole('status')).toHaveTextContent('Step 2/4 · Knowledge retrieval');
+    expect(screen.getByRole('button', { name: 'Show execution trace' })).toHaveClass('breathing');
+  });
+
+  it('keeps the trace toggle still when the agent is idle or the trace is open', () => {
+    const { unmount } = render(<CommandCenter />);
+    expect(screen.getByRole('button', { name: 'Hide execution trace' })).not.toHaveClass('breathing');
+    unmount();
+    useLayout.setState({ traceOpen: false });
+    render(<CommandCenter />);
+    expect(screen.getByRole('button', { name: 'Show execution trace' })).not.toHaveClass('breathing');
+  });
+
+  it('hides the execution trace until the user opens it', () => {
+    expect(useLayout.getInitialState().traceOpen).toBe(false);
   });
 });
 

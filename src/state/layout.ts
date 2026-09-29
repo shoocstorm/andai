@@ -5,7 +5,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 type LayoutState = {
   /** Left nav shows icons only. */
   navCollapsed: boolean;
-  /** Execution Trace panel visible in Command Center. */
+  /** Execution Trace panel visible in Command Center (hidden until the user opens it). */
   traceOpen: boolean;
   toggleNav: () => void;
   toggleTrace: () => void;
@@ -15,7 +15,7 @@ export const useLayout = create<LayoutState>()(
   persist(
     (set) => ({
       navCollapsed: false,
-      traceOpen: true,
+      traceOpen: false,
       toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
       toggleTrace: () => set((s) => ({ traceOpen: !s.traceOpen })),
     }),

@@ -28,7 +28,6 @@
   --backdrop: #05070acc;
   --tile-grad: linear-gradient(160deg, #1f2736, #141923);
   --answer-bg: linear-gradient(180deg, #1a202bee, #161b24ee);
-  --orb-frame: linear-gradient(160deg, #262d3b, #151a23);
   --orb-well: radial-gradient(circle at 50% 45%, #3a3f4a, #23262d 70%);
   --well-shadow: #000000;
 
@@ -77,6 +76,8 @@
   --grad-cta: linear-gradient(180deg, #9cc9ff 0%, #5a9bff 100%);
   --grad-orb: linear-gradient(135deg, #8ec1ff 0%, #d3a8ff 100%);
   --grad-brand: linear-gradient(90deg, #8ec1ff 0%, #b8b0ff 55%, #d3a8ff 100%);
+  /* the white-hot center of the standby core */
+  --core-hot: #f2f8ff;
 
   --shadow-color: #000000;
   --shadow-panel: 0 1px 0 #ffffff08 inset, 0 12px 32px -18px #000000cc;
@@ -120,7 +121,6 @@
   --backdrop: #0b12205c;
   --tile-grad: linear-gradient(160deg, #ffffff, #eaeef5);
   --answer-bg: linear-gradient(180deg, #ffffff, #fbfcfe);
-  --orb-frame: linear-gradient(160deg, #ffffff, #eaeef5);
   --orb-well: radial-gradient(circle at 50% 45%, #f1f4f9, #dde3ec 70%);
   --well-shadow: #0b122022;
 
@@ -163,6 +163,7 @@
 
   --grad-cta: linear-gradient(180deg, #4d8cf5 0%, #2f6fe0 100%);
   --grad-brand: linear-gradient(90deg, #2f6fe0 0%, #5a5ce0 55%, #7a4bd8 100%);
+  --core-hot: #ffffff;
 
   --shadow-color: #0b122033;
   --shadow-panel: 0 1px 2px #0b12200d, 0 10px 30px -18px #0b122040;

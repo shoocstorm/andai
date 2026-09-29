@@ -185,6 +185,116 @@
 .cc-trace-toggle:hover {
   color: var(--blue);
 }
+/* trace hidden while the agent works: the toggle breathes */
+.cc-trace-toggle.breathing {
+  color: var(--blue);
+  animation: toggle-breathe 2.2s ease-in-out infinite;
+}
+@keyframes toggle-breathe {
+  0%,
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    background: var(--blue-soft);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 35%, transparent), 0 0 18px -2px var(--blue-glow);
+  }
+}
+
+/* ambient backdrop while standing by: slow aurora and a faint grid that breathe */
+.cc-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.cc-aurora {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: var(--aurora-alpha, 0.55);
+  transition: opacity 0.6s var(--ease);
+  will-change: transform, opacity;
+}
+:root[data-theme='light'] .cc-ambient {
+  --aurora-alpha: 0.32;
+}
+.cc-aurora.a1 {
+  width: 620px;
+  height: 620px;
+  left: 8%;
+  top: -18%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--blue-strong) 45%, transparent), transparent 68%);
+  animation: aurora-a 14s ease-in-out infinite;
+}
+.cc-aurora.a2 {
+  width: 560px;
+  height: 560px;
+  right: 2%;
+  bottom: -22%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--violet) 42%, transparent), transparent 68%);
+  animation: aurora-b 18s ease-in-out infinite;
+}
+.cc-aurora.a3 {
+  width: 420px;
+  height: 420px;
+  left: 34%;
+  top: 30%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--blue) 30%, transparent), transparent 70%);
+  animation: aurora-breathe 7s ease-in-out infinite;
+}
+@keyframes aurora-a {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(60px, 40px) scale(1.15);
+  }
+}
+@keyframes aurora-b {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1.05);
+  }
+  50% {
+    transform: translate(-70px, -30px) scale(0.9);
+  }
+}
+@keyframes aurora-breathe {
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: calc(var(--aurora-alpha, 0.55) * 0.5);
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: var(--aurora-alpha, 0.55);
+  }
+}
+.cc-grid {
+  position: absolute;
+  inset: -40px;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--ink) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--ink) 5%, transparent) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 55% 50% at 45% 48%, #000 0%, transparent 75%); /* theme-literal: mask alpha */
+  animation: grid-breathe 7s ease-in-out infinite;
+}
+@keyframes grid-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+}
 .cc-minitrace {
   display: inline-flex;
   align-items: center;
@@ -200,6 +310,8 @@
 }
 .cc-hub,
 .cc-trace {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -410,7 +522,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* safe: when the window is short, scroll from the top instead of clipping it */
+  justify-content: safe center;
   text-align: center;
   padding: 20px 20px 30px;
   gap: 8px;
@@ -425,29 +538,306 @@
   margin: 0 0 18px;
   font-size: 15px;
 }
-.cc-orb {
-  width: 120px;
-  height: 120px;
-  border-radius: 30px;
-  padding: 14px;
-  background: var(--orb-frame);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 30px 60px -30px color-mix(in srgb, var(--blue-strong) 53%, transparent), 0 0 80px -20px color-mix(in srgb, var(--violet) 33%, transparent);
+.cc-core {
+  flex: none;
+  margin: 0 0 -14px;
 }
-.cc-orb-inner {
-  width: 100%;
+.cc-core + h2 {
+  margin-top: 0;
+}
+
+/* NeuralCore (components/NeuralCore.tsx) */
+.nc {
+  position: relative;
+  animation: nc-breathe 4.8s ease-in-out infinite;
+}
+.nc svg {
+  position: relative;
+  display: block;
+  overflow: visible;
+}
+/* the glow has no edge, so the core melts into the ambient backdrop. It
+   fades out inside the core's own box: .cc-empty scrolls, and a glow past
+   its top was cut off in a hard line. */
+.nc-halo {
+  position: absolute;
+  inset: -12%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--blue) 30%, transparent) 0%,
+    color-mix(in srgb, var(--violet) 14%, transparent) 38%,
+    transparent 70%
+  );
+  animation: nc-halo 4.8s ease-in-out infinite;
+}
+:root[data-theme='light'] .nc-halo {
+  opacity: 0.7;
+}
+/* the user is typing: the core and the backdrop answer, brighter */
+.nc svg,
+.nc-halo {
+  transition:
+    transform 0.5s var(--ease),
+    filter 0.5s var(--ease);
+}
+.cc:has(.cc-composer:focus-within) .nc svg {
+  transform: scale(1.06);
+  filter: brightness(1.25) saturate(1.2) drop-shadow(0 0 10px var(--blue-glow));
+}
+.cc:has(.cc-composer:focus-within) .nc-halo {
+  filter: brightness(1.5) saturate(1.3);
+}
+.cc:has(.cc-composer:focus-within) .nc-orbit {
+  stroke-width: 1.3;
+}
+.cc:has(.cc-composer:focus-within) .cc-ambient {
+  --aurora-alpha: 0.8;
+}
+:root[data-theme='light'] .cc:has(.cc-composer:focus-within) .cc-ambient {
+  --aurora-alpha: 0.5;
+}
+@keyframes nc-breathe {
+  50% {
+    transform: scale(1.03);
+  }
+}
+@keyframes nc-halo {
+  0%,
+  100% {
+    transform: scale(0.9);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+}
+.nc-stop-hot {
+  stop-color: var(--core-hot);
+}
+.nc-stop-blue {
+  stop-color: var(--blue);
+}
+.nc-stop-violet {
+  stop-color: var(--violet);
+}
+.nc-dial {
+  stroke: color-mix(in srgb, var(--blue) 40%, transparent);
+  stroke-width: 0.8;
+  transform-origin: 0 0;
+  animation: spin 80s linear infinite;
+}
+.nc-scan {
+  fill: none;
+  stroke: var(--violet);
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-dasharray: 14 86;
+  opacity: 0.7;
+  transform-origin: 0 0;
+  animation: spin 6s linear infinite reverse;
+}
+.nc-orbit {
+  fill: none;
+  stroke-width: 0.9;
+}
+.nc-node {
+  fill: var(--core-hot);
+  stroke: var(--blue);
+  stroke-width: 1.2;
+  filter: drop-shadow(0 0 3px var(--blue));
+}
+.nc-sphere {
+  fill: none;
+  stroke: color-mix(in srgb, var(--blue) 45%, transparent);
+  stroke-width: 0.7;
+  transform-origin: 0 0;
+  animation: nc-tilt 12s ease-in-out infinite;
+}
+@keyframes nc-tilt {
+  50% {
+    transform: rotate(14deg);
+  }
+}
+/* meridians narrow and widen out of phase: the sphere seems to turn */
+.nc-meridian {
+  stroke: color-mix(in srgb, var(--violet) 55%, transparent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nc-meridian 6s ease-in-out infinite;
+}
+@keyframes nc-meridian {
+  0%,
+  100% {
+    transform: scaleX(1);
+  }
+  50% {
+    transform: scaleX(0.02);
+  }
+}
+.nc-heart {
+  transform-origin: 0 0;
+  animation: nc-heart 2.4s ease-in-out infinite;
+}
+@keyframes nc-heart {
+  50% {
+    transform: scale(1.16);
+    opacity: 0.85;
+  }
+}
+.nc-spark {
+  fill: var(--core-hot);
+  filter: drop-shadow(0 0 6px var(--core-hot)) drop-shadow(0 0 12px var(--blue));
+}
+
+/* empty Execution Trace: a scanner at rest */
+.trace-idle {
   height: 100%;
-  border-radius: 20px;
-  background: var(--grad-orb);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 30px 20px;
+  color: var(--text-3);
+  background: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--blue) 9%, transparent), transparent 62%);
+}
+.ti-scope {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  margin-bottom: 10px;
   display: grid;
   place-items: center;
-  color: #141a26; /* theme-literal: dark glyph on the pastel orb */
-  box-shadow: 0 0 40px -6px color-mix(in srgb, var(--violet) 67%, transparent) inset;
-  animation: breathe 4s ease-in-out infinite;
 }
-@keyframes breathe {
+.ti-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--blue) 22%, transparent);
+}
+.ti-ring.r1 {
+  inset: 0;
+  border-style: dashed;
+  animation: spin 30s linear infinite;
+}
+.ti-ring.r2 {
+  inset: 22px;
+  animation: ti-ring 3.6s ease-in-out infinite;
+}
+.ti-ring.r3 {
+  inset: 44px;
+  border-color: color-mix(in srgb, var(--violet) 30%, transparent);
+  animation: ti-ring 3.6s ease-in-out 1.2s infinite;
+}
+@keyframes ti-ring {
   50% {
-    filter: brightness(1.12) saturate(1.1);
+    border-color: color-mix(in srgb, var(--blue) 55%, transparent);
+    box-shadow: 0 0 16px -4px var(--blue-glow);
+  }
+}
+.ti-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, transparent 290deg, color-mix(in srgb, var(--blue) 30%, transparent) 360deg);
+  mask-image: radial-gradient(circle, transparent 18px, #000 19px); /* theme-literal: mask alpha */
+  animation: spin 5s linear infinite;
+}
+.ti-core {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--blue);
+  background: var(--blue-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 30%, transparent) inset;
+  animation: ti-core 3.6s ease-in-out infinite;
+}
+@keyframes ti-core {
+  50% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 55%, transparent) inset, 0 0 26px -2px var(--blue-glow);
+  }
+}
+.ti-label {
+  color: var(--blue);
+  letter-spacing: 0.18em;
+}
+.ti-title {
+  font: 600 16px/1.2 var(--font-display);
+  color: var(--text-2);
+}
+.ti-text {
+  font-size: 12.5px;
+  max-width: 250px;
+}
+.ti-stages {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+}
+.ti-stages li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font: 500 10px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-4);
+  animation: ti-stage 2.4s ease-in-out infinite;
+}
+.ti-stages li i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+@keyframes ti-stage {
+  0%,
+  60%,
+  100% {
+    color: var(--text-4);
+    border-color: var(--border);
+  }
+  25% {
+    color: var(--blue);
+    border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-aurora,
+  .cc-grid,
+  .nc,
+  .nc-halo,
+  .nc-dial,
+  .nc-scan,
+  .nc-sphere,
+  .nc-meridian,
+  .nc-heart,
+  .cc-trace-toggle.breathing,
+  .cc-composer:focus-within,
+  .ti-ring,
+  .ti-sweep,
+  .ti-core,
+  .ti-stages li {
+    animation: none;
+  }
+  .cc-composer:focus-within {
+    box-shadow: var(--shadow-panel), 0 0 0 1px color-mix(in srgb, var(--blue) 18%, transparent), 0 0 32px -10px var(--blue-glow);
+  }
+  /* no motion: the toggle stays lit instead of breathing */
+  .cc-trace-toggle.breathing {
+    background: var(--blue-soft);
   }
 }
 .cc-setup {
@@ -510,6 +900,23 @@
   width: 100%;
   margin: 8px auto 0;
   padding: 14px 16px 16px;
+  transition:
+    border-color 0.25s var(--ease),
+    box-shadow 0.25s var(--ease);
+}
+/* typing: the composer lights up and breathes */
+.cc-composer:focus-within {
+  border-color: color-mix(in srgb, var(--blue) 45%, transparent);
+  animation: composer-glow 2.4s ease-in-out infinite;
+}
+@keyframes composer-glow {
+  0%,
+  100% {
+    box-shadow: var(--shadow-panel), 0 0 0 1px color-mix(in srgb, var(--blue) 18%, transparent), 0 0 28px -10px var(--blue-glow);
+  }
+  50% {
+    box-shadow: var(--shadow-panel), 0 0 0 1px color-mix(in srgb, var(--violet) 30%, transparent), 0 0 44px -8px var(--blue-glow);
+  }
 }
 .cc-tools {
   display: flex;

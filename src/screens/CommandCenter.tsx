@@ -30,6 +30,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { available, policyOf } from '../agent/tools/registry';
 import { runTurn, stopTurn } from '../agent/turn';
 import { Bar, CopyButton, Markdown, Stat, fmtTime } from '../components/ui';
+import { NeuralCore } from '../components/NeuralCore';
 import { debugReport } from '../agent/debugReport';
 import { inTauri } from '../kb/api';
 import { sampleByName } from '../kb/samples';
@@ -67,6 +68,16 @@ export function CommandCenter() {
 
   return (
     <div className={`screen cc${traceOpen ? '' : ' no-trace'}`}>
+      <AnimatePresence>
+        {!messages.length && (
+          <motion.div className="cc-ambient" aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.6 }}>
+            <i className="cc-aurora a1" />
+            <i className="cc-aurora a2" />
+            <i className="cc-aurora a3" />
+            <i className="cc-grid" />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <section className="cc-hub">
         <HubHeader latest={lastAssistant} />
         <Thread messages={messages} focusedId={focused?.id} onFocus={setFocusId} />
@@ -115,7 +126,8 @@ function HubHeader({ latest }: { latest?: Message }) {
         <RotateCw size={13} /> New session
       </button>
       <button
-        className={`icon-btn cc-trace-toggle${traceOpen ? ' on' : ''}`}
+        // Hidden trace, agent working: the toggle breathes so the work stays one click away.
+        className={`icon-btn cc-trace-toggle${traceOpen ? ' on' : busy ? ' breathing' : ''}`}
         aria-label={traceOpen ? 'Hide execution trace' : 'Show execution trace'}
         aria-pressed={traceOpen}
         title={`${traceOpen ? 'Hide' : 'Show'} execution trace (${shortcut('J')})`}
@@ -493,10 +505,8 @@ function EmptyHub() {
   const pct = progress && progress.total ? progress.loaded / progress.total : 0;
   return (
     <div className="cc-empty">
-      <motion.div className="cc-orb" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-        <div className="cc-orb-inner">
-          <Sparkles size={30} />
-        </div>
+      <motion.div className="cc-core" initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.6, ease: [0.2, 0.7, 0.2, 1] }}>
+        <NeuralCore />
       </motion.div>
       <h2 className="display">
         {name} <span className="grad-text">standing by</span>
@@ -795,6 +805,38 @@ const STATUS_PILL: Record<TraceStep['status'], [string, string]> = {
   error: ['Failed', 'red'],
 };
 
+const IDLE_STAGES = ['Decide', 'Tool', 'Observe', 'Answer'];
+
+/** The empty trace: a scanner at rest and the loop's stages, waiting for a task. */
+function TraceIdle() {
+  return (
+    <div className="trace-idle">
+      <div className="ti-scope" aria-hidden="true">
+        <i className="ti-ring r1" />
+        <i className="ti-ring r2" />
+        <i className="ti-ring r3" />
+        <i className="ti-sweep" />
+        <span className="ti-core">
+          <CircleDashed size={22} />
+        </span>
+      </div>
+      <div className="label ti-label">Awaiting transmission</div>
+      <div className="ti-title">No task yet</div>
+      <div className="ti-text">
+        Each transmission is traced here — every decision and tool call, context assembly and generation, step by step.
+      </div>
+      <ol className="ti-stages" aria-hidden="true">
+        {IDLE_STAGES.map((s, i) => (
+          <li key={s} style={{ animationDelay: `${i * 0.6}s` }}>
+            <i />
+            {s}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function TracePanel({ msg }: { msg?: Message }) {
   const engine = useEngine();
   const maxTokens = usePersona((s) => s.maxTokens);
@@ -825,13 +867,7 @@ function TracePanel({ msg }: { msg?: Message }) {
       </div>
       <div className="panel trace">
         {!msg ? (
-          <div className="empty" style={{ height: '100%' }}>
-            <CircleDashed size={30} />
-            <div>No task yet</div>
-            <div style={{ fontSize: 12.5, maxWidth: 240 }}>
-              Each transmission is traced here — every decision and tool call, context assembly and generation, step by step.
-            </div>
-          </div>
+          <TraceIdle />
         ) : (
           <div className="trace-rail">
             <TraceNode state={active ? 'active' : 'done'}>
