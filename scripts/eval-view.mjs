@@ -15,7 +15,8 @@ import { join, resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const dir = join(root, 'eval');
 const viewer = join(root, 'scripts', 'eval-viewer.html');
-const REPORT = /^[\w.-]+\.json$/;
+// `+` joins setups in report names (`item15-v6-1.7b-mlx+en.json`); no path separators.
+const REPORT = /^[\w.+-]+\.json$/;
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 

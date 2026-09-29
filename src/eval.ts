@@ -45,6 +45,7 @@ function report(c: EvalCase, msg: Message | undefined, error: string | null, ms:
       action: a.action,
       fallback: a.fallback ?? null,
       note: a.note ?? null,
+      planned: a.planned ?? false,
       decision: a.decision && {
         chosen: a.decision.chosen,
         confidence: a.decision.confidence,

@@ -27,12 +27,14 @@ const q = { id: 'q', kb: 'docs', prompt: '?', first: ['kb_search'], facts: ['48'
 const call = (over: Record<string, unknown> = {}) => ({ tool: 'kb_search', status: 'done', args: { query: 'x' }, argsFallback: false, hits: 2, error: null, observation: '', ...over });
 
 describe('agent eval question set', () => {
-  it('has 20–50 questions with unique ids, a known KB, expected first actions and valid regexes', () => {
+  it('has 20–110 questions with unique ids, a known KB, expected first actions and valid regexes', () => {
     // Items add questions that exercise what they change (docs/agentic-rag-improvements.md);
-    // past 50 a run takes long enough that it stops being run before every change
-    // (45 questions: about a minute on the native engine with Laya, item 15).
+    // 100 questions tell a 1–2 question change from noise better than 45 did,
+    // at about 2 minutes on the native engine with Laya (about 1 s a question)
+    // and 9 minutes with wllama Qwen3 0.6B; past 110 it stops being run before
+    // every change. Use --only for a quick look.
     expect(cases.length).toBeGreaterThanOrEqual(20);
-    expect(cases.length).toBeLessThanOrEqual(50);
+    expect(cases.length).toBeLessThanOrEqual(110);
     expect(new Set(cases.map((c: { id: string }) => c.id)).size).toBe(cases.length);
     for (const c of cases) {
       expect(['docs', 'code', 'mixed', 'large']).toContain(c.kb);

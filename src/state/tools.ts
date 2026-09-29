@@ -13,12 +13,21 @@ type ToolsState = {
   minConfidence: number;
   /** Search as the first step without a decision, unless the request is small talk (loop.ts). */
   searchFirst: boolean;
+  /**
+   * The evidence plan (agent/plan.ts, item 16), with a Laya decision model:
+   * code picks the follow-ups its rules cover; `hybrid` asks the decision
+   * model when none applies, `pure` answers. Off by default: measured faster,
+   * not more accurate (docs/agentic-rag-improvements.md).
+   */
+  plan: 'off' | 'hybrid' | 'pure';
+  /** With Laya, search once more (the question as written, the other scope) when nothing found scores as helping. Off by default. */
+  searchAgain: boolean;
   /** Per-tool user setting; a tool that isn't listed uses its default (registry.defaultPolicy). */
   policies: Record<string, Policy>;
   stats: Record<string, ToolStats>;
 };
 
-export const TOOL_DEFAULTS = { agentMode: true, maxSteps: 20, minConfidence: 0.3, searchFirst: true };
+export const TOOL_DEFAULTS = { agentMode: true, maxSteps: 20, minConfidence: 0.3, searchFirst: true, plan: 'off' as ToolsState['plan'], searchAgain: false };
 
 export const useTools = create<ToolsState>()(
   persist((): ToolsState => ({ ...TOOL_DEFAULTS, policies: {}, stats: {} }), {
@@ -28,7 +37,7 @@ export const useTools = create<ToolsState>()(
 );
 
 export const setPolicy = (id: string, policy: Policy) => useTools.setState((s) => ({ policies: { ...s.policies, [id]: policy } }));
-export const setAgent = (patch: Partial<Pick<ToolsState, 'agentMode' | 'maxSteps' | 'minConfidence'>>) => useTools.setState(patch);
+export const setAgent = (patch: Partial<Pick<ToolsState, 'agentMode' | 'maxSteps' | 'minConfidence' | 'plan' | 'searchAgain'>>) => useTools.setState(patch);
 
 export function recordToolRun(id: string, ms: number, ok: boolean) {
   useTools.setState((s) => {

@@ -32,10 +32,11 @@ const value = (name) => {
   const i = argv.indexOf(name);
   return i === -1 ? undefined : argv[i + 1];
 };
-const model = process.env.EVAL_MODEL ?? 'qwen3-0.6b';
+const model = process.env.EVAL_MODEL ?? 'qwen3-0.6b-mlx';
 const decider = process.env.EVAL_DECIDER || null;
 const seed = Number(process.env.EVAL_SEED ?? 7);
-const timeoutMs = Number(process.env.EVAL_TIMEOUT_MS ?? 1_800_000);
+// 100 questions on wllama Qwen3 1.7B take about 21 minutes, plus loading and indexing.
+const timeoutMs = Number(process.env.EVAL_TIMEOUT_MS ?? 2_700_000);
 const only = value('--only')?.split(',');
 
 const fixtures = resolve(root, 'tests/fixtures/eval');

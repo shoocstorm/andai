@@ -9,7 +9,8 @@
   run, or two compared, as an evaluation report. `bun run eval:view` serves it
   with every report in eval/ listed (scripts/eval-view.mjs). Opened as a plain
   file it still works: drop reports on it. Everything is inline; nothing goes
-  online. Dropped reports stay in this browser's localStorage until cleared.
+  online. Dropped reports and the run library's filters stay in this browser's
+  localStorage until cleared.
 -->
 <style>
 /* Colours mirror src/theme/tokens.css: light first, dark in the two blocks after. */
@@ -20,7 +21,8 @@
   --blue: #2f6fe0; --blue-soft: #2f6fe01a; --violet: #7a4bd8; --violet-soft: #7a4bd81a;
   --amber: #b45309; --amber-soft: #b453091a; --red: #d33c3c; --red-soft: #d33c3c14; --green: #13875a; --green-soft: #13875a17;
   --mark-fact: #13875a2e; --mark-cite: #2f6fe024;
-  --serif: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --shadow: 0 1px 2px #0b12200d, 0 4px 16px #0b12200a;
+  --display: "Space Grotesk", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -33,6 +35,7 @@
     --blue: #7db4ff; --blue-soft: #7db4ff1f; --violet: #c9a2ff; --violet-soft: #c9a2ff1f;
     --amber: #f5a524; --amber-soft: #f5a5241f; --red: #ff7a7a; --red-soft: #ff7a7a1c; --green: #5ee0a0; --green-soft: #5ee0a01c;
     --mark-fact: #5ee0a033; --mark-cite: #7db4ff2e;
+    --shadow: 0 1px 2px #0000004d, 0 4px 16px #00000033;
   }
 }
 :root[data-theme="dark"] {
@@ -43,14 +46,15 @@
   --blue: #7db4ff; --blue-soft: #7db4ff1f; --violet: #c9a2ff; --violet-soft: #c9a2ff1f;
   --amber: #f5a524; --amber-soft: #f5a5241f; --red: #ff7a7a; --red-soft: #ff7a7a1c; --green: #5ee0a0; --green-soft: #5ee0a01c;
   --mark-fact: #5ee0a033; --mark-cite: #7db4ff2e;
+  --shadow: 0 1px 2px #0000004d, 0 4px 16px #00000033;
 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { color-scheme: light; }
-body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.55 var(--sans); padding-inline: 16px; }
-.page { max-width: 1180px; margin: 0 auto; padding-block: 28px 72px; display: grid; gap: 28px; }
-h1, h2, h3 { margin: 0; text-wrap: balance; }
+body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.55 var(--sans); padding-inline: 16px; -webkit-font-smoothing: antialiased; }
+.page { max-width: 1200px; margin: 0 auto; padding-block: 24px 72px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 26px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; font-family: var(--display); }
 code, .mono { font-family: var(--mono); font-size: 12px; }
 button, select, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -60,48 +64,157 @@ button { cursor: pointer; }
 .muted { color: var(--text-3); }
 .small { font-size: 12.5px; }
 .up { color: var(--green); } .down { color: var(--red); } .flat { color: var(--text-3); }
+svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
 /* ── masthead ── */
-.mast { display: grid; gap: 12px; border-bottom: 2px solid var(--text); padding-bottom: 18px; }
-.mast-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.mast h1 { font: 600 30px/1.15 var(--serif); letter-spacing: -0.01em; }
-.mast h1 .vs { font-style: italic; font-weight: 400; color: var(--text-3); padding-inline: 8px; }
+.mast { display: grid; gap: 10px; }
+.mast-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.logo { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(135deg, var(--violet), var(--blue)); color: var(--paper); font: 700 14px var(--display); }
+.mast h1 { font: 600 28px/1.2 var(--display); letter-spacing: -0.015em; overflow-wrap: anywhere; }
+.mast h1 .vs { font-weight: 400; color: var(--text-4); padding-inline: 10px; font-size: 20px; }
 .meta { display: flex; flex-wrap: wrap; gap: 4px 18px; color: var(--text-2); font-size: 13px; }
 .meta b { font-weight: 600; color: var(--text); }
-.tools { display: flex; gap: 6px; flex-wrap: wrap; }
-.btn { border: 1px solid var(--rule-strong); background: var(--paper); border-radius: 6px; padding: 5px 11px; font-size: 12.5px; }
+.tools { display: flex; gap: 6px; }
+.icon-btn { width: 34px; height: 34px; display: inline-grid; place-items: center; border: 1px solid var(--rule-strong); background: var(--paper); border-radius: 9px; color: var(--text-2); transition: background 150ms, color 150ms; }
+.icon-btn:hover { background: var(--raised); color: var(--text); }
+.icon-btn.spin svg { animation: spin 700ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn { border: 1px solid var(--rule-strong); background: var(--paper); border-radius: 7px; padding: 5px 11px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
 .btn:hover { background: var(--raised); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--text-3); }
+.btn.ghost:hover { color: var(--text); background: var(--raised); }
 
-/* ── run selection ── */
-.runs-bar { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px 14px; align-items: end; }
-.runsel { display: grid; gap: 5px; min-width: 0; }
-.runsel label { display: flex; align-items: center; gap: 8px; }
-.runsel select { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--rule-strong); background: var(--paper); min-width: 0; }
-.runsel .setup { font-size: 12px; color: var(--text-3); min-height: 1.4em; }
-.runsel .setup b { color: var(--text-2); font-weight: 600; }
-.key { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; font: 700 10.5px var(--mono); vertical-align: middle; }
+.paper { background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--shadow); }
+
+/* ── picked runs ── */
+.picked { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: stretch; }
+.runcard { padding: 14px 16px 14px 18px; display: grid; gap: 8px; position: relative; overflow: hidden; align-content: start; }
+.runcard::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; }
+.runcard.a::before { background: var(--violet); } .runcard.b::before { background: var(--blue); }
+.runcard.none { box-shadow: none; background: transparent; border: 1.5px dashed var(--rule-strong); place-content: center; justify-items: center; text-align: center; color: var(--text-3); font-size: 13px; }
+.runcard.none::before { display: none; }
+.rc-top { display: flex; align-items: center; gap: 8px; }
+.rc-top .btn.ghost { margin-left: auto; padding: 3px; }
+.rc-name { font: 600 14px/1.3 var(--mono); word-break: break-all; }
+.rc-sub { font-size: 12.5px; color: var(--text-3); }
+.rc-body { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; justify-content: space-between; }
+.tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag { font: 11.5px/1.5 var(--mono); padding: 1px 7px; border-radius: 5px; background: var(--raised); color: var(--text-2); white-space: nowrap; }
+.tag b { font-weight: 600; color: var(--text); }
+.tag.warn { background: var(--amber-soft); color: var(--amber); }
+.rc-facts { text-align: right; flex: none; }
+.rc-facts .v { font: 600 24px/1 var(--display); font-variant-numeric: tabular-nums; }
+.rc-facts .l { font: 600 9.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
+.swap { align-self: center; }
+.key { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; font: 700 11px var(--mono); vertical-align: middle; flex: none; }
 .key.a { background: var(--violet-soft); color: var(--violet); }
 .key.b { background: var(--blue-soft); color: var(--blue); }
-.swap { margin-bottom: 26px; }
-.source-note { grid-column: 1 / -1; font-size: 12.5px; color: var(--text-3); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
-.source-note label { color: var(--blue); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 760px) { .picked { grid-template-columns: minmax(0, 1fr); } .swap { justify-self: center; transform: rotate(90deg); } }
+
+/* ── run library ── */
+.lib { display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+.lib-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; flex-wrap: wrap; }
+.lib-head h2 { font-size: 16px; font-weight: 600; }
+.lib-head .count { font-size: 12.5px; color: var(--text-3); }
+.lib-head .icon-btn { margin-left: auto; width: 30px; height: 30px; }
+.lib-head .icon-btn svg { transition: transform 200ms; }
+.lib.closed .lib-head .icon-btn svg { transform: rotate(-90deg); }
+.lib.closed .lib-body { display: none; }
+.lib-body { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--rule); }
+.lib-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 16px 4px; }
+.searchbox { flex: 1 1 240px; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--rule-strong); background: var(--inset); color: var(--text-3); }
+.searchbox input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 6px 0; color: var(--text); outline: none; }
+.searchbox:focus-within { outline: 2px solid var(--blue); outline-offset: 1px; }
+.switch { display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; font-size: 12.5px; color: var(--text-2); padding: 4px 2px; }
+.switch .track { width: 28px; height: 16px; border-radius: 8px; background: var(--rule-strong); position: relative; transition: background 150ms; flex: none; }
+.switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--paper); transition: transform 150ms; box-shadow: 0 1px 2px #0003; }
+.switch[aria-checked="true"] .track { background: var(--violet); }
+.switch[aria-checked="true"] .track::after { transform: translateX(12px); }
+.switch:disabled { opacity: 0.45; cursor: default; }
+.sortsel { padding: 5px 8px; border-radius: 7px; border: 1px solid var(--rule-strong); background: var(--paper); font-size: 12.5px; }
+.facets { display: grid; gap: 6px; padding: 8px 16px 12px; }
+.facet { display: grid; grid-template-columns: 84px 1fr; gap: 8px; align-items: baseline; }
+.facet .eyebrow { padding-top: 5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip-btn { border: 1px solid var(--rule-strong); background: var(--paper); border-radius: 999px; padding: 2px 10px; font: 12px/1.6 var(--mono); color: var(--text-2); transition: background 150ms, color 150ms, border-color 150ms; }
+.chip-btn:hover { border-color: var(--text-3); color: var(--text); }
+.chip-btn[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--paper); }
+.chip-btn .ct { opacity: 0.6; margin-left: 5px; }
+.clear-f { font-size: 12px; color: var(--blue); background: none; border: 0; padding: 2px 4px; text-decoration: underline; text-underline-offset: 2px; }
+.lib-scroll { max-height: 440px; overflow: auto; border-top: 1px solid var(--rule); }
+table.runs { width: 100%; border-collapse: collapse; font-size: 13px; }
+.runs th { position: sticky; top: 0; z-index: 1; background: var(--paper); text-align: left; font: 600 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); padding: 8px 12px; border-bottom: 1px solid var(--rule-strong); white-space: nowrap; }
+.runs th.hl { color: var(--green); }
+.runs td { padding: 7px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; white-space: nowrap; }
+.runs tr:hover td { background: var(--inset); }
+.runs tr.is-a td:first-child { box-shadow: inset 3px 0 var(--violet); }
+.runs tr.is-b td:first-child { box-shadow: inset 3px 0 var(--blue); }
+.runs tr.is-a td, .runs tr.is-b td { background: var(--selected); }
+.runs .r { text-align: right; }
+.rn { font: 500 12.5px var(--mono); max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+.rd { font-size: 11.5px; color: var(--text-3); }
+.dim { color: var(--text-4); }
+.fbar { display: inline-flex; align-items: center; gap: 8px; }
+.fbar span { width: 56px; height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
+.fbar i { display: block; height: 100%; background: var(--green); border-radius: 3px; }
+.fbar b { font: 600 12.5px var(--mono); min-width: 46px; text-align: right; }
+.use { display: inline-flex; gap: 4px; }
+.use button { width: 26px; height: 24px; border-radius: 6px; border: 1px solid var(--rule-strong); background: var(--paper); font: 700 11px var(--mono); color: var(--text-3); padding: 0; }
+.use button.a:hover, .use button.a[aria-pressed="true"] { background: var(--violet); border-color: var(--violet); color: var(--paper); }
+.use button.b:hover, .use button.b[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: var(--paper); }
+.setdiff { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); margin-left: 5px; vertical-align: middle; }
+.lib-foot { padding: 10px 16px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--text-3); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.lib-foot label { color: var(--blue); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .load-err { color: var(--red); }
-@media (max-width: 720px) { .runs-bar { grid-template-columns: 1fr; } .swap { margin: 0; justify-self: start; } }
+@media (max-width: 720px) { .facet { grid-template-columns: minmax(0, 1fr); gap: 3px; } .col-opt { display: none; } }
 
 .dropzone { position: fixed; inset: 0; background: color-mix(in srgb, var(--canvas) 88%, transparent); border: 2px dashed var(--blue); display: grid; place-items: center; font: 600 16px var(--sans); color: var(--blue); z-index: 10; }
 
 /* ── sections ── */
-section.block { display: grid; gap: 12px; }
-.block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--rule-strong); padding-bottom: 6px; }
-.block-head h2 { font: 600 18px/1.3 var(--serif); }
-.paper { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; }
+section.block { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.block-head h2 { font: 600 18px/1.3 var(--display); letter-spacing: -0.01em; }
+
+/* headline metric */
+.hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; }
+.facts-card { padding: 22px 24px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; position: relative; overflow: hidden; background: linear-gradient(160deg, var(--green-soft), transparent 60%), var(--paper); }
+.facts-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: var(--green); }
+.fc-label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fc-label .name { font: 600 15px var(--display); }
+.fc-label .badge { font: 600 9.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); background: var(--green-soft); padding: 2px 7px; border-radius: 999px; }
+.fc-main { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; }
+.fc-big { font: 600 64px/0.9 var(--display); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.fc-big small { font-size: 28px; font-weight: 500; color: var(--text-3); margin-left: 2px; }
+.fc-from { display: grid; gap: 6px; padding-bottom: 4px; }
+.fc-prev { font: 500 14px var(--mono); color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+.delta { font: 700 14px var(--mono); padding: 3px 9px; border-radius: 7px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.delta.up { background: var(--green-soft); } .delta.down { background: var(--red-soft); } .delta.flat { background: var(--raised); }
+.fc-bars { display: grid; gap: 6px; }
+.fc-bar { display: grid; grid-template-columns: 20px 1fr 46px; gap: 8px; align-items: center; font: 12px var(--mono); color: var(--text-3); }
+.fc-bar span { height: 8px; border-radius: 4px; background: var(--raised); overflow: hidden; }
+.fc-bar i { display: block; height: 100%; border-radius: 4px; }
+.fc-bar.a i { background: var(--violet); } .fc-bar.b i { background: var(--blue); }
+.fc-text { margin: 0; color: var(--text-2); font-size: 13.5px; max-width: 70ch; }
+.fc-text b { color: var(--text); }
+.fc-kb { display: flex; flex-wrap: wrap; gap: 8px; }
+.kbf { display: grid; gap: 1px; padding: 7px 11px; border-radius: 8px; background: var(--paper); border: 1px solid var(--rule); min-width: 92px; }
+.kbf .num { font: 600 15px var(--display); }
+.kbf .num .muted { font-weight: 400; font-size: 12.5px; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--blue); font-size: 12.5px; text-decoration: underline; text-underline-offset: 2px; justify-self: start; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.tile { padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.tile-v { font: 600 24px/1.15 var(--display); letter-spacing: -0.01em; }
+.tile-s { font-size: 12px; color: var(--text-3); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+@media (max-width: 860px) { .hero { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .fc-big { font-size: 48px; } .tiles { grid-template-columns: minmax(0, 1fr); } }
 
 /* verdict */
-.verdict { padding: 20px 22px; display: grid; gap: 14px; border-left: 4px solid var(--text-3); }
+.verdict { padding: 18px 22px; display: grid; gap: 12px; border-left: 4px solid var(--text-3); }
 .verdict.good { border-left-color: var(--green); }
 .verdict.bad { border-left-color: var(--red); }
 .verdict.mixed { border-left-color: var(--amber); }
-.verdict .headline { margin: 0; font: 400 20px/1.4 var(--serif); max-width: 72ch; }
+.verdict .headline { margin: 0; font: 500 17px/1.45 var(--display); max-width: 80ch; }
 .verdict .headline b { font-weight: 600; }
 .findings { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .findings li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; color: var(--text-2); max-width: 92ch; }
@@ -115,10 +228,16 @@ section.block { display: grid; gap: 12px; }
 .tbl-wrap { overflow-x: auto; }
 table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .tbl th { text-align: left; font: 600 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); padding: 10px 14px; border-bottom: 1px solid var(--rule-strong); white-space: nowrap; }
+.tbl th.hl { color: var(--green); }
 .tbl td { padding: 9px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
 .tbl tbody tr:last-child td { border-bottom: 0; }
 .tbl th.r, .tbl td.r { text-align: right; }
 .tbl tr.group td { font: 600 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); background: var(--inset); padding-block: 6px; }
+.tbl tr.primary td { background: var(--green-soft); }
+.tbl tr.primary td:first-child { box-shadow: inset 3px 0 var(--green); }
+.tbl tr.primary .metric-name { font-weight: 700; font-size: 14.5px; }
+.tbl tr.primary td.r { font-size: 15px; }
+.tbl td.hl { font-weight: 600; }
 .metric-name { font-weight: 500; }
 .metric-help { font-size: 12px; color: var(--text-3); }
 .bars { display: grid; gap: 3px; width: 120px; padding-top: 5px; }
@@ -130,26 +249,28 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 
 /* question table */
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; background: var(--paper); }
+.seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--rule-strong); border-radius: 8px; overflow: hidden; background: var(--paper); }
 .seg button { border: 0; background: transparent; padding: 5px 11px; font-size: 12.5px; border-right: 1px solid var(--rule); }
 .seg button:last-child { border-right: 0; }
 .seg button[aria-pressed="true"] { background: var(--text); color: var(--paper); }
 .seg .ct { font: 11px var(--mono); opacity: 0.7; margin-left: 5px; }
-.search { flex: 1 1 200px; min-width: 0; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--rule-strong); background: var(--paper); }
+.filters .searchbox { flex: 1 1 200px; background: var(--paper); }
 table.q td { padding-block: 10px; }
 table.q tr.row { cursor: pointer; }
 table.q tr.row:hover td { background: var(--inset); }
 table.q tr.row.open td { background: var(--selected); }
 table.q th.stripe, table.q td.stripe { padding: 0; width: 4px; }
-table.q td.stripe { background-clip: content-box; }
 table.q tr.row td.s-improved { box-shadow: inset 4px 0 var(--green); }
 table.q tr.row td.s-regressed { box-shadow: inset 4px 0 var(--red); }
 table.q tr.row td.s-mixed { box-shadow: inset 4px 0 var(--amber); }
 table.q tr.row td.s-changed { box-shadow: inset 4px 0 var(--blue); }
+table.q td.factcol { background: var(--green-soft); }
+table.q tr.row.open td.factcol, table.q tr.row:hover td.factcol { background: var(--green-soft); }
 .qid { font: 500 12px var(--mono); white-space: nowrap; }
 .qprompt { color: var(--text-2); margin-top: 1px; max-width: 48ch; }
-.kb { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; padding: 2px 6px; border-radius: 3px; background: var(--raised); color: var(--text-2); white-space: nowrap; }
+.kb { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; padding: 2px 6px; border-radius: 4px; background: var(--raised); color: var(--text-2); white-space: nowrap; }
 .cell-ab { white-space: nowrap; font: 600 13px var(--mono); }
+.cell-ab.big { font-size: 15px; }
 .cell-ab .arrow { color: var(--text-4); font-weight: 400; padding-inline: 3px; }
 .ok { color: var(--green); } .no { color: var(--red); } .na { color: var(--text-4); font-weight: 400; }
 .chain { font: 11.5px var(--mono); color: var(--text-2); white-space: nowrap; }
@@ -161,12 +282,12 @@ table.q tr.row td.s-changed { box-shadow: inset 4px 0 var(--blue); }
 /* question detail */
 td.detail { background: var(--inset); padding: 18px 18px 20px !important; cursor: default; }
 .dgrid { display: grid; gap: 14px; }
-.dq { font: 500 16px/1.45 var(--serif); }
+.dq { font: 500 16px/1.45 var(--display); }
 .spec { display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: 12.5px; color: var(--text-2); align-items: center; }
 .chip { font: 12px var(--mono); padding: 1px 7px; border-radius: 4px; background: var(--raised); color: var(--text-2); }
 .history { border-left: 2px solid var(--rule-strong); padding-left: 12px; display: grid; gap: 2px; color: var(--text-2); font-size: 12.5px; }
 .cmp { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
-.run { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.run { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; display: grid; gap: 12px; align-content: start; min-width: 0; }
 .run-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; border-bottom: 1px solid var(--rule); padding-bottom: 8px; }
 .run-head b { font-weight: 600; }
 .run-score { margin-left: auto; font: 12px var(--mono); color: var(--text-3); display: flex; gap: 10px; }
@@ -189,53 +310,75 @@ mark.badcite { background: var(--red-soft); color: var(--red); font: 12px var(--
 .missing { font-size: 12.5px; color: var(--red); }
 
 /* method */
-.method { columns: 2 320px; column-gap: 32px; font-size: 13px; color: var(--text-2); }
+.method { columns: 2 320px; column-gap: 32px; font-size: 13px; color: var(--text-2); padding: 18px 22px; }
 .method p { margin: 0 0 10px; break-inside: avoid; }
 .method b { color: var(--text); font-weight: 600; }
 
 .empty { padding: 28px; display: grid; gap: 10px; justify-items: start; }
-.empty h2 { font: 600 20px var(--serif); }
+.empty h2 { font: 600 20px var(--display); }
 .empty ol { margin: 0; padding-left: 20px; color: var(--text-2); display: grid; gap: 4px; }
 footer { font-size: 12px; color: var(--text-4); border-top: 1px solid var(--rule); padding-top: 12px; }
-@media (max-width: 600px) { .mast h1 { font-size: 24px; } .cmp { grid-template-columns: 1fr; } .qprompt { max-width: 30ch; } }
+@media (max-width: 600px) { .mast h1 { font-size: 22px; } .cmp { grid-template-columns: 1fr; } .qprompt { max-width: 30ch; } }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-reload" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.99 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.78 9.79z"/></symbol>
+  <symbol id="i-system" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M16 3l4 4-4 4"/><path d="M20 7H4"/><path d="M8 21l-4-4 4-4"/><path d="M4 17h16"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+</svg>
 <div class="page">
   <header class="mast">
     <div class="mast-top">
-      <span class="eyebrow">Andai · Agent evaluation report</span>
+      <div class="brand"><span class="logo" aria-hidden="true">A</span><span class="eyebrow">Andai · Agent evaluation</span></div>
       <div class="tools">
-        <button class="btn" id="reload" type="button" hidden>Reload eval/</button>
-        <button class="btn" id="theme" type="button" aria-label="Switch theme">Theme: system</button>
+        <button class="icon-btn" id="reload" type="button" hidden title="Reload reports from eval/" aria-label="Reload reports from eval/"><svg class="i"><use href="#i-reload"/></svg></button>
+        <button class="icon-btn" id="theme" type="button"><svg class="i"><use href="#i-system"/></svg></button>
       </div>
     </div>
     <h1 id="title">Agent evaluation</h1>
     <div class="meta" id="meta"></div>
   </header>
 
-  <div class="runs-bar" aria-label="Runs">
-    <div class="runsel">
-      <label for="pickA"><span class="key a">A</span><span class="eyebrow">Baseline run</span></label>
-      <select id="pickA"></select>
-      <div class="setup" id="infoA"></div>
-    </div>
-    <button class="btn swap" id="swap" type="button" title="Swap baseline and candidate">⇄ Swap</button>
-    <div class="runsel">
-      <label for="pickB"><span class="key b">B</span><span class="eyebrow">Candidate run (optional)</span></label>
-      <select id="pickB"></select>
-      <div class="setup" id="infoB"></div>
-    </div>
-    <div class="source-note">
-      <span id="folderNote"></span>
-      <span>Drop report files anywhere on the page, or <label for="files">choose files</label>.</span>
-      <input type="file" id="files" accept=".json,application/json" multiple hidden>
-      <button class="btn" id="clear" type="button" hidden style="padding:1px 8px;font-size:12px">Forget dropped reports</button>
-      <span class="load-err" id="loadErr" hidden></span>
-    </div>
-  </div>
+  <div class="picked" id="picked" aria-label="Runs being reported"></div>
 
-  <main id="main" style="display:grid;gap:32px"></main>
+  <section class="lib paper" id="lib" aria-label="Run library">
+    <div class="lib-head">
+      <h2>Run library</h2><span class="count" id="libCount"></span>
+      <button class="icon-btn" id="libToggle" type="button" aria-expanded="true" aria-controls="libBody" title="Show or hide the run library" aria-label="Show or hide the run library"><svg class="i"><use href="#i-chevron"/></svg></button>
+    </div>
+    <div class="lib-body" id="libBody">
+      <div class="lib-tools">
+        <label class="searchbox"><svg class="i"><use href="#i-search"/></svg><input id="libSearch" type="search" placeholder="Search runs by name, model, decider…" aria-label="Search runs"></label>
+        <button class="switch" id="libComparable" type="button" role="switch" aria-checked="false" title="Same questions and seed as run A"><span class="track"></span>Comparable with A only</button>
+        <select class="sortsel" id="libSort" aria-label="Sort runs">
+          <option value="new">Newest first</option>
+          <option value="old">Oldest first</option>
+          <option value="facts">Most facts found</option>
+          <option value="name">Name</option>
+        </select>
+      </div>
+      <div class="facets" id="libFacets"></div>
+      <div class="lib-scroll"><table class="runs">
+        <thead><tr><th>Run</th><th>Answers</th><th>Decider</th><th class="r">Questions</th><th class="col-opt">Engine</th><th class="hl">Answer facts</th><th class="r col-opt">Grounded</th><th class="r col-opt">s / q</th><th class="r">Use as</th></tr></thead>
+        <tbody id="libRows"></tbody>
+      </table></div>
+      <div class="lib-foot">
+        <span id="folderNote"></span>
+        <span>Drop report files anywhere on the page, or <label for="files">choose files</label>.</span>
+        <input type="file" id="files" accept=".json,application/json" multiple hidden>
+        <button class="btn" id="clear" type="button" hidden style="padding:1px 8px;font-size:12px">Forget dropped reports</button>
+        <span class="load-err" id="loadErr" hidden></span>
+      </div>
+    </div>
+  </section>
+
+  <main id="main" style="display:grid;grid-template-columns:minmax(0,1fr);gap:30px"></main>
   <footer>Generated locally from <code>bun run eval:agent</code> reports. Nothing on this page leaves your computer.</footer>
 </div>
 <div class="dropzone" id="dropzone" hidden>Drop evaluation reports to load them</div>
@@ -244,31 +387,124 @@ footer { font-size: 12px; color: var(--text-4); border-top: 1px solid var(--rule
 'use strict';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const icon = (name) => `<svg class="i" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const STORE = 'andai.evalReports';
+const LIB_STORE = 'andai.evalLibrary';
 // Same pattern as cases.json `notFound`, for reports written before it was saved in them.
 const NOT_FOUND = "(not (mention|contain|include|specif|state|say|provide|list|found|available|have|find|know|able)|no (information|mention|details?|data|record)|does(n't| not) (mention|contain|include|specif|state|say|provide|list|have)|unable|cannot|can't|unknown)";
 const served = location.protocol.startsWith('http'); // by scripts/eval-view.mjs
 
-let reports = []; // { key, name, data, from: 'folder' | 'dropped' }
+let reports = []; // { key, name, data, from: 'folder' | 'dropped', meta }
 const state = { a: null, b: null, filter: 'all', kb: 'all', q: '', open: new Set() };
+// The run library's filters: facet values are OR'ed within a facet, AND'ed across.
+const FACETS = [
+  { key: 'model', label: 'Answers' },
+  { key: 'decider', label: 'Decider' },
+  { key: 'n', label: 'Questions', order: (x, y) => Number(y) - Number(x) },
+  { key: 'engine', label: 'Engine' },
+  { key: 'day', label: 'Date', order: (x, y) => y.localeCompare(x) },
+];
+const lib = { q: '', sort: 'new', comparable: false, open: true, facets: Object.fromEntries(FACETS.map((f) => [f.key, new Set()])) };
 
 // ── storage: only dropped reports; the folder is read on every visit ──────
 function save() {
-  try { localStorage.setItem(STORE, JSON.stringify(reports.filter((r) => r.from !== 'folder'))); } catch { /* full or blocked */ }
+  try { localStorage.setItem(STORE, JSON.stringify(reports.filter((r) => r.from !== 'folder').map(({ key, name, data, from }) => ({ key, name, data, from })))); } catch { /* full or blocked */ }
 }
 function restore() {
   try { reports = JSON.parse(localStorage.getItem(STORE) || '[]').map((r) => ({ ...r, from: 'dropped' })); } catch { reports = []; }
+  try {
+    const l = JSON.parse(localStorage.getItem(LIB_STORE) || 'null');
+    if (l) {
+      Object.assign(lib, { q: String(l.q ?? ''), sort: l.sort ?? 'new', comparable: !!l.comparable, open: l.open !== false });
+      for (const f of FACETS) lib.facets[f.key] = new Set(Array.isArray(l.facets?.[f.key]) ? l.facets[f.key] : []);
+    }
+  } catch { /* keep defaults */ }
+}
+function saveLib() {
+  try { localStorage.setItem(LIB_STORE, JSON.stringify({ ...lib, facets: Object.fromEntries(Object.entries(lib.facets).map(([k, v]) => [k, [...v]])) })); } catch {}
 }
 const byTime = () => reports.sort((x, y) => String(x.data.at).localeCompare(String(y.data.at)));
-const newestTwo = () => {
-  if (reports.length >= 2) { state.a = reports.at(-2).key; state.b = reports.at(-1).key; }
-  else { state.a = reports[0]?.key ?? null; state.b = null; }
-};
 const valid = (d) => d && typeof d === 'object' && Array.isArray(d.scored) && Array.isArray(d.records) && d.scorecard;
-const get = (key) => reports.find((r) => r.key === key)?.data ?? null;
+const entry = (key) => reports.find((r) => r.key === key) ?? null;
+const get = (key) => entry(key)?.data ?? null;
+
+// ── facts about a run ──────────────────────────────────────────────────────
+const deciderOf = (d) => {
+  if (d.decider !== undefined) return d.decider; // null: decisions on the chat model
+  const models = [...new Set(d.records.flatMap((r) => r.steps.map((s) => s.decision?.model).filter(Boolean)))];
+  return models.length ? `${models.join(', ')} (from records)` : null;
+};
+const setupName = (d) => `${d.model}${d.decider ? ` + ${d.decider}` : ''}`;
+// How the report names a run: its setup, or its report name when A and B share the setup.
+const nameOf = (d) => {
+  const [A, B] = current();
+  if (!A || !B || setupName(A) !== setupName(B)) return setupName(d);
+  const r = reports.find((x) => x.data === d);
+  return r ? runName(r) : setupName(d);
+};
+const when = (at, long) => {
+  const t = new Date(at);
+  if (isNaN(t)) return String(at ?? '');
+  return t.toLocaleString(undefined, long ? { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+const dayKey = (at) => { const t = new Date(at); return isNaN(t) ? '?' : t.toLocaleDateString('en-CA'); };
+const dayLabel = (k) => { const t = new Date(`${k}T12:00:00`); return isNaN(t) ? k : t.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); };
+const runName = (r) => r.name.replace(/\.json$/i, '');
+// What the library shows and filters on; derived once per report.
+function metaOf(r) {
+  if (r.meta) return r.meta;
+  const d = r.data, e = d.engine || {};
+  const backend = String(e.backend ?? '');
+  const bits = String(e.arch ?? '').match(/(\d+)-bit/)?.[1];
+  const dec = deciderOf(d);
+  r.meta = {
+    model: String(d.model ?? '?'),
+    decider: dec ?? 'same model',
+    n: String(d.scored.length),
+    engine: /mlx/i.test(backend) ? 'MLX' : /webgpu|wasm|cpu/i.test(backend) ? 'wllama' : backend || '?',
+    bits: bits ? `${bits}-bit` : null,
+    day: dayKey(d.at),
+    seed: d.seed,
+    subset: Array.isArray(d.only) && d.only.length > 0,
+    set: d.scored.map((s) => s.id).sort().join('\n'),
+    facts: d.scorecard.factHitRate ?? null,
+    grounded: d.scorecard.groundedRate ?? null,
+    spq: d.scorecard.secondsPerQuestion ?? null,
+  };
+  r.meta.text = `${runName(r)} ${r.meta.model} ${r.meta.decider} ${backend} ${r.meta.bits ?? ''}`.toLowerCase();
+  return r.meta;
+}
+// Same questions and seed: rates are directly comparable.
+const comparableRuns = (x, y) => !!x && !!y && metaOf(x).set === metaOf(y).set && metaOf(x).seed === metaOf(y).seed;
+
+// Default pair: the newest run as B, and the newest earlier run it can be compared with as A.
+function newestPair() {
+  const last = reports.at(-1);
+  if (!last) { state.a = state.b = null; return; }
+  const base = reports.slice(0, -1).reverse().find((r) => comparableRuns(r, last));
+  if (base) { state.a = base.key; state.b = last.key; } else { state.a = last.key; state.b = null; }
+}
+
+// The picked pair lives in the URL (#a=<report>&b=<report>), so a comparison can be bookmarked or reloaded.
+function fromHash() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  const find = (name) => name && reports.find((r) => r.name === name || runName(r) === name)?.key;
+  const a = find(h.get('a'));
+  if (!a) return false;
+  state.a = a;
+  state.b = find(h.get('b')) ?? null;
+  return true;
+}
+function toHash() {
+  const a = entry(state.a), b = state.b && state.b !== state.a ? entry(state.b) : null;
+  const h = a ? `#a=${encodeURIComponent(runName(a))}${b ? `&b=${encodeURIComponent(runName(b))}` : ''}` : '';
+  if (h !== location.hash) history.replaceState(null, '', h || location.pathname);
+}
+window.addEventListener('hashchange', () => { if (fromHash()) { state.open.clear(); render(); } });
 
 async function loadFolder() {
   const note = $('folderNote');
+  $('reload').classList.add('spin');
   try {
     const list = await (await fetch('reports', { cache: 'no-store' })).json();
     const loaded = await Promise.all(list.map(async ({ name }) => {
@@ -281,10 +517,12 @@ async function loadFolder() {
     reports = [...reports.filter((r) => r.from !== 'folder'), ...found];
     byTime();
     note.innerHTML = `<b>${found.length}</b> report${found.length === 1 ? '' : 's'} in <code>eval/</code>.`;
-    if (!get(state.a)) newestTwo();
+    if (!fromHash() && !get(state.a)) newestPair();
+    if (state.b && !get(state.b)) state.b = null;
   } catch (e) {
     note.textContent = `Couldn't read the eval/ folder (${e.message}).`;
   }
+  $('reload').classList.remove('spin');
   render();
 }
 
@@ -303,7 +541,7 @@ async function addFiles(fileList) {
   save();
   $('loadErr').hidden = !errors.length;
   $('loadErr').textContent = errors.join(' · ');
-  newestTwo();
+  newestPair();
   state.open.clear();
   render();
 }
@@ -318,20 +556,55 @@ document.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; $(
 $('clear').addEventListener('click', () => {
   reports = reports.filter((r) => r.from === 'folder');
   try { localStorage.removeItem(STORE); } catch {}
-  state.open.clear(); newestTwo(); render();
+  state.open.clear(); newestPair(); render();
 });
 $('reload').addEventListener('click', loadFolder);
-$('swap').addEventListener('click', () => { if (!state.b) return; [state.a, state.b] = [state.b, state.a]; state.open.clear(); render(); });
-$('pickA').addEventListener('change', (e) => { state.a = e.target.value; state.open.clear(); render(); });
-$('pickB').addEventListener('change', (e) => { state.b = e.target.value || null; state.open.clear(); render(); });
+const pick = (slot, key) => {
+  if (slot === 'a') { state.a = key; if (state.b === key) state.b = null; }
+  else state.b = key === state.a ? null : key;
+  state.open.clear();
+  render();
+};
+$('picked').addEventListener('click', (e) => {
+  if (e.target.closest('#swap')) { if (!state.b) return; [state.a, state.b] = [state.b, state.a]; state.open.clear(); render(); }
+  else if (e.target.closest('#dropB')) pick('b', null);
+});
+
+// Library controls: the toolbar is static, so typing never loses focus.
+$('libSearch').addEventListener('input', (e) => { lib.q = e.target.value; saveLib(); renderLibrary(); });
+$('libSort').addEventListener('change', (e) => { lib.sort = e.target.value; saveLib(); renderLibrary(); });
+$('libComparable').addEventListener('click', () => { lib.comparable = !lib.comparable; saveLib(); renderLibrary(); });
+$('libToggle').addEventListener('click', () => { lib.open = !lib.open; saveLib(); renderLibrary(); });
+$('libFacets').addEventListener('click', (e) => {
+  const c = e.target.closest('[data-facet]');
+  if (c) {
+    const s = lib.facets[c.dataset.facet];
+    s.has(c.dataset.value) ? s.delete(c.dataset.value) : s.add(c.dataset.value);
+  } else if (e.target.closest('#clearFacets')) {
+    for (const s of Object.values(lib.facets)) s.clear();
+    lib.q = ''; $('libSearch').value = ''; lib.comparable = false;
+  } else return;
+  saveLib();
+  renderLibrary();
+});
+$('libRows').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-use]');
+  if (b) pick(b.dataset.use, b.dataset.key);
+});
 
 const THEMES = ['system', 'light', 'dark'];
+const THEME_ICON = { system: 'system', light: 'sun', dark: 'moon' };
 let theme = 'system';
 try { theme = localStorage.getItem('andai.evalTheme') || 'system'; } catch {}
+if (!THEMES.includes(theme)) theme = 'system';
 function applyTheme() {
   if (theme === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.dataset.theme = theme;
-  $('theme').textContent = `Theme: ${theme}`;
+  const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  const btn = $('theme');
+  btn.innerHTML = icon(THEME_ICON[theme]);
+  btn.title = `Theme: ${theme} (click for ${next})`;
+  btn.setAttribute('aria-label', `Theme: ${theme}. Switch to ${next}`);
 }
 $('theme').addEventListener('click', () => {
   theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
@@ -340,25 +613,6 @@ $('theme').addEventListener('click', () => {
 });
 applyTheme();
 
-// ── facts about a run ──────────────────────────────────────────────────────
-const deciderOf = (d) => {
-  if (d.decider !== undefined) return d.decider; // null: decisions on the chat model
-  const models = [...new Set(d.records.flatMap((r) => r.steps.map((s) => s.decision?.model).filter(Boolean)))];
-  return models.length ? `${models.join(', ')} (from records)` : null;
-};
-const setupName = (d) => `${d.model}${d.decider ? ` + ${d.decider}` : ''}`;
-const when = (at, long) => {
-  const t = new Date(at);
-  if (isNaN(t)) return String(at ?? '');
-  return t.toLocaleString(undefined, long ? { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-};
-const optionLabel = (r) => `${r.name} — ${setupName(r.data)}, ${when(r.data.at)}${r.from === 'dropped' ? ' (dropped)' : ''}`;
-function setupLine(d) {
-  if (!d) return '';
-  const dec = deciderOf(d);
-  const e = d.engine || {};
-  return `Answers <b>${esc(d.model)}</b> · decisions <b>${esc(dec ?? 'same model')}</b> · seed ${esc(d.seed)}${e.backend ? ` · ${esc(e.backend)}` : ''}${d.only ? ` · <span style="color:var(--amber)">subset of ${d.only.length}</span>` : ''}`;
-}
 const caseMap = () => {
   const m = new Map();
   for (const key of [state.a, state.b]) for (const c of get(key)?.cases ?? []) if (!m.has(c.id)) m.set(c.id, c);
@@ -367,11 +621,15 @@ const caseMap = () => {
 const byId = (d) => new Map((d?.scored ?? []).map((s) => [s.id, s]));
 const recById = (d) => new Map((d?.records ?? []).map((r) => [r.id, r]));
 const isMiss = (s) => !!s && (!s.firstOk || s.factsOk === false || s.grounded === false || !!s.error);
+const factsCount = (d, kb) => {
+  const xs = d.scored.filter((s) => s.factsOk != null && (!kb || s.kb === kb));
+  return { hit: xs.filter((s) => s.factsOk).length, n: xs.length };
+};
 
 // ── metrics ────────────────────────────────────────────────────────────────
 const METRICS = [
   { group: 'Answer quality' },
-  { key: 'factHitRate', pair: 'factsOk', label: 'Answer facts found', help: 'Answers that state every expected fact', kind: 'pct', better: 'higher' },
+  { key: 'factHitRate', pair: 'factsOk', label: 'Answer facts found', help: 'Answers that state every expected fact', kind: 'pct', better: 'higher', primary: true },
   { key: 'groundedRate', pair: 'grounded', label: 'Grounded answers', help: 'Answers that cite their sources, and only listed ones', kind: 'pct', better: 'higher' },
   { key: 'firstActionAccuracy', pair: 'firstOk', label: 'Right first action', help: 'First action is one the question allows', kind: 'pct', better: 'higher' },
   { group: 'Efficiency' },
@@ -387,6 +645,7 @@ const METRICS = [
   { key: 'fallbacks', label: 'Decision fallbacks', kind: 'int', better: 'lower' },
   { key: 'errors', label: 'Turn errors', kind: 'int', better: 'lower' },
 ];
+const metric = (key) => METRICS.find((m) => m.key === key);
 function fmt(v, kind) {
   if (v == null || Number.isNaN(v)) return '—';
   if (kind === 'pct') return `${(v * 100).toFixed(1)}%`;
@@ -446,16 +705,155 @@ function shiftCounts(A, B) {
   return counts;
 }
 
+// ── run library ────────────────────────────────────────────────────────────
+function libraryRows() {
+  const A = entry(state.a);
+  const q = lib.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const rows = reports.filter((r) => {
+    const m = metaOf(r);
+    if (q.length && !q.every((w) => m.text.includes(w))) return false;
+    if (lib.comparable && A && !comparableRuns(A, r)) return false;
+    return FACETS.every((f) => !lib.facets[f.key].size || lib.facets[f.key].has(m[f.key]));
+  });
+  const cmp = {
+    new: (x, y) => String(y.data.at).localeCompare(String(x.data.at)),
+    old: (x, y) => String(x.data.at).localeCompare(String(y.data.at)),
+    facts: (x, y) => (metaOf(y).facts ?? -1) - (metaOf(x).facts ?? -1) || String(y.data.at).localeCompare(String(x.data.at)),
+    name: (x, y) => runName(x).localeCompare(runName(y), undefined, { numeric: true }),
+  }[lib.sort] ?? (() => 0);
+  return rows.sort(cmp);
+}
+function renderLibrary() {
+  const libEl = $('lib');
+  libEl.classList.toggle('closed', !lib.open);
+  $('libToggle').setAttribute('aria-expanded', String(lib.open));
+  const A = entry(state.a);
+  const cmpBtn = $('libComparable');
+  cmpBtn.setAttribute('aria-checked', String(lib.comparable && !!A));
+  cmpBtn.disabled = !A;
+
+  // Facet chips, with how many runs carry each value.
+  const counts = Object.fromEntries(FACETS.map((f) => [f.key, new Map()]));
+  for (const r of reports) { const m = metaOf(r); for (const f of FACETS) counts[f.key].set(m[f.key], (counts[f.key].get(m[f.key]) || 0) + 1); }
+  const active = lib.q || lib.comparable || FACETS.some((f) => lib.facets[f.key].size);
+  $('libFacets').innerHTML = FACETS.map((f) => {
+    const values = [...counts[f.key].keys()].sort(f.order ?? ((x, y) => x.localeCompare(y, undefined, { numeric: true })));
+    if (values.length < 2 && !lib.facets[f.key].size) return '';
+    return `<div class="facet"><span class="eyebrow">${esc(f.label)}</span><div class="chips">${values.map((v) =>
+      `<button type="button" class="chip-btn" data-facet="${f.key}" data-value="${esc(v)}" aria-pressed="${lib.facets[f.key].has(v)}">${esc(f.key === 'day' ? dayLabel(v) : v)}<span class="ct">${counts[f.key].get(v)}</span></button>`).join('')}</div></div>`;
+  }).join('') + (active ? `<div class="facet"><span></span><div><button type="button" class="clear-f" id="clearFacets">Clear all filters</button></div></div>` : '');
+
+  const rows = libraryRows();
+  $('libCount').textContent = reports.length ? `${rows.length === reports.length ? `${reports.length}` : `${rows.length} of ${reports.length}`} run${reports.length === 1 ? '' : 's'}` : 'no runs yet';
+  $('libRows').innerHTML = rows.map((r) => {
+    const m = metaOf(r);
+    const isA = r.key === state.a, isB = r.key === state.b;
+    const diff = A && !isA && !comparableRuns(A, r);
+    const f = m.facts;
+    return `<tr class="${isA ? 'is-a' : ''}${isB ? ' is-b' : ''}">
+      <td><div class="rn" title="${esc(r.name)}">${esc(runName(r))}</div><div class="rd">${esc(when(r.data.at))}${r.from === 'dropped' ? ' · dropped' : ''}</div></td>
+      <td class="mono">${esc(m.model)}</td>
+      <td class="mono ${m.decider === 'same model' ? 'dim' : ''}">${esc(m.decider)}</td>
+      <td class="r num">${esc(m.n)}${m.subset ? ' <span class="tag warn">subset</span>' : ''}${diff ? '<span class="setdiff" title="Different questions or seed from A: rates are not directly comparable"></span>' : ''}</td>
+      <td class="col-opt small">${esc(m.engine)}${m.bits ? ` <span class="muted">${esc(m.bits)}</span>` : ''}</td>
+      <td><span class="fbar"><span aria-hidden="true"><i style="width:${f == null ? 0 : f * 100}%"></i></span><b>${fmt(f, 'pct')}</b></span></td>
+      <td class="r num col-opt">${fmt(m.grounded, 'pct')}</td>
+      <td class="r num col-opt">${m.spq == null ? '—' : m.spq.toFixed(2)}</td>
+      <td class="r"><span class="use">
+        <button type="button" class="a" data-use="a" data-key="${esc(r.key)}" aria-pressed="${isA}" title="Use as baseline (A)" aria-label="Use ${esc(runName(r))} as baseline A">A</button>
+        <button type="button" class="b" data-use="b" data-key="${esc(r.key)}" aria-pressed="${isB}" title="Use as candidate (B)" aria-label="Use ${esc(runName(r))} as candidate B"${isA ? ' disabled' : ''}>B</button>
+      </span></td></tr>`;
+  }).join('') || `<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">${reports.length ? 'No run matches these filters.' : 'No reports loaded yet.'}</td></tr>`;
+  $('clear').hidden = !reports.some((r) => r.from === 'dropped');
+}
+
+function runCard(tag, r) {
+  if (!r) {
+    return tag === 'a'
+      ? '<div class="runcard none">No run selected. Pick one in the run library below.</div>'
+      : `<div class="runcard none"><span><span class="key b">B</span> No candidate</span><span class="small">Press <b>B</b> on a run in the library to compare it with A.</span></div>`;
+  }
+  const m = metaOf(r), d = r.data, e = d.engine || {};
+  const fc = factsCount(d);
+  return `<div class="paper runcard ${tag}">
+    <div class="rc-top"><span class="key ${tag}">${tag.toUpperCase()}</span><span class="eyebrow">${tag === 'a' ? 'Baseline' : 'Candidate'}</span>
+      ${tag === 'b' ? `<button class="btn ghost" id="dropB" type="button" title="Report on A alone" aria-label="Remove candidate B">${icon('x')}</button>` : ''}</div>
+    <div class="rc-name">${esc(runName(r))}</div>
+    <div class="rc-sub">${esc(when(d.at, true))} · ${esc(m.n)} questions · seed ${esc(d.seed)}</div>
+    <div class="rc-body">
+      <div class="tags">
+        <span class="tag">answers <b>${esc(m.model)}</b></span>
+        <span class="tag">decides <b>${esc(m.decider)}</b></span>
+        ${e.backend ? `<span class="tag">${esc(e.backend)}${m.bits ? ` · ${esc(m.bits)}` : ''}</span>` : ''}
+        ${m.subset ? `<span class="tag warn">subset of ${d.only.length}</span>` : ''}
+      </div>
+      <div class="rc-facts"><div class="v">${fmt(m.facts, 'pct')}</div><div class="l">facts · ${fc.hit}/${fc.n}</div></div>
+    </div>
+  </div>`;
+}
+function renderPicked() {
+  const a = entry(state.a), b = state.b && state.b !== state.a ? entry(state.b) : null;
+  $('picked').innerHTML = `${runCard('a', a)}
+    <button class="icon-btn swap" id="swap" type="button" title="Swap baseline and candidate" aria-label="Swap baseline and candidate"${b ? '' : ' disabled'}>${icon('swap')}</button>
+    ${runCard('b', b)}`;
+}
+
+// ── headline: answer facts ─────────────────────────────────────────────────
+function renderHero(A, B) {
+  const main = B ?? A;
+  const fa = factsCount(A), fb = B ? factsCount(B) : null;
+  const va = A.scorecard.factHitRate, vb = B?.scorecard.factHitRate;
+  const v = B ? vb : va;
+  const c = B ? change(va, vb, metric('factHitRate')) : null;
+  const pr = B ? pairs(A, B, 'factsOk') : null;
+  const pctParts = (x) => (x == null ? ['—', ''] : [(x * 100).toFixed(1), '%']);
+  const [big, unit] = pctParts(v);
+  const bar = (tag, x) => `<div class="fc-bar ${tag}"><span class="key ${tag}">${tag.toUpperCase()}</span><span><i style="width:${(x ?? 0) * 100}%"></i></span><b class="num">${fmt(x, 'pct')}</b></div>`;
+  const kbs = [...new Set(main.scored.map((s) => s.kb))];
+  const kbTiles = kbs.map((kb) => {
+    const a = factsCount(A, kb), b = B ? factsCount(B, kb) : null, cur = b ?? a;
+    if (!cur.n) return '';
+    const p = (x) => (x && x.n ? `${Math.round((x.hit / x.n) * 100)}%` : '—');
+    const dir = b && a.n && b.n ? (b.hit / b.n > a.hit / a.n ? 'up' : b.hit / b.n < a.hit / a.n ? 'down' : '') : '';
+    return `<div class="kbf"><span class="kb" style="justify-self:start">${esc(kb)}</span>
+      <span class="num">${B ? `<span class="muted">${p(a)} → </span><span class="${dir}">${p(b)}</span>` : p(a)}</span>
+      <span class="small muted num">${cur.hit} of ${cur.n}</span></div>`;
+  }).join('');
+  const missed = main.scored.filter((s) => s.factsOk === false).length;
+  const text = B
+    ? `<b>${esc(nameOf(B))}</b> stated every expected fact in <b>${fb.hit} of ${fb.n}</b> answers, against ${fa.hit} of ${fa.n} for A. ${pr.up + pr.down ? `<span class="up">${pr.up} gained</span>, <span class="down">${pr.down} lost</span> (${pText(pr.p)}).` : 'No question flipped.'}`
+    : `<b>${esc(nameOf(A))}</b> stated every expected fact in <b>${fa.hit} of ${fa.n}</b> answers.`;
+  const tiles = ['groundedRate', 'firstActionAccuracy', 'secondsPerQuestion', 'msPerDecision'].map((k) => {
+    const mm = metric(k), a = A.scorecard[k], b = B?.scorecard[k];
+    const cc = B ? change(a, b, mm) : null;
+    return `<div class="paper tile"><div class="eyebrow">${esc(mm.label)}</div><div class="tile-v num">${fmt(B ? b : a, mm.kind)}</div>
+      <div class="tile-s">${B ? `<span class="num">A ${fmt(a, mm.kind)}</span><span class="chg ${cc?.dir ?? 'flat'}">${cc ? esc(cc.text) : ''}</span>` : esc(mm.help ?? '')}</div></div>`;
+  }).join('');
+  return `<section class="hero" aria-label="Headline results">
+    <div class="paper facts-card">
+      <div class="fc-label"><span class="name">Answer facts found</span><span class="badge">Headline quality metric</span></div>
+      <div class="fc-main">
+        <div class="fc-big">${big}<small>${unit}</small></div>
+        ${B ? `<div class="fc-from"><span class="delta ${c?.dir ?? 'flat'}">${c ? esc(c.text) : '—'}</span><span class="fc-prev"><span class="key a">A</span>${fmt(va, 'pct')}</span></div>` : ''}
+      </div>
+      <div class="fc-bars">${B ? bar('a', va) + bar('b', vb) : bar('a', va)}</div>
+      <p class="fc-text">${text}</p>
+      ${kbTiles ? `<div class="fc-kb">${kbTiles}</div>` : ''}
+      ${missed ? `<button type="button" class="linkbtn" data-goto="nofacts">Show the ${missed} question${missed === 1 ? '' : 's'} ${B ? 'B' : 'the run'} missed facts on</button>` : ''}
+    </div>
+    <div class="tiles">${tiles}</div>
+  </section>`;
+}
+
 // ── verdict ────────────────────────────────────────────────────────────────
 const joinList = (xs) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 function renderVerdict(A, B) {
   const sc = A.scorecard;
   if (!B) {
-    const withFacts = A.scored.filter((s) => s.factsOk !== null);
     const misses = A.scored.filter(isMiss);
     const cls = misses.length ? 'mixed' : 'good';
-    return `<section class="block"><div class="paper verdict ${cls}">
-      <p class="headline"><b>${esc(setupName(A))}</b> found every expected fact in ${withFacts.filter((s) => s.factsOk).length} of ${withFacts.length} answers and took the right first action on ${A.scored.filter((s) => s.firstOk).length} of ${A.scored.length} questions.</p>
+    return `<section class="block"><div class="block-head"><h2>Summary</h2></div><div class="paper verdict ${cls}">
+      <p class="headline"><b>${esc(nameOf(A))}</b> took the right first action on ${A.scored.filter((s) => s.firstOk).length} of ${A.scored.length} questions.</p>
       <ul class="findings">
         <li><span><b>${fmt(sc.groundedRate, 'pct')}</b> of answers with sources cited them correctly.</span></li>
         <li><span><b>${fmt(sc.secondsPerQuestion, 's')}</b> per question, with ${fmt(sc.decisionsPerQuestion, 'num')} decisions of ${fmt(sc.msPerDecision, 'ms')} each.</span></li>
@@ -475,7 +873,7 @@ function renderVerdict(A, B) {
   const counts = shiftCounts(A, B);
   const up = counts.improved || 0, down = counts.regressed || 0;
   const p = signTest(up, up + down);
-  const nameA = esc(setupName(A)), nameB = `<b>${esc(setupName(B))}</b>`;
+  const nameA = esc(nameOf(A)), nameB = `<b>${esc(nameOf(B))}</b>`;
   let cls, headline;
   if (gains.length && !losses.length) { cls = 'good'; headline = `${nameB} answers better than ${nameA}, with no quality metric worse, ${speed}.`; }
   else if (losses.length && !gains.length) { cls = 'bad'; headline = `${nameB} answers worse than ${nameA}, ${speed}.`; }
@@ -484,8 +882,8 @@ function renderVerdict(A, B) {
   const sig = up + down
     ? `${up} question${up === 1 ? '' : 's'} improved and ${down} regressed (exact sign test on the ${up + down} that changed: ${pText(p)}). ${p < 0.05 ? 'A split this one-sided is unlikely to be chance.' : 'With this few changes, the split could be chance.'}`
     : 'No question changed outcome.';
-  const comparable = A.seed === B.seed && !A.only && !B.only && A.scored.length === B.scored.length;
-  return `<section class="block"><div class="paper verdict ${cls}">
+  const comparable = comparableRuns(entry(state.a), entry(state.b)) && !A.only && !B.only;
+  return `<section class="block"><div class="block-head"><h2>Verdict</h2></div><div class="paper verdict ${cls}">
     <p class="headline">${headline}</p>
     <ul class="findings">
       ${gains.length ? `<li><span><b class="up">Better:</b> ${esc(joinList(gains))}.</span></li>` : ''}
@@ -506,10 +904,11 @@ function renderScorecard(A, B) {
     if (a == null && b == null) return '';
     const name = `<div class="metric-name">${esc(m.label)}</div>${m.help ? `<div class="metric-help">${esc(m.help)}</div>` : ''}`;
     const bar = (cls, v) => `<span class="${cls}"><i style="width:${Math.max(0, Math.min(1, v ?? 0)) * 100}%"></i></span>`;
-    if (!B) return `<tr><td>${name}</td><td class="r num"><b>${fmt(a, m.kind)}</b></td><td>${m.kind === 'pct' ? `<div class="bars" aria-hidden="true">${bar('a', a)}</div>` : ''}</td></tr>`;
+    const tr = m.primary ? '<tr class="primary">' : '<tr>';
+    if (!B) return `${tr}<td>${name}</td><td class="r num"><b>${fmt(a, m.kind)}</b></td><td>${m.kind === 'pct' ? `<div class="bars" aria-hidden="true">${bar('a', a)}</div>` : ''}</td></tr>`;
     const c = change(a, b, m);
     const pr = m.pair ? pairs(A, B, m.pair) : null;
-    return `<tr>
+    return `${tr}
       <td>${name}</td>
       <td class="r num">${fmt(a, m.kind)}</td>
       <td class="r num"><b>${fmt(b, m.kind)}</b></td>
@@ -537,16 +936,18 @@ function renderByKb(A, B) {
   };
   const cell = (r) => (r ? `${r.hit}<span class="muted"> / ${r.n}</span>` : '<span class="muted">—</span>');
   const pair = (kb, k) => {
+    const hl = k === 'factsOk' ? ' hl' : '';
     const a = rate(A, kb, k);
-    if (!B) return `<td class="r num">${cell(a)}</td>`;
+    if (!B) return `<td class="r num${hl}">${cell(a)}</td>`;
     const b = rate(B, kb, k);
     const dir = a && b ? (b.hit > a.hit ? 'up' : b.hit < a.hit ? 'down' : '') : '';
-    return `<td class="r num">${cell(a)}</td><td class="r num"><span class="${dir}">${cell(b)}</span></td>`;
+    return `<td class="r num${hl}">${cell(a)}</td><td class="r num${hl}"><span class="${dir}">${cell(b)}</span></td>`;
   };
   const cols = [['factsOk', 'Facts'], ['grounded', 'Grounded'], ['firstOk', 'First action']];
-  const head = `<tr><th>Knowledge base</th><th class="r">Questions</th>${cols.map(([, l]) => (B ? `<th class="r">${l} <span class="key a">A</span></th><th class="r">${l} <span class="key b">B</span></th>` : `<th class="r">${l}</th>`)).join('')}</tr>`;
-  const label = { docs: 'Documents', code: 'Source code', mixed: 'Documents and code' };
-  const rows = kbs.map((kb) => `<tr><td><span class="kb">${esc(kb)}</span> <span class="small muted">${esc(label[kb] ?? '')}</span></td><td class="r num">${A.scored.filter((s) => s.kb === kb).length}</td>${cols.map(([k]) => pair(kb, k)).join('')}</tr>`).join('');
+  const th = (k, l) => `<th class="r${k === 'factsOk' ? ' hl' : ''}">${l}`;
+  const head = `<tr><th>Knowledge base</th><th class="r">Questions</th>${cols.map(([k, l]) => (B ? `${th(k, l)} <span class="key a">A</span></th>${th(k, l)} <span class="key b">B</span></th>` : `${th(k, l)}</th>`)).join('')}</tr>`;
+  const label = { docs: 'Documents', code: 'Source code', mixed: 'Documents and code', large: 'Long documents' };
+  const rows = kbs.map((kb) => `<tr><td><span class="kb">${esc(kb)}</span> <span class="small muted">${esc(label[kb] ?? '')}</span></td><td class="r num">${(B ?? A).scored.filter((s) => s.kb === kb).length}</td>${cols.map(([k]) => pair(kb, k)).join('')}</tr>`).join('');
   return `<section class="block">
     <div class="block-head"><h2>Results by knowledge base</h2><span class="small muted">Questions passing / questions the check applies to</span></div>
     <div class="paper tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
@@ -570,6 +971,7 @@ function filtered(A, B) {
     const f = state.filter;
     if (f === 'all') return true;
     if (f === 'misses') return B ? isMiss(b) : isMiss(a);
+    if (f === 'nofacts') return (B ? b : a)?.factsOk === false;
     if (f === 'changed') return shift(a, b) !== 'same';
     return shift(a, b) === f;
   });
@@ -579,13 +981,14 @@ function renderQuestions(A, B) {
   const kbs = [...new Set(A.scored.map((s) => s.kb).concat(B ? B.scored.map((s) => s.kb) : []))];
   const counts = B ? shiftCounts(A, B) : {};
   const misses = (B ?? A).scored.filter(isMiss).length;
+  const noFacts = (B ?? A).scored.filter((s) => s.factsOk === false).length;
   const filters = B
-    ? [['all', 'All', new Set([...sa.keys(), ...sb.keys()]).size], ['changed', 'Changed', Object.entries(counts).filter(([k]) => k !== 'same').reduce((n, [, v]) => n + v, 0)], ['improved', 'Improved', counts.improved || 0], ['regressed', 'Regressed', counts.regressed || 0], ['misses', 'Misses in B', misses]]
-    : [['all', 'All', sa.size], ['misses', 'Misses', misses]];
+    ? [['all', 'All', new Set([...sa.keys(), ...sb.keys()]).size], ['changed', 'Changed', Object.entries(counts).filter(([k]) => k !== 'same').reduce((n, [, v]) => n + v, 0)], ['improved', 'Improved', counts.improved || 0], ['regressed', 'Regressed', counts.regressed || 0], ['nofacts', 'Facts missed in B', noFacts], ['misses', 'Any miss in B', misses]]
+    : [['all', 'All', sa.size], ['nofacts', 'Facts missed', noFacts], ['misses', 'Any miss', misses]];
   if (!filters.some(([k]) => k === state.filter)) state.filter = 'all';
   const ids = filtered(A, B);
   const cols = 8;
-  const head = `<tr><th class="stripe"></th><th>Question</th><th>KB</th><th>First action</th><th>Facts</th><th>Cited</th><th>${B ? 'Actions (A, then B if different)' : 'Actions'}</th><th class="r">${B ? 'Outcome' : 'Time'}</th></tr>`;
+  const head = `<tr><th class="stripe"></th><th>Question</th><th>KB</th><th class="hl">Facts</th><th>Cited</th><th>First action</th><th>${B ? 'Actions (A, then B if different)' : 'Actions'}</th><th class="r">${B ? 'Outcome' : 'Time'}</th></tr>`;
   const rows = ids.map((id) => {
     const a = sa.get(id), b = sb.get(id), c = cases.get(id);
     const open = state.open.has(id);
@@ -597,15 +1000,15 @@ function renderQuestions(A, B) {
       : `<td class="r num">${a.seconds.toFixed(1)} s</td>`;
     return `<tr class="row${open ? ' open' : ''}" data-id="${esc(id)}" tabindex="0" aria-expanded="${open}">
       <td class="stripe s-${sh}"></td><td>${q}</td><td><span class="kb">${esc((a ?? b).kb)}</span></td>
-      <td class="cell-ab">${abMark(a, b, 'firstOk', !!B)}</td><td class="cell-ab">${abMark(a, b, 'factsOk', !!B)}</td><td class="cell-ab">${abMark(a, b, 'grounded', !!B)}</td>
+      <td class="cell-ab big factcol">${abMark(a, b, 'factsOk', !!B)}</td><td class="cell-ab">${abMark(a, b, 'grounded', !!B)}</td><td class="cell-ab">${abMark(a, b, 'firstOk', !!B)}</td>
       <td>${actions}</td>${last}</tr>${open ? `<tr><td class="detail" colspan="${cols}">${renderDetail(id, A, B)}</td></tr>` : ''}`;
   }).join('') || `<tr class="empty-row"><td colspan="${cols}">No question matches these filters.</td></tr>`;
-  return `<section class="block">
+  return `<section class="block" id="questions">
     <div class="block-head"><h2>Question-level results</h2><span class="small muted">${ids.length} shown · select a row for its trace and answer${B ? ' in both runs' : ''}</span></div>
     <div class="filters">
       <div class="seg" role="group" aria-label="Filter by outcome">${filters.map(([k, l, n]) => `<button type="button" data-filter="${k}" aria-pressed="${state.filter === k}">${l}<span class="ct">${n}</span></button>`).join('')}</div>
       <div class="seg" role="group" aria-label="Filter by knowledge base">${['all', ...kbs].map((k) => `<button type="button" data-kb="${esc(k)}" aria-pressed="${state.kb === k}">${k === 'all' ? 'All KBs' : esc(k)}</button>`).join('')}</div>
-      <input class="search" id="search" type="search" placeholder="Search by id or question" value="${esc(state.q)}" aria-label="Search questions">
+      <label class="searchbox">${icon('search')}<input id="search" type="search" placeholder="Search by id or question" value="${esc(state.q)}" aria-label="Search questions"></label>
       <button class="btn" type="button" id="expandAll">${ids.length && ids.every((id) => state.open.has(id)) ? 'Collapse all' : 'Expand all'}</button>
     </div>
     <div class="paper tbl-wrap"><table class="tbl q"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
@@ -652,8 +1055,8 @@ function renderRun(tag, d, id, c) {
     </div></li>`;
   }).join('');
   return `<div class="run">
-    <div class="run-head"><span class="key ${tag}">${tag.toUpperCase()}</span><b>${esc(setupName(d))}</b>
-      <span class="run-score">first ${mark(s.firstOk)} facts ${mark(s.factsOk)} cited ${mark(s.grounded)} · ${s.seconds.toFixed(1)} s</span></div>
+    <div class="run-head"><span class="key ${tag}">${tag.toUpperCase()}</span><b>${esc(nameOf(d))}</b>
+      <span class="run-score">facts ${mark(s.factsOk)} cited ${mark(s.grounded)} first ${mark(s.firstOk)} · ${s.seconds.toFixed(1)} s</span></div>
     ${r.error ? `<span class="err">Turn error: ${esc(r.error)}</span>` : ''}
     <ol class="steps">${steps}</ol>
     ${r.sources.length ? `<div><div class="eyebrow" style="margin-bottom:4px">Sources</div><div class="sources">${r.sources.map((x, i) => `<span>[${i + 1}] ${esc(x)}</span>`).join('')}</div></div>` : ''}
@@ -667,8 +1070,8 @@ function renderDetail(id, A, B) {
   const head = c
     ? `<div class="dq">${esc(c.prompt)}</div>
        ${c.history?.length ? `<div><div class="eyebrow" style="margin-bottom:4px">Earlier in the conversation</div><div class="history">${c.history.map((h) => `<div><b>${esc(h.role)}:</b> ${esc(h.content)}</div>`).join('')}</div></div>` : ''}
-       <div class="spec"><span class="eyebrow">Expected first action</span>${c.first.map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div>
-       <div class="spec"><span class="eyebrow">Expected facts</span>${c.facts.length ? c.facts.map((f) => `<span class="chip">${esc(f === '$notFound' ? 'says the KB doesn’t cover it' : f)}</span>`).join('') : '<span class="muted">None (small talk)</span>'}</div>`
+       <div class="spec"><span class="eyebrow">Expected facts</span>${c.facts.length ? c.facts.map((f) => `<span class="chip">${esc(f === '$notFound' ? 'says the KB doesn’t cover it' : f)}</span>`).join('') : '<span class="muted">None (small talk)</span>'}</div>
+       <div class="spec"><span class="eyebrow">Expected first action</span>${c.first.map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div>`
     : `<p class="small muted" style="margin:0">This report predates saving questions in reports, so only the id <code>${esc(id)}</code> is known.</p>`;
   return `<div class="dgrid">${head}<div class="cmp">${renderRun('a', A, id, c)}${B ? renderRun('b', B, id, c) : ''}</div></div>`;
 }
@@ -676,15 +1079,17 @@ function renderDetail(id, A, B) {
 function renderMethod(A, B) {
   const d = B ?? A;
   const nFacts = d.scored.filter((s) => s.factsOk !== null).length;
+  const nKb = new Set(d.scored.map((s) => s.kb)).size;
   return `<section class="block">
     <div class="block-head"><h2>Method</h2></div>
-    <div class="method">
-      <p><b>Questions.</b> ${d.scored.length} fixed questions over three knowledge bases built from <code>tests/fixtures/eval/</code>: documents, source code, and both. The content describes a fictional ferry operator, so a model can’t answer from general knowledge. The set includes small talk, follow-ups and questions the knowledge base can’t answer.</p>
+    <div class="paper method">
+      <p><b>Questions.</b> ${d.scored.length} fixed questions over ${nKb} knowledge bases built from <code>tests/fixtures/eval/</code>. The content describes a fictional ferry operator, so a model can’t answer from general knowledge. The set includes small talk, follow-ups and questions the knowledge base can’t answer.</p>
       <p><b>Procedure.</b> Each question goes through the real agent in the app with the shipped defaults. The option order is shuffled with a fixed seed and answers are generated at temperature 0, so a run is repeatable: repeated runs of one setup agreed on every question.</p>
-      <p><b>Right first action.</b> The first action the agent took, after any fallback, is one the question lists as acceptable.</p>
-      <p><b>Answer facts.</b> Each question lists case-insensitive patterns the answer must all match, for example <code>30 days</code>. For an unanswerable question the answer must say the knowledge base doesn’t cover it. The rate is over the ${nFacts} questions that expect facts.</p>
+      <p><b>Answer facts (headline).</b> Each question lists case-insensitive patterns the answer must all match, for example <code>30 days</code>. For an unanswerable question the answer must say the knowledge base doesn’t cover it. The rate is over the ${nFacts} questions that expect facts.</p>
       <p><b>Grounded.</b> An answer with sources cites at least one <code>[n]</code>, and every <code>[n]</code> names a source the app listed.</p>
+      <p><b>Right first action.</b> The first action the agent took, after any fallback, is one the question lists as acceptable.</p>
       <p><b>Wasted calls.</b> Tool calls that errored, returned nothing, or were skipped as repeats.</p>
+      <p><b>Comparable runs.</b> Rates compare directly only between runs with the same questions and seed; the run library marks the others with an amber dot.</p>
       <p><b>Significance.</b> One question moves a rate by ${(100 / d.scored.length).toFixed(1)} points. “Questions flipped” counts the questions whose result differs between A and B; the exact two-sided sign test gives the chance of a split at least that one-sided if neither setup were better. Timings depend on the machine and vary by up to about 15% between runs.</p>
     </div>
   </section>`;
@@ -705,37 +1110,32 @@ function renderEmpty() {
 function renderHeader(A, B) {
   const title = $('title'), meta = $('meta');
   if (!A) { title.textContent = 'Agent evaluation'; meta.innerHTML = ''; document.title = 'Andai Agent Evaluation'; return; }
-  title.innerHTML = B ? `${esc(setupName(A))}<span class="vs">vs</span>${esc(setupName(B))}` : esc(setupName(A));
-  document.title = B ? `${setupName(A)} vs ${setupName(B)} · Andai eval` : `${setupName(A)} · Andai eval`;
+  title.innerHTML = B ? `${esc(nameOf(A))}<span class="vs">vs</span>${esc(nameOf(B))}` : esc(nameOf(A));
+  document.title = B ? `${nameOf(A)} vs ${nameOf(B)} · Andai eval` : `${nameOf(A)} · Andai eval`;
   const kbs = new Set(A.scored.map((s) => s.kb)).size;
+  const nA = A.scored.length, nB = B?.scored.length;
   meta.innerHTML = [
-    `<span><b>${A.scored.length}</b> questions</span>`,
+    `<span><b>${nA}</b>${B && nB !== nA ? ` / <b>${nB}</b>` : ''} questions</span>`,
     `<span><b>${kbs}</b> knowledge bases</span>`,
     `<span>Seed <b>${esc(A.seed)}</b>${B && B.seed !== A.seed ? ` / <b>${esc(B.seed)}</b>` : ''}</span>`,
-    `<span>Run ${B ? `${esc(when(A.at, true))} and ${esc(when(B.at, true))}` : esc(when(A.at, true))}</span>`,
   ].join('');
-}
-function renderPicker() {
-  const opts = (sel, none) => (none ? '<option value="">None: report on A alone</option>' : '') +
-    reports.slice().reverse().map((r) => `<option value="${esc(r.key)}"${r.key === sel ? ' selected' : ''}>${esc(optionLabel(r))}</option>`).join('');
-  $('pickA').innerHTML = reports.length ? opts(state.a, false) : '<option>No reports yet</option>';
-  $('pickB').innerHTML = opts(state.b, true);
-  $('infoA').innerHTML = setupLine(get(state.a));
-  $('infoB').innerHTML = setupLine(get(state.b));
-  $('clear').hidden = !reports.some((r) => r.from === 'dropped');
 }
 function current() {
   const A = get(state.a);
   return [A, A && state.b && state.b !== state.a ? get(state.b) : null];
 }
 function render() {
-  renderPicker();
+  toHash();
+  renderPicked();
+  renderLibrary();
   const [A, B] = current();
   renderHeader(A, B);
-  $('main').innerHTML = A ? [renderVerdict(A, B), renderScorecard(A, B), renderByKb(A, B), renderQuestions(A, B), renderMethod(A, B)].join('') : renderEmpty();
+  $('main').innerHTML = A ? [renderHero(A, B), renderVerdict(A, B), renderScorecard(A, B), renderByKb(A, B), renderQuestions(A, B), renderMethod(A, B)].join('') : renderEmpty();
 }
 
 $('main').addEventListener('click', (e) => {
+  const g = e.target.closest('[data-goto]');
+  if (g) { state.filter = g.dataset.goto; state.kb = 'all'; render(); $('questions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
   const f = e.target.closest('[data-filter]');
   if (f) { state.filter = f.dataset.filter; render(); return; }
   const k = e.target.closest('[data-kb]');
@@ -765,10 +1165,11 @@ $('main').addEventListener('input', (e) => {
 });
 
 restore();
+$('libSearch').value = lib.q;
+$('libSort').value = lib.sort;
 byTime();
-newestTwo();
-render();
-if (served) { $('reload').hidden = false; loadFolder(); }
+if (!fromHash()) newestPair();
+if (served) { $('reload').hidden = false; loadFolder(); } else render();
 </script>
 </body>
 </html>

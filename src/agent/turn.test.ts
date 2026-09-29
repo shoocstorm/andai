@@ -215,7 +215,7 @@ beforeEach(() => {
   useKb.setState({ kbs: [kb()], grounding: 'docs', k: 8, maxChars: 6000 });
   usePersona.getState().reset();
   // Most tests script the first decision; the searchFirst tests turn it on.
-  useTools.setState({ agentMode: false, maxSteps: 4, minConfidence: 0.3, searchFirst: false, policies: {}, stats: {} });
+  useTools.setState({ agentMode: false, maxSteps: 4, minConfidence: 0.3, searchFirst: false, plan: 'off', searchAgain: false, policies: {}, stats: {} });
   Object.assign(agent, {
     decisions: [],
     laya: false,
@@ -909,6 +909,41 @@ describe('runTurn (agent mode)', () => {
       agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now', stop: 0.9 }];
       await runTurn('How often is the Kestrel dry-docked?');
       expect(steps()[0].call!.argIO).toMatchObject({ calls: [{ reply: 'nope', errors: ['missing scope'] }], note: expect.stringMatching(/searched with the question as written/) });
+    });
+
+    it('with searchAgain on, searches once more with the question as written when nothing scores as helping', async () => {
+      agent.laya = true;
+      useTools.setState({ searchAgain: true });
+      agent.output = { kb_search: { items: [noise] } };
+      rel.scores = null;
+      rel.fail = null;
+      agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now', stop: 0.9 }];
+      // every passage scores 0.9 by default; this one must look like a miss
+      rel.scores = [0.05];
+      await runTurn('How often is the Kestrel dry-docked?');
+      expect(agent.tool.map((t) => t.call)).toEqual([
+        expect.objectContaining({ tool: 'kb_search' }),
+        expect.objectContaining({ tool: 'kb_search', query: 'How often is the Kestrel dry-docked?' }),
+      ]);
+      expect(steps()[1]).toMatchObject({ action: 'kb_search', planned: true, decision: null });
+      expect(steps()[1].note).toMatch(/searching again with the question as written/);
+      // set by the rule, not written by the chat model
+      expect(agent.fillStates).toHaveLength(1);
+    });
+
+    it('with the plan on, reads a clipped passage by rule, then answers by rule (pure) or asks the decision model (hybrid)', async () => {
+      agent.laya = true;
+      agent.output = { kb_search: { items: [long] }, kb_get_code: { slices: [] } };
+      rel.scores = [0.8];
+      useTools.setState({ plan: 'pure' });
+      agent.decisions = [{ chosen: 'kb_search' }];
+      await runTurn('How often is the Kestrel dry-docked?');
+      expect(steps().map((x) => [x.action, x.planned ?? false])).toEqual([
+        ['kb_search', false],
+        ['kb_read_lines', true],
+        ['answer_now', true],
+      ]);
+      expect(agent.seenStates).toHaveLength(1);
     });
 
     it('reads nothing whole when the clipped passages are clear misses', async () => {

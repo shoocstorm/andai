@@ -113,7 +113,7 @@ can't measure is left out of the comparison and kept in the baseline.
 
 ### Agent eval: `bun run eval:agent`, section `agent-eval`
 
-Not a speed suite only: it scores what the agent *does* on 45 fixed
+Not a speed suite only: it scores what the agent *does* on 100 fixed
 questions (`tests/fixtures/eval/cases.json`) over four knowledge bases built
 from `tests/fixtures/eval/` (documents, code, both, and long documents whose
 results outgrow Laya's input; item 15). The scorecard is also split by
@@ -122,7 +122,9 @@ acceptable first actions and regexes the answer must match. The option
 shuffle is seeded and the answer is greedy (temperature 0), so a run is
 repeatable. It needs ug and the model, so it isn't part of `bun run check`.
 Recorded on Apple M5 Max · 18 cores · 128 GB with Qwen3 0.6B, on the
-45-question set (2026-09-28; every setup's section was re-recorded then).
+45-question set (2026-09-28). The set has since grown to 100 questions
+(2026-09-28), so these baselines no longer describe it: re-record each
+setup's section with `--update`, one run at a time (AGENTS.md §6).
 
 | Metric | Baseline | Tolerance | What it is |
 |---|---|---|---|

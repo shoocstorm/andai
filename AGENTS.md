@@ -481,6 +481,13 @@ level defaults to *Ask*.
   answering from a clipped search passage (fewer than 80% of its node's
   lines, scored ≥ 0.3 with Laya, or the first one without), the loop reads
   that node whole with Read lines, once a turn (`read-whole` in the trace).
+- **Rules can plan the follow-ups, but didn't add facts** (tracker item 16,
+  2026-09-28). `agent/plan.ts` reads clipped passages, fetches named symbols
+  and answers from Laya's scores without a decision; it cut tool calls by a
+  third and time per question by 25–45%, but lost 1–3 of 80 answers across
+  the two Laya checkpoints. It ships off (`useTools` `plan`), as does
+  `searchAgain` (search once more with the question as written when nothing
+  scores ≥ 0.5).
 - **Score a short follow-up with the question before it.** Against "And the
   Osprey?" alone, an accessibility section scored 96% and the dry-dock
   schedule 1% (`scoringRequest`).
@@ -728,7 +735,7 @@ bun run audit            # bun audit (JS deps) + cargo audit (RustSec); CI and r
 bun run test:e2e:release # same against the release binary (localhost origin + ACL + Finder-like PATH)
 bun run perf             # bundle size (CI too) + micro-benchmarks vs. perf/baseline.json
 bun run bench:engine     # engine probe: GPU layers, threads, prompt and generation tok/s per wllama setting (needs a downloaded model); BENCH_MODEL=qwen3-1.7b-mlx for native MLX
-bun run eval:agent       # agent eval: 45 questions (4 knowledge bases, one of long documents) through the real agent → scorecard vs. perf/baseline.json (needs ug + model); read and compare reports with bun run eval:view
+bun run eval:agent       # agent eval: 100 questions (4 knowledge bases, one of long documents) through the real agent → scorecard vs. perf/baseline.json (needs ug + model); read and compare reports with bun run eval:view
 ```
 
 **Run the e2e tests with the default model, `qwen3-0.6b`** (don't set
@@ -792,6 +799,13 @@ Rules:
   and give the reason in the commit. Don't raise a tolerance to get a change
   through. Timing baselines are machine-bound: they're enforced only on the
   machine that recorded them (docs/performance.md).
+- **Heavy runs, one at a time.** An agent eval, e2e run, `bench:engine` or
+  `test:llm` starts the app with models on the GPU. About twenty evals back
+  to back (2026-09-28) overheated a MacBook to a black screen and a forced
+  power-off. Run one, pause, check `pgrep -fl "tauri dev|andai|vite"` for
+  leftovers, prefer `--only` for a few questions, and stop when runs slow
+  down unexpectedly (a sign the machine is throttling). Never queue a batch
+  of them in the background.
 - **Agent changes are measured, not argued.** A change to the agent loop,
   decision options, tool offers, argument filling or observations runs
   `bun run eval:agent` before and after, and the commit says what moved

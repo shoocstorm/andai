@@ -96,6 +96,147 @@
         "24 months"
       ]
     },
-    { "id": "large-unanswerable", "kb": "large", "prompt": "How much is a deckhand paid?", "first": ["kb_search"], "facts": ["$notFound"] }
+    { "id": "large-unanswerable", "kb": "large", "prompt": "How much is a deckhand paid?", "first": ["kb_search"], "facts": ["$notFound"] },
+    { "id": "doc-osprey-capacity", "kb": "docs", "prompt": "How many passengers can the MV Osprey carry?", "first": ["kb_search"], "facts": ["150"] },
+    { "id": "doc-kestrel-vehicles", "kb": "docs", "prompt": "How many vehicles fit on the Kestrel?", "first": ["kb_search"], "facts": ["\\b40\\b|forty"] },
+    { "id": "doc-dunmere-time", "kb": "docs", "prompt": "How long does the crossing from Harlow to Dunmere take?", "first": ["kb_search"], "facts": ["1 ?(hour|hr|h)\\w* (and )?20|80 min|one hour (and )?twenty"] },
+    { "id": "doc-checkin-foot", "kb": "docs", "prompt": "When does check-in close for foot passengers?", "first": ["kb_search"], "facts": ["20 minutes|twenty minutes"] },
+    { "id": "doc-late-vehicle", "kb": "docs", "prompt": "What happens if I arrive with my car after check-in has closed?", "first": ["kb_search"], "facts": ["next\\s+sailing"] },
+    { "id": "doc-swell", "kb": "docs", "prompt": "How big does the swell have to be before a sailing is cancelled?", "first": ["kb_search"], "facts": ["\\b3 ?m|three met"] },
+    { "id": "doc-half-refund", "kb": "docs", "prompt": "What refund do I get if I cancel 20 hours before departure?", "first": ["kb_search"], "facts": ["50 ?%|half|50 percent"] },
+    { "id": "doc-transfer", "kb": "docs", "prompt": "It's too late for a refund. Can I give my ticket to someone else instead?", "first": ["kb_search"], "facts": ["transfer", "free|no (extra )?(charge|fee|cost)|without (a )?(charge|fee)|at no cost"] },
+    { "id": "doc-refund-method", "kb": "docs", "prompt": "Where does my refund money go? Can I get it in cash at the terminal?", "first": ["kb_search"], "facts": ["original payment|same (card|payment)|payment method"] },
+    { "id": "doc-peak-days", "kb": "docs", "prompt": "Which days of the week are more expensive to travel?", "first": ["kb_search"], "facts": ["friday", "sunday"] },
+    { "id": "doc-peak-price", "kb": "docs", "prompt": "How much more do peak sailings cost?", "first": ["kb_search"], "facts": ["25 ?%|25 percent"] },
+    { "id": "doc-weather-two-facts", "kb": "docs", "prompt": "If my ferry is cancelled for weather, how long do I have to rebook, and how long would a refund take to arrive?", "first": ["kb_search"], "facts": ["30 days|thirty days", "5 business days|five business days"] },
+    { "id": "doc-smalltalk-bye", "kb": "docs", "prompt": "Great, bye!", "first": ["answer_now"], "facts": [] },
+    { "id": "doc-unanswerable-parking", "kb": "docs", "prompt": "Is there parking at the Harlow terminal?", "first": ["kb_search"], "facts": ["$notFound"] },
+    {
+      "id": "doc-followup-dunmere",
+      "kb": "docs",
+      "history": [
+        {
+          "role": "user",
+          "content": "How long is the crossing from Harlow to Pellin Island?"
+        },
+        {
+          "role": "assistant",
+          "content": "The crossing from Harlow to Pellin Island takes 55 minutes [1]."
+        }
+      ],
+      "prompt": "And to Dunmere?",
+      "first": [
+        "kb_search"
+      ],
+      "facts": [
+        "1 ?(hour|hr|h)\\w* (and )?20|80 min|one hour (and )?twenty"
+      ]
+    },
+    { "id": "code-base-fare-dunmere", "kb": "code", "prompt": "What is the base fare per passenger on the Dunmere route?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["19\\.5"] },
+    { "id": "code-group-size", "kb": "code", "prompt": "From how many passengers does the code apply the group discount?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["\\b10\\b|ten"] },
+    { "id": "code-group-rate", "kb": "code", "prompt": "How big a discount does applyGroupDiscount give?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["15 ?%|0\\.15|15 percent"] },
+    { "id": "code-base-delay", "kb": "code", "prompt": "How long does withRetry wait before its first retry?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["250"] },
+    { "id": "code-backoff", "kb": "code", "prompt": "How does the wait between retries grow after each failure?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["doubl|twice|2 \\*\\* ?i|exponential"] },
+    { "id": "code-weather-refund", "kb": "code", "prompt": "What does weatherRefund return?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["full|the (whole |entire )?fare|entire|whole"] },
+    { "id": "code-refund-boundary", "kb": "code", "prompt": "What does refundFraction return for a cancellation exactly 6 hours before departure?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["0\\.5|50 ?%|half"] },
+    { "id": "code-route-types", "kb": "code", "prompt": "Which routes does the Route type allow?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["harlow-pellin", "harlow-dunmere"] },
+    { "id": "code-gateway", "kb": "code", "prompt": "Which methods does the Gateway type have?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["chargeCard", "refundCard"] },
+    { "id": "code-callers-retry", "kb": "code", "prompt": "Which functions call withRetry?", "first": ["kb_find_usages", "kb_search", "kb_find_symbols", "kb_symbol_context"], "facts": ["createBooking", "cancelBooking"] },
+    { "id": "code-unanswerable", "kb": "code", "prompt": "Which web framework does the booking service use?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["$notFound"] },
+    {
+      "id": "code-followup-delay",
+      "kb": "code",
+      "history": [
+        {
+          "role": "user",
+          "content": "What does withRetry do?"
+        },
+        {
+          "role": "assistant",
+          "content": "`withRetry` runs a function up to 3 times by default, waiting longer after each failure (exponential backoff) [1]."
+        }
+      ],
+      "prompt": "What is its base delay?",
+      "first": [
+        "kb_search",
+        "kb_find_symbols",
+        "kb_get_code",
+        "kb_symbol_context"
+      ],
+      "facts": [
+        "250"
+      ]
+    },
+    { "id": "mixed-peak-match", "kb": "mixed", "prompt": "Does the peak pricing in the code match the 25% in the release notes?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["1\\.25|25 ?%"] },
+    { "id": "mixed-group-match", "kb": "mixed", "prompt": "Is the group discount in the code the same as the one announced in the release notes?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["15 ?%|0\\.15", "\\b10\\b|ten"] },
+    { "id": "mixed-weather-code", "kb": "mixed", "prompt": "How does the code refund a sailing that Tidewater cancelled for weather?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["weatherRefund", "full|the (whole |entire )?fare|entire|whole"] },
+    { "id": "mixed-refund-50h", "kb": "mixed", "prompt": "What share does the code refund when someone cancels 50 hours before departure, and does that match the policy?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["full|100 ?%|entire|whole|\\b1\\b"] },
+    { "id": "mixed-retry-release", "kb": "mixed", "prompt": "Which release added payment retries, and which function implements them?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["2\\.4\\.0", "withRetry"] },
+    { "id": "mixed-vehicle-two-facts", "kb": "mixed", "prompt": "How much extra is it to bring a car, and when does check-in close for it?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["18\\.5", "45"] },
+    { "id": "mixed-cancel-steps", "kb": "mixed", "prompt": "Walk me through what the code does when a passenger cancels a booking.", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["refundFraction", "refundCard|refund"] },
+    { "id": "mixed-smalltalk", "kb": "mixed", "prompt": "Thanks!", "first": ["answer_now"], "facts": [] },
+    { "id": "mixed-unanswerable-author", "kb": "mixed", "prompt": "Who wrote the refund code?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["$notFound"] },
+    {
+      "id": "mixed-followup-weather",
+      "kb": "mixed",
+      "history": [
+        {
+          "role": "user",
+          "content": "How much do I get back if I cancel 10 hours before departure?"
+        },
+        {
+          "role": "assistant",
+          "content": "You get 50% of the fare back [1]."
+        }
+      ],
+      "prompt": "And if the sailing is cancelled because of the weather?",
+      "first": [
+        "kb_search",
+        "kb_find_symbols",
+        "kb_get_code",
+        "kb_symbol_context"
+      ],
+      "facts": [
+        "full|rebook"
+      ]
+    },
+    { "id": "large-heron-drydock", "kb": "large", "prompt": "How often is MV Heron dry-docked, and who is responsible for it?", "first": ["kb_search"], "facts": ["36 months|thirty-six months", "dunmere marine"] },
+    { "id": "large-drydock-duration", "kb": "large", "prompt": "How long does a dry-dock period normally take?", "first": ["kb_search"], "facts": ["nine|\\b9\\b", "fourteen|\\b14\\b"] },
+    { "id": "large-diver-kestrel", "kb": "large", "prompt": "How often does a diver inspect MV Kestrel's hull?", "first": ["kb_search"], "facts": ["6 months|six months"] },
+    { "id": "large-diver-osprey", "kb": "large", "prompt": "How often is the Osprey's hull inspected by a diver?", "first": ["kb_search"], "facts": ["4 months|four months"] },
+    { "id": "large-blade-damage", "kb": "large", "prompt": "How deep can damage to a propeller blade be before the vessel has to come out of service?", "first": ["kb_search"], "facts": ["3 ?mm|3 millimet|three millimet"] },
+    { "id": "large-kestrel-major-overhaul", "kb": "large", "prompt": "When do MV Kestrel's engines get a major overhaul?", "first": ["kb_search"], "facts": ["24,?000"] },
+    { "id": "large-osprey-engine", "kb": "large", "prompt": "What happens to an Osprey engine when it reaches 15,000 running hours?", "first": ["kb_search"], "facts": ["exchang|replac|recondition"] },
+    { "id": "large-fuel-pellin", "kb": "large", "prompt": "What fuel reserve does a vessel need for a Pellin Island crossing?", "first": ["kb_search"], "facts": ["25 ?%|25 percent"] },
+    { "id": "large-fuel-wind", "kb": "large", "prompt": "How does the minimum fuel reserve change when winds above 30 knots are forecast?", "first": ["kb_search"], "facts": ["10 (percentage )?points|10 ?%|ten"] },
+    { "id": "large-defect-b", "kb": "large", "prompt": "How long does the crew have to fix a category B defect?", "first": ["kb_search"], "facts": ["7 days|seven days"] },
+    { "id": "large-rest-week", "kb": "large", "prompt": "How many hours of rest must every crew member have in a seven-day period?", "first": ["kb_search"], "facts": ["77"] },
+    { "id": "large-mob-target", "kb": "large", "prompt": "What is the target time for a man-overboard drill?", "first": ["kb_search"], "facts": ["4 minutes|four minutes"] },
+    { "id": "large-tern-lounge", "kb": "large", "prompt": "How much does the Tern Lounge cost, and can my children come in?", "first": ["kb_search"], "facts": ["£ ?8|\\b8\\b|eight", "12|twelve"] },
+    { "id": "large-lost-property", "kb": "large", "prompt": "How long is lost property kept?", "first": ["kb_search"], "facts": ["60 days|sixty days"] },
+    { "id": "large-assistance-pellin", "kb": "large", "prompt": "How late can I still ask for boarding assistance at Pellin Island?", "first": ["kb_search"], "facts": ["2 hours|two hours"] },
+    { "id": "large-incident-fuel", "kb": "large", "prompt": "What went wrong with the fuel delivery at Harlow in November 2025?", "first": ["kb_search"], "facts": ["water"] },
+    {
+      "id": "large-followup-infants",
+      "kb": "large",
+      "history": [
+        {
+          "role": "user",
+          "content": "How many child lifejackets does the Osprey have to carry?"
+        },
+        {
+          "role": "assistant",
+          "content": "MV Osprey must carry child lifejackets for 20% of its passenger certificate [1]."
+        }
+      ],
+      "prompt": "And where are the infant ones kept?",
+      "first": [
+        "kb_search"
+      ],
+      "facts": [
+        "forward\\s+boarding\\s+door"
+      ]
+    },
+    { "id": "large-unanswerable-wifi", "kb": "large", "prompt": "Is there Wi-Fi on board MV Kestrel?", "first": ["kb_search"], "facts": ["$notFound"] }
   ]
 }

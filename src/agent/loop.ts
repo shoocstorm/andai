@@ -27,6 +27,7 @@ import { recordSearch } from '../state/kb';
 import { recordToolRun, requestApproval, useTools } from '../state/tools';
 import { addEvidence, mergeEvidence, type Found } from './evidence';
 import { agentState, LAYA_CHARS_PER_TOKEN, needsLookup, type Observation, type StatePassage } from './prompt';
+import { planNext, searchAgainStep, type PlanInput } from './plan';
 import { DROP_BELOW, PassageScorer, passageText, scoringRequest, shownLines } from './relevance';
 import { fillArgs, parseObject } from './tools/argfill';
 import { available, policyOf } from './tools/registry';
@@ -315,7 +316,30 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     // deciders stopped after Find symbols' names and lines without reading
     // the code (docs/agentic-rag-improvements.md, item 14). Small talk and
     // questions to the assistant always go to the model.
-    if (settings.searchFirst && index === 0 && searchTool && needsLookup(prompt)) {
+    // With Laya's scores, rules pick the steps they cover (settings `plan` and
+    // `searchAgain`, both off by default; plan.ts, item 16); the arguments
+    // come from what was found, so no model writes them.
+    const allowed = available(kind, settings.policies).filter((t) => !denied.has(t.id));
+    const evidence = (): PlanInput => ({
+      prompt,
+      kind,
+      found: found.map((f) => ({ hit: f.hit, tool: f.tool, score: scorer?.get(f.hit)?.score ?? null })),
+      can: new Set(allowed.map((t) => t.id)),
+      done: (t, a) => done.has(argKey(t, a)),
+      searches: [...done.keys()].filter((k) => k.startsWith('kb_search ')).map((k) => Object.fromEntries(JSON.parse(k.slice('kb_search '.length)))),
+      searchAgain: settings.searchAgain,
+    });
+    const ruled = !scorer || !found.length ? null : settings.plan !== 'off' ? planNext(evidence()) : settings.searchAgain ? searchAgainStep(evidence()) : null;
+    const planned = ruled != null;
+    let given: Record<string, unknown> | null = null;
+    if (ruled) {
+      action = ruled.action;
+      note = ruled.note;
+      given = ruled.args ?? null;
+    } else if (settings.plan === 'pure' && scorer && found.length) {
+      action = ANSWER;
+      note = 'Planned: no rule calls for another step, so answering.';
+    } else if (settings.searchFirst && index === 0 && searchTool && needsLookup(prompt)) {
       action = searchTool.id;
       note = 'Searched first, without a decision: a question about the knowledge base’s content starts with a search, which reads the matching text.';
     } else {
@@ -365,7 +389,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     // questions (docs/agentic-rag-improvements.md, item 2).
     // The same for Read lines, which reads around a passage already found.
     const lookup = tools.find((t) => t.id === 'kb_find_symbols') ?? searchTool;
-    const chosenTool = tools.find((t) => t.id === action);
+    const chosenTool = planned ? undefined : tools.find((t) => t.id === action);
     if (chosenTool && needsSymbol(chosenTool) && !symbolsIn(hits()).length && lookup) {
       fallback = 'needs-symbol';
       note = `${chosenTool.title} needs a symbol name, and none has been seen yet, so ${lookup.id === 'kb_find_symbols' ? 'looking symbols up' : 'searching'} first.`;
@@ -379,9 +403,8 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     // About to answer from a passage the tool cut short: the rest of its
     // section may hold the answer, and neither the decision nor the answer can
     // see past the cut. Read it whole first (item 15).
-    let given: Record<string, unknown> | null = null;
     const reader = tools.find((t) => t.id === 'kb_read_lines');
-    const whole = action === ANSWER && !readWholeDone && reader && calls < settings.maxSteps ? clippedPassage() : null;
+    const whole = action === ANSWER && !planned && !readWholeDone && reader && calls < settings.maxSteps ? clippedPassage() : null;
     if (whole && reader) {
       readWholeDone = true;
       answerNext = true;
@@ -393,12 +416,12 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     }
 
     if (action === ANSWER || action === CLARIFY) {
-      step({ decision, action, note, fallback, failedDecision });
+      step({ decision, action, note, fallback, failedDecision, ...(planned ? { planned: true } : {}) });
       progress(action === CLARIFY ? 'Asking a clarifying question' : `Answering · ${calls} tool call${calls === 1 ? '' : 's'}`);
       return { hits: mergeEvidence(found), clarify: action === CLARIFY, calls, scorer };
     }
 
-    const tool = tools.find((t) => t.id === action)!;
+    const tool = (planned ? allowed : tools).find((t) => t.id === action)!;
     const policy = policyOf(tool, settings.policies);
     // Laya picks the tool's enum arguments: from the decision's pass, or, when
     // the tool came without one (search first, a fallback), in a pass of their own.
@@ -429,7 +452,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       status: 'filling',
       ...(mine.length ? { argChoices: mine.map((p) => ({ arg: p.arg, value: p.value, probability: p.probability, model: pickModel })) } : {}),
     };
-    const s = step({ decision, action, note, fallback, failedDecision, call });
+    const s = step({ decision, action, note, fallback, failedDecision, call, ...(planned ? { planned: true } : {}) });
     const patch = (p: Partial<ToolCallRecord>) => patchCall(msgId, s.id, p);
     calls++;
 
@@ -447,7 +470,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
           argsRaw: sameJson(fill.raw, args) ? null : fill.raw,
           argModel: fill.model,
           argAttempts: fill.attempts,
-          argIO: given ? { ...fill.io, note: 'No argument writer: the agent set the range to the whole section the search had clipped.' } : fill.io,
+          argIO: given ? { ...fill.io, note: planned ? `No argument writer: a rule set them (${Object.keys(given).join(', ')}): ${note ?? ''}` : 'No argument writer: the agent set the range to the whole section the search had clipped.' } : fill.io,
         });
       } else if (tool.id === 'kb_search') {
         // The fixed pipeline's query: the question itself.

@@ -28,11 +28,12 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 8 | [Measure a larger decision model](#8-measure-a-larger-decision-model) | done 2026-09-26 · 1.7B decides worse; recommend 1.7B answers + 0.6B decisions |
 | 9 | [Two query phrasings per search](#9-two-query-phrasings-per-search) | measured 2026-09-26 · worse, not shipped |
 | 10 | [Robust to the search scope](#10-robust-to-the-search-scope) | done 2026-09-27 with Laya · facts 75.9% → 89.7% (Multilingual), 82.8% → 89.7% (English); Qwen deciders unchanged |
-| 11 | [Rerank kept passages by relevance](#11-rerank-kept-passages-by-relevance) | measured 2026-09-27 · one fact lost per checkpoint, none gained; not shipped |
+| 11 | [Rerank kept passages by relevance](#11-rerank-kept-passages-by-relevance) | measured 2026-09-27, again 2026-09-28 on long documents · one to two facts lost, none gained; not shipped |
 | 12 | [Intent gate with Laya](#12-intent-gate-with-laya) | probed 2026-09-27 · fails the bar on both checkpoints; not shipped |
 | 13 | [Answer claim check](#13-answer-claim-check) | done 2026-09-27 · AUC 0.67 / 0.82; flags 3 of 42 and 8 of 41 cited sentences on the eval, 14 / 27 ms |
 | 14 | [Let the decision model choose the first step on code](#14-let-the-decision-model-choose-the-first-step-on-code) | measured 2026-09-27 · fewer facts on every setup; not shipped |
 | 15 | [Decide on what was found, not on what fits](#15-decide-on-what-was-found-not-on-what-fits) | done 2026-09-28 · facts 75.0% → 85.0% (Laya English), 82.5% → 87.5% (Multilingual), 65.0% → 72.5% (Qwen deciding) |
+| 16 | [Code plans, Laya judges](#16-code-plans-laya-judges) | measured 2026-09-28 · 25–45% faster, not more accurate; shipped off (`plan`), search-again kept as an option |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
 not shipped: 4, 9; 8 changed the recommendation (a small decision model with
@@ -82,6 +83,15 @@ answer is greedy, and each run writes a full report to `eval/`. How to run
 it and the metrics: [performance.md](performance.md#agent-eval-bun-run-evalagent-section-agent-eval).
 Three runs gave the same outcome on every question. `bun run eval:view`
 reads and compares the reports.
+
+**Grown to 100 questions (2026-09-28).** With 45, most changes moved one or
+two answers, too few to tell from a lucky question. 55 more, each fact
+checked against the fixture text (four knowledge bases: docs 33, code 22,
+mixed 16, long documents 29): more single facts, two-fact questions, four
+more follow-ups, five more unanswerable questions (parking, web framework,
+the refund code's author, Wi-Fi, a CEO) and two more small-talk lines. The
+earlier 45 are unchanged, so old reports still compare question by question
+(`--against`). Baselines recorded on 45 questions need re-recording.
 
 Other setups (2026-09-26, same questions and seed; each has its own baseline
 section in `perf/baseline.json`, `agent-eval:<setup>`):
@@ -488,6 +498,21 @@ may rarely cut a passage, and then the reorder only changes what the answer
 leads with, not what it sees. Reverted. Worth a
 re-measure on a knowledge base big enough for the budget to bite.
 
+**Retried (2026-09-28) on the 45-question set,** where the long-document
+knowledge base gives the answer prompt's budget something to cut (a section
+read whole plus seven search passages is about 8,000 characters). Top two in
+place, the rest by score (`keptOrder`), Qwen3 1.7B MLX answering:
+
+| Setup | Facts, without → with |
+|---|---|
+| Laya English | 85.0% → 85.0% |
+| Laya Multilingual | 87.5% → 85.0% |
+| Laya English, plan hybrid + search again (item 16) | 87.5% → 85.0% |
+| Laya Multilingual, plan hybrid + search again | 82.5% → 80.0% |
+
+Nothing gained anywhere, so it stays out and the code was removed again
+(reports `eval/item15-r11*`).
+
 ## 12. Intent gate with Laya
 
 **Why.** With Laya deciding, small talk still searches ("hi", "who are
@@ -726,4 +751,56 @@ answers, and two earlier runs of 17 minutes were the machine, not the code
 miss (hold it to the node of the best-scoring passage); the relevance
 statement asks whether a passage *helps*, not whether it *answers*, so a
 second fixed statement for the stop gate is worth a probe.
+
+## 16. Code plans, Laya judges
+
+**Why.** Of the eight tools, only search returns something uncertain; the
+others return what they're asked for. Item 15's largest gain came from a
+fixed rule (read a clipped passage whole), not from a model choosing well.
+So: let code plan the follow-ups, let Laya judge (its per-passage scores),
+and let the chat model write only free text (queries, the answer).
+
+**What was built** (`agent/plan.ts`, pure and unit-tested; settings `plan`
+and `searchAgain` in `state/tools.ts`, no UI). With a Laya decision model,
+once something was found, rules pick the next step, and their arguments come
+from what was found, so no model writes them:
+1. read whole the best-scoring passage a search clipped (≥ 0.3, two at most);
+2. on code, when the request names a symbol the results show: its usages if
+   it asks who calls it, else its source;
+3. answer when a passage scores ≥ 0.5;
+4. with `searchAgain`: when nothing scores ≥ 0.5, search once more with the
+   question as written and the other scope.
+
+When no rule applies, `hybrid` asks the decision model as before and `pure`
+answers. The trace marks rule-chosen steps (`planned`) and says why.
+
+**Measured** (2026-09-28, Qwen3 1.7B MLX answering, seed 7, 40 fact
+questions, M5 Max; against `eval/item15-a1r-*`):
+
+| Variant | Laya English | Laya Multilingual | Both (of 80) | Calls (en) | Decisions / q (en) | s / q (en) |
+|---|---|---|---|---|---|---|
+| No plan (ships) | 85.0% | 87.5% | 69 | 116 | 2.29 | 1.05 |
+| Hybrid | 82.5% | 85.0% | 67 | 73 | 0.47 | 0.75 |
+| Hybrid + search again | 87.5% | 82.5% | 68 | 80 | 0.44 | 0.77 |
+| Pure | 85.0% | 80.0% | 66 | 61 | 0.18 | 0.70 |
+| Pure + search again | 85.0% | 80.0% | 66 | 70 | 0.18 | 0.73 |
+
+The plan cuts tool calls by about a third and time per question by 25–45%,
+but finds no more facts. Its losses weren't retrieval a rule could see:
+`lifejackets-osprey` read the right section whole and the answer dropped
+"12 infant"; `pets-kestrel` answered from the accessibility section ("assistance
+dogs are welcome", 78%) because the Pets section never came up. Search again
+fired on 7 (English) and 4 (Multilingual) questions: it recovered
+`mixed-context-createbooking` and `mixed-unanswerable` on English and cost
+`lifejackets-osprey` on Multilingual (the second search added noise, then the
+decision wandered).
+
+**What ships:** `plan: 'off'` and `searchAgain: false` by default, so the
+agent behaves as after item 15. Search again also works without the plan
+(`searchAgainStep`); that combination hasn't been measured yet.
+
+**Note on running evals:** item 15 and 16 ran about twenty full evals back to
+back; each starts the dev app with two MLX models on the GPU, and the Mac
+overheated to a black screen and had to be powered off. Run one eval at a
+time, with a pause between runs, and prefer `--only` (AGENTS.md §6).
 
