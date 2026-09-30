@@ -156,6 +156,16 @@ describe('fillArgs', () => {
     expect(await fillArgs(tool('kb_search'), ctx)).toMatchObject({ ok: false, errors: ['Failed to initialize samplers'], attempts: 1 });
   });
 
+  it('keeps a picked range the only value, rather than every range seen', () => {
+    const known = { ranges: ['a.md:1-30', 'b.md:40-80'] };
+    const rangeEnum = (picked?: Record<string, string>) => {
+      const range = schemaFor(tool('kb_read_lines'), known, picked)!.properties.range;
+      return range.type === 'string' ? range.enum : undefined;
+    };
+    expect(rangeEnum()).toEqual(known.ranges);
+    expect(rangeEnum({ range: 'b.md:40-80' })).toEqual(['b.md:40-80']);
+  });
+
   it('holds a file argument to the files that exist, and lists them', async () => {
     const files = ['notes.md', 'src/app.ts'];
     eng.replies = ['{"file":"kb1"}', '{"file":"notes.md"}'];

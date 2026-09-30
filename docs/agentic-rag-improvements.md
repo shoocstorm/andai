@@ -37,6 +37,7 @@ The e2e question takes `kb_search` (96–100%), then `answer_now` (81–92%).
 | 17 | [Baselines on the 100-question set](#17-baselines-on-the-100-question-set) | done 2026-09-29 · Laya English 79.6% facts, Laya Multilingual 82.8% |
 | 18 | [Say when nothing found clearly helps](#18-say-when-nothing-found-clearly-helps) | measured 2026-09-29 · one gained, one lost; not shipped |
 | 19 | [Fetch the symbol the request names](#19-fetch-the-symbol-the-request-names) | done 2026-09-29 · Laya English 79.6% → 80.6%, Multilingual unchanged |
+| 20 | [Laya picks the Read lines range](#20-laya-picks-the-read-lines-range) | measured 2026-09-30 · one gained, two lost (Laya English); not shipped |
 
 **Where it ended (2026-09-26).** Shipped: 1, 2, 3, 5, 6, 7; measured and
 not shipped: 4, 9; 8 changed the recommendation (a small decision model with
@@ -885,4 +886,33 @@ The English run also carried item 18; its gains and losses are listed
 there. The Multilingual run measured 1.77 s against 0.89 s per question with
 ms per decision doubled too (decisions are untouched by this change), so the
 machine was slowing down; heavy runs stopped there.
+
+## 20. Laya picks the Read lines range
+
+**Why.** In the item 17 reports the chat model wrote Read lines' `range` 30–37
+times a run, mostly the first range offered (`operations.md:1-45` for most
+document questions); `large-wheelchair-harlow` read a range past the fact on
+both checkpoints. A range among known ones is a typed choice, like `scope`
+(item 10).
+
+**What was measured.** `rangeChoice` offered the ranges around the passages
+found so far as a Laya `choice` (ids `r1…`, text "passage name — file:start-end",
+best-scoring first, at most 8 so the options fit Laya's head budget), in the
+decision's batch or its own pass; a picked range was the whole argument, so
+the argument writer wasn't called. Laya English only, against item 19's run
+(`eval/i20-1.7b-mlx+en.json` vs `eval/i17-1.7b-mlx+en.json`):
+
+- gained `large-wheelchair-harlow` (read the whole guide, 1–104, instead of 23–76);
+- lost `large-pets-kestrel` (picked the incident log over the passenger
+  guide the writer had chosen) and `large-lifejackets-osprey` (38–96 instead
+  of 57–111);
+- facts 80.6% → 79.6%; ms per decision 24 → 34 (the extra row).
+
+Laya chooses from the passages' names and locations only; the decision state
+holds no passage text (item 15), while the argument writer reads the two best
+passages. Not shipped; the loop change was removed. Kept: `schemaFor` no
+longer widens a picked (fixed) argument back to every known value, which
+this exposed. **Next to try:** give the choice's options the passage's own
+relevance score, or pick the range by rule (the best-scoring passage's node),
+before another Laya variant.
 

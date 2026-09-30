@@ -80,6 +80,8 @@ export function schemaFor(tool: ToolDef, known: Known = {}, fixed: Record<string
     schema = { ...schema, properties: { ...schema.properties, [key]: { ...prop, enum: [value] } } };
   }
   for (const [key, from] of HELD) {
+    // A picked value stays the only one allowed.
+    if (key in fixed) continue;
     const prop = schema.properties[key];
     const values = known[from] ?? [];
     if (prop?.type !== 'string' || !values.length || values.length > MAX_FILE_ENUM) continue;
