@@ -1,5 +1,5 @@
-//! Native chat models: Qwen3 on MLX, in-process on the shared MLX thread
-//! (mlx.rs). On an M5 Max, Qwen3 1.7B writes about 350 tok/s here, against
+//! Native chat models: Qwen3 and Qwen3.5 on MLX, in-process on the shared
+//! MLX thread (mlx.rs). On an M5 Max, Qwen3 1.7B writes about 350 tok/s here, against
 //! 30–65 tok/s for the same model in wllama on WebGPU (docs/performance.md).
 //! Apple Silicon only (`cfg(mlx)`); everywhere else the webview keeps wllama.
 //!
@@ -21,6 +21,8 @@ mod grammar;
 #[cfg_attr(not(mlx), allow(dead_code))]
 pub(crate) mod template;
 
+#[cfg(mlx)]
+mod delta;
 #[cfg(mlx)]
 pub(crate) mod engine;
 #[cfg(mlx)]
@@ -420,13 +422,19 @@ pub async fn llm_generate(
         let out = blocking(move || {
             t.run(move |m| {
                 let (_, engine) = m.llm[slot.index()].as_mut().ok_or("No MLX model is loaded; open Settings → Models to load one.")?;
-                // A template without Qwen3's thinking switch gets no empty think block:
-                // rendered as with thinking on, which adds none.
-                let text = template::render(&messages, params.thinking || !engine.think_switch);
+                let text = engine.render(&messages, params.thinking);
+                // Qwen3.5 opens the think block in the prompt; the reply starts inside it,
+                // so it gets the tag back for the webview's think split (state/chat.ts).
+                let opened = if text.ends_with("<think>\n") { "<think>\n" } else { "" };
+                if !opened.is_empty() {
+                    let _ = on_text.send(opened.to_string());
+                }
                 let mut send = |piece: &str| {
                     let _ = on_text.send(piece.to_string());
                 };
-                engine.generate(&text, &p, &mut send, &|| cancelled.load(Ordering::Relaxed) == request)
+                let mut out = engine.generate(&text, &p, &mut send, &|| cancelled.load(Ordering::Relaxed) == request)?;
+                out.text.insert_str(0, opened);
+                Ok(out)
             })
         })
         .await?;

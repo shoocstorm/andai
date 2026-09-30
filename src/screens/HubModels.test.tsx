@@ -90,6 +90,6 @@ describe('Add from Hugging Face', () => {
     render(<HubModels open onClose={() => {}} />);
     const format = within(screen.getByRole('group', { name: 'Model format' }));
     expect(format.getByRole('button', { name: /MLX/ })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText(/runs Qwen3 models quantized for MLX/)).toBeInTheDocument();
+    expect(screen.getByText(/runs Qwen3 and Qwen3.5 models quantized for MLX/)).toBeInTheDocument();
   });
 });

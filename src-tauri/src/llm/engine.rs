@@ -1,11 +1,14 @@
-//! A loaded native chat model: Qwen3 on MLX plus its tokenizer, and the
-//! generation loop.
+//! A loaded native chat model: Qwen3 or Qwen3.5 on MLX plus its tokenizer,
+//! and the generation loop.
 //!
 //! - **Prompt-prefix reuse.** The KV cache keeps the token ids it holds; a new
 //!   prompt that starts with the same tokens (the same system prompt and
 //!   history, a follow-up decision) only runs the rest. It replaces wllama's
 //!   `cache_prompt`, and the result is the same as running the whole prompt
-//!   (checked in the parity test).
+//!   (checked in the parity test). Qwen3.5's DeltaNet state can't be cut
+//!   back, so its prompts are read in pieces that end where a message starts,
+//!   the state is kept at each (`Cache::snapshot`), and a new prompt resumes
+//!   from the last one it shares.
 //! - **Pipelined decoding**, like mlx-lm's `generate_step`: the next step is
 //!   queued on the GPU (`async_eval`) before the current token is read back,
 //!   so the GPU never waits on Rust. The sampled token stays an MLX array
@@ -19,7 +22,9 @@
 //!   depends on the token picked; replies held to a grammar are short.
 
 use super::grammar::{Constraint, TokenBytes};
-use super::model::{e, Config, Kv, Model, R};
+use super::config::Arch;
+use super::model::{e, Cache, Config, Model, R};
+use super::template::{self, Flavor, Message};
 use mlx_rs::ops::indexing::IndexOp;
 use mlx_rs::{ops, random, Array, Dtype};
 use serde::Serialize;
@@ -96,12 +101,16 @@ pub struct Engine {
     model: Model,
     tok: tokenizers::Tokenizer,
     stop: Vec<u32>,
-    cache: Vec<Kv>,
+    cache: Cache,
     /// Token ids whose keys and values are in `cache`, in order.
     cached: Vec<u32>,
     pub n_ctx: usize,
     /// The chat template has Qwen3's `enable_thinking` switch.
     pub think_switch: bool,
+    /// Which chat template to write.
+    pub flavor: Flavor,
+    /// `<|im_start|>`: where a message starts, so where a Qwen3.5 prompt is split.
+    msg_start: Option<u32>,
     /// Each token id's raw bytes (`None`: a special or added token), built on first use by a grammar.
     token_bytes: Option<Arc<TokenBytes>>,
 }
@@ -158,9 +167,21 @@ impl Engine {
         if stop.is_empty() {
             return Err("tokenizer config names no end-of-turn token".into());
         }
+        let flavor = match cfg.arch {
+            Arch::Qwen3 => Flavor::Qwen3,
+            Arch::Qwen35(_) => Flavor::Qwen35,
+        };
+        let msg_start = tok.token_to_id("<|im_start|>");
         let model = Model::load(dir, cfg)?;
         let cache = model.new_cache();
-        Ok(Self { model, tok, stop, cache, cached: Vec::new(), n_ctx, think_switch, token_bytes: None })
+        Ok(Self { model, tok, stop, cache, cached: Vec::new(), n_ctx, think_switch, flavor, msg_start, token_bytes: None })
+    }
+
+    /// The prompt for `messages` in this model's chat template. A template
+    /// without a thinking switch is rendered as with thinking on, which adds
+    /// no think block for Qwen3.
+    pub fn render(&self, messages: &[Message], thinking: bool) -> String {
+        template::render_as(self.flavor, messages, thinking || !self.think_switch)
     }
 
     /// Layer count and weight bits.
@@ -278,19 +299,25 @@ impl Engine {
     fn prefill(&mut self, ids: &[u32], reuse_prefix: bool) -> R<usize> {
         let common = if reuse_prefix { self.cached.iter().zip(ids).take_while(|(a, b)| a == b).count() } else { 0 };
         // At least the last prompt token runs, to produce the first logits.
-        let reuse = common.min(ids.len() - 1);
-        for kv in &mut self.cache {
-            kv.trim_to(reuse as i32);
-        }
+        let reuse = self.cache.rewind(common.min(ids.len() - 1), self.cached.len());
         self.cached.truncate(reuse);
+        let end = ids.len() - 1;
+        let recurrent = self.cache.recurrent();
         let mut at = reuse;
-        while ids.len() - at > 1 {
-            let n = PREFILL_CHUNK.min(ids.len() - 1 - at);
+        while at < end {
+            let mut n = PREFILL_CHUNK.min(end - at);
+            // A recurrent model stops where the next message starts, to keep its state there.
+            if let (true, Some(start)) = (recurrent, self.msg_start) {
+                if let Some(i) = ids[at + 1..at + n].iter().position(|&t| t == start) {
+                    n = i + 1;
+                }
+            }
             let chunk = Array::from_slice(&ids[at..at + n], &[1, n as i32]);
             self.model.forward(&chunk, &mut self.cache)?;
-            mlx_rs::transforms::eval(self.cache.iter().flat_map(Kv::arrays)).map_err(e)?;
+            mlx_rs::transforms::eval(self.cache.arrays()).map_err(e)?;
             self.cached.extend_from_slice(&ids[at..at + n]);
             at += n;
+            self.cache.snapshot(at);
             mlx_rs::memory::clear_cache().map_err(e)?;
         }
         Ok(reuse)
@@ -580,11 +607,15 @@ mod tests {
     }
 
     fn run(id: &str) {
-        let g = golden(id);
-        let mut engine = Engine::load(&checkpoint_dir(id), 8192).unwrap();
+        run_on(id, &checkpoint_dir(id), golden(id));
+    }
+
+    fn run_on(id: &str, dir: &Path, g: Value) {
+        let mut engine = Engine::load(dir, 8192).unwrap();
         for (name, case) in g["cases"].as_object().unwrap() {
             let messages: Vec<Message> = serde_json::from_value(case["messages"].clone()).unwrap();
-            let text = render(&messages, case["enable_thinking"].as_bool().unwrap());
+            let text = engine.render(&messages, case["enable_thinking"].as_bool().unwrap());
+            assert_eq!(text, case["text"].as_str().unwrap(), "{id} {name}: template matches transformers");
             let want: Vec<u32> = serde_json::from_value(case["ids"].clone()).unwrap();
             assert_eq!(engine.encode(&text).unwrap(), want, "{id} {name}: token ids match transformers");
         }
@@ -609,7 +640,7 @@ mod tests {
         // must match a cold run's within bf16 noise: splitting a prompt moves logits by up
         // to ~0.4 in mlx-lm too (enough to flip a greedy tie, so replies aren't compared),
         // while a wrong mask or RoPE offset moves them by whole nats.
-        let other = render(
+        let other = engine.render(
             &[
                 Message { role: crate::llm::template::Role::System, content: messages_system(&g) },
                 Message { role: crate::llm::template::Role::User, content: "Which vessels carry cars, and how many?".into() },
@@ -665,7 +696,7 @@ mod tests {
 
         // Argument filling held to its grammar: a JSON object in the schema's shape.
         let grammars: Value = serde_json::from_str(include_str!("../../tests/fixtures/llm/grammars.json")).unwrap();
-        let fill = render(
+        let fill = engine.render(
             &[Message {
                 role: crate::llm::template::Role::User,
                 content: "Write a knowledge base search for: which function implements the group discount?\nArguments schema:\n{\"query\": string, \"scope\": \"broad\" | \"focused\"}\nReply with only the JSON object.".into(),
@@ -683,7 +714,7 @@ mod tests {
 
         // Speed on a grounded-size prompt (~550 tokens), like bench:engine.
         let filler = "The ferry leaves the north pier at nine and returns at five. ".repeat(40);
-        let prompt = render(&[Message { role: crate::llm::template::Role::User, content: format!("{filler}\nSummarize the schedule in detail.") }], false);
+        let prompt = engine.render(&[Message { role: crate::llm::template::Role::User, content: format!("{filler}\nSummarize the schedule in detail.") }], false);
         engine.clear_cache();
         let run = engine.generate(&prompt, &Params { max_tokens: 256, ..greedy(256) }, &mut |_| {}, &|| false).unwrap();
         let tps = (run.completion_tokens.saturating_sub(1)) as f64 / (run.gen_ms / 1e3);
@@ -778,6 +809,18 @@ mod tests {
         // Tampering after the download: the model no longer counts as complete.
         std::fs::write(store::dir(root, &c).join("config.json"), "{}").unwrap();
         assert!(!custom::is_complete(root, &m));
+    }
+
+    /// Qwen3.5 (hybrid DeltaNet + gated attention, mixed 4/8-bit weights): the
+    /// same checks as the Qwen3 catalog models against golden35.py's goldens.
+    /// Needs `hf download mlx-community/Qwen3.5-0.8B-OptiQ-4bit --revision ef60586…`.
+    #[test]
+    #[ignore = "needs the Qwen3.5 0.8B OptiQ MLX checkpoint"]
+    fn llm_qwen35_0_8b_optiq_matches_mlx_lm() {
+        let home = std::env::var_os("HOME").expect("HOME");
+        let dir = PathBuf::from(home).join(".cache/huggingface/hub/models--mlx-community--Qwen3.5-0.8B-OptiQ-4bit/snapshots/ef60586933bd2cc02b763f77eb8839a5114bbec1");
+        let g: Value = serde_json::from_str(include_str!("../../tests/fixtures/llm/golden-qwen3.5-0.8b-optiq.json")).unwrap();
+        run_on("qwen3.5-0.8b-optiq", &dir, g);
     }
 
     #[test]

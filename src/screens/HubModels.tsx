@@ -138,7 +138,7 @@ export function HubModels({ open, onClose }: { open: boolean; onClose: () => voi
       </div>
       <p className="faint hub-scope">
         {format === 'mlx'
-          ? 'MLX models run natively on your Mac’s GPU. The native engine runs Qwen3 models quantized for MLX.'
+          ? 'MLX models run natively on your Mac’s GPU. The native engine runs Qwen3 and Qwen3.5 models quantized for MLX.'
           : 'GGUF models run in the app on any computer (wllama), one file up to 2 GB.'}
       </p>
 

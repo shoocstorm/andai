@@ -221,7 +221,7 @@ button:disabled {
   overflow: hidden;
   transition: width 0.22s var(--ease);
   background: var(--sidebar);
-  border-right: 1px solid var(--border);
+  border-right: none;
   display: flex;
   flex-direction: column;
   padding: 18px 0 14px;
@@ -241,7 +241,7 @@ button:disabled {
   display: grid;
   place-items: center;
   background: var(--tile-grad);
-  border: 1px solid var(--border-strong);
+  border: none;
   color: var(--blue);
   position: relative;
 }
@@ -434,7 +434,7 @@ button:disabled {
 }
 .panel {
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-panel);
 }
@@ -508,7 +508,7 @@ button:disabled {
 }
 .btn.ghost {
   color: var(--text-2);
-  border-color: var(--border);
+  border-color: transparent;
 }
 .btn.ghost:hover:not(:disabled) {
   color: var(--text);
@@ -555,7 +555,7 @@ button:disabled {
   font: 600 10.5px/1 var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  border: 1px solid var(--border-strong);
+  border: none;
   color: var(--text-2);
   background: color-mix(in srgb, var(--ink) 2%, transparent);
   white-space: nowrap;
@@ -903,7 +903,7 @@ select.field {
 .kbd-hint {
   font: 500 10.5px/1 var(--font-mono);
   color: var(--text-4);
-  border: 1px solid var(--border-strong);
+  border: none;
   border-radius: 4px;
   padding: 3px 5px;
 }

@@ -429,11 +429,40 @@ level defaults to *Ask*.
   A small file's `resolve/<commit>` URL 307-redirects within huggingface.co
   (`/api/resolve-cache/…`). Some MLX repos ship
   `model.safetensors.index.json` that names only `model.safetensors`; the
-  single file wins (`load_weights`). The native engine runs Qwen3 only,
-  MLX-quantized (affine, uniform bits), with a ChatML template; untied LM
-  heads (Qwen3 8B) and sharded weights are supported. Checked end to end on
+  single file wins (`load_weights`). The native engine runs Qwen3 and dense
+  Qwen3.5 (below), MLX-quantized (affine, 2–8 bits, mixed per weight), with
+  a ChatML template; untied LM heads (Qwen3 8B) and sharded weights are
+  supported. Checked end to end on
   Qwen3 8B 4-bit (`test:llm`): add, chunked download, sha256, load, same
   greedy text as mlx-lm, 116 tok/s on an M5 Max.
+- **Qwen3.5 on MLX** (`model_type` `qwen3_5`, 2026-09-30; `llm/model.rs`,
+  `llm/delta.rs`, golden35.py). A hybrid: three of every four layers are
+  Gated DeltaNet (depthwise causal conv + a gated linear recurrence with a
+  fixed `[Hv, Dv, Dk]` float32 state), the fourth attention with a sigmoid
+  output gate and RoPE on a quarter of each head; config under
+  `text_config`, weights under `language_model.`, vision tower skipped.
+  Dense only (`qwen3_5_moe` refused). The recurrence is mlx-lm's Metal
+  kernel through mlx-sys's C API (`mlx_fast_metal_kernel_*`; mlx-rs 0.32
+  doesn't wrap it), checked against an ops version. Its template differs
+  from Qwen3's (content trimmed, thinking on ends the prompt with
+  `<think>\n`, which `llm_generate` puts back in the reply). The state can't
+  be trimmed, so prefill splits at each `<|im_start|>` and snapshots the
+  states there (`Cache::snapshot`, ≤ 256 MB); a new prompt resumes from the
+  last shared snapshot. Qwen3.5 0.8B OptiQ (mixed 4/8-bit) on an M5 Max
+  (`test:llm`): same token ids and greedy text as mlx-lm, decision letters
+  Δ 0.002, 307 tok/s generation, 4,164 tok/s prompt.
+- **mlx-lm's Python wheel and the MLX that mlx-sys builds round
+  differently on an M5** (2026-09-30). mlx-sys 0.6.0 builds MLX v0.32.2
+  from source without the neural-accelerator (NAX) kernels the wheel's
+  metallib has (6,055 NAX symbols vs 1); for a quantized matmul over 64+
+  rows the wheel takes them, and a bf16 logit can land a step apart
+  (identical inputs, `in_proj_qkv` sums −4136.06 vs −4136.14). Goldens
+  therefore come from `mlx==0.32.2` on the engine's own prompt split. The
+  Qwen3 goldens predate this and fail on `HEAD` (0.6B letters Δ 0.21, 1.7B
+  greedy text differs after two words) while the Qwen3.5 ones pass.
+- **1-bit MLX checkpoints don't load** (e.g. prism-ml Bonsai 27B): MLX 0.32
+  quantizes 2, 3, 4, 5, 6 or 8 bits (`mx.quantize` refuses 1); Bonsai needs
+  PrismML's MLX fork. `config.rs` refuses them with that reason.
 - **The catalog carries Qwen's own MLX builds, 4B to 32B** (`Qwen/Qwen3-*-MLX-4bit`,
   2026-09-27): 4-bit in groups of 128, the same tokenizer as the smaller
   ones, untied from 8B up, and sharded at 14B and 32B, so their
@@ -640,7 +669,7 @@ level defaults to *Ask*.
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |
 | Native MLX chat models (download, verify, load, stream, stop, decide; Apple Silicon) | Real | `src-tauri/src/llm/`, `src-tauri/src/mlx.rs`, `llm/native.ts` |
-| Add a model from Hugging Face (search, compatibility check, pin, verified download; GGUF anywhere, MLX Qwen3 on Apple Silicon) | Real | `llm/hub.ts`, `llm/custom.ts`, `screens/HubModels.tsx`, `src-tauri/src/llm/custom.rs` |
+| Add a model from Hugging Face (search, compatibility check, pin, verified download; GGUF anywhere, MLX Qwen3 and Qwen3.5 on Apple Silicon) | Real | `llm/hub.ts`, `llm/custom.ts`, `screens/HubModels.tsx`, `src-tauri/src/llm/custom.rs` |
 | Appearance (light / dark; first run follows the OS) | Real | `state/theme.ts` |
 | Activity log (off by default; each step, argument writer call, tool call, context and answer as JSONL, 7 days) | Real | `state/activity.ts`, `src-tauri/src/activity.rs`, Settings |
 | Layout: collapsible nav (⌘B), Execution Trace on/off (⌘J) | Real, persisted | `state/layout.ts` |

@@ -577,7 +577,7 @@ describe('runTurn (agent mode)', () => {
     agent.decisions = [{ chosen: 'answer_now' }];
     await runTurn('What headers does wllama need?');
     expect(steps()[0]).toMatchObject({ action: 'kb_search', decision: null });
-    expect(steps()[0].note).toMatch(/Searched first, without a decision/);
+    expect(steps()[0].note).toMatch(/Searched first, no decision/);
     expect(agent.tool.map((t) => t.call.tool)).toEqual(['kb_search']);
     expect(agent.seenOptions).toHaveLength(1); // only the second step was decided
   });
@@ -592,7 +592,7 @@ describe('runTurn (agent mode)', () => {
       agent.decisions = [{ chosen: 'answer_now' }];
       await runTurn('Which functions call computeFare?');
       expect(steps()[0]).toMatchObject({ action: 'kb_search', decision: null });
-      expect(steps()[0].note).toBe('Searched first, without a decision: a question about the knowledge base’s content starts with a search, which reads the matching text.');
+      expect(steps()[0].note).toBe('Searched first, no decision: a question about the knowledge base’s content starts with a search');
     }
   });
 

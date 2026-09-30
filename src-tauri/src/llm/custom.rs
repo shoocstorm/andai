@@ -10,7 +10,8 @@
 //! - the large files (weights, tokenizer) by their sha256 (Hugging Face's LFS
 //!   oid), verified by the store after download like the catalog's;
 //! - the small JSON files sent inline, parsed here, and a model the native
-//!   engine can run (config.rs: Qwen3, MLX-quantized, a ChatML template).
+//!   engine can run (config.rs: Qwen3 or dense Qwen3.5, MLX-quantized, a
+//!   ChatML template).
 //!
 //! Rust writes the manifest itself, under `<data>/models/llm/custom/<id>.json`,
 //! with an id it derives from the repo and commit; loading re-reads and

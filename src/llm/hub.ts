@@ -148,31 +148,50 @@ export function chatTemplate(tokenizerConfig: unknown, jinja: string | null): st
   return jinja;
 }
 
+/** Bit widths MLX's quantized kernels take (mirrors config.rs `check_quant`). */
+const MLX_BITS = [2, 3, 4, 5, 6, 8];
+const MLX_GROUPS = [32, 64, 128];
+
 /**
  * What the native engine can run (mirrors src-tauri/src/llm/config.rs, which
- * decides): Qwen3, MLX-quantized, a ChatML template with an end-of-turn token.
+ * decides): Qwen3 or dense Qwen3.5, MLX-quantized (mixed precision allowed),
+ * a ChatML template with an end-of-turn token.
  */
 export function mlxChecks(config: unknown, tokenizerConfig: unknown, jinja: string | null): { checks: Check[]; layers: number; bits: number; thinking: boolean } {
   const c = obj(config);
-  const q = obj(c.quantization);
+  const qwen35 = c.model_type === 'qwen3_5';
+  // Qwen3.5 checkpoints are vision-language: the text model's settings are nested.
+  const t = qwen35 && c.text_config && typeof c.text_config === 'object' ? obj(c.text_config) : c;
+  const q = obj(c.quantization ?? t.quantization);
   const checks: Check[] = [];
   const block = (text: string) => checks.push({ level: 'block', text });
-  if (c.model_type !== 'qwen3') block(`It’s a ${str(c.model_type) ?? 'unknown'} model; the native engine runs Qwen3.`);
-  else checks.push({ level: 'ok', text: 'Qwen3, which the native engine runs.' });
+  if (c.model_type === 'qwen3') checks.push({ level: 'ok', text: 'Qwen3, which the native engine runs.' });
+  else if (qwen35) {
+    if (num(t.num_experts) > 0) block('It’s a mixture-of-experts Qwen3.5, which the native engine doesn’t run.');
+    else checks.push({ level: 'ok', text: 'Qwen3.5 (text only), which the native engine runs.' });
+    const rope = obj(t.rope_parameters);
+    const kind = str(rope.rope_type) ?? str(rope.type) ?? 'default';
+    if (kind !== 'default') block(`It uses ${kind} RoPE scaling, which the native engine doesn’t support.`);
+    if (t.attn_output_gate === false) block('Its attention has no output gate, which the Qwen3.5 engine expects.');
+  } else block(`It’s a ${str(c.model_type) ?? 'unknown'} model; the native engine runs Qwen3 and Qwen3.5.`);
   const bits = num(q.bits);
-  if (!bits || !num(q.group_size)) block('Its weights aren’t MLX-quantized (4-, 5-, 6- or 8-bit).');
-  else if ((q.mode && q.mode !== 'affine') || Object.entries(q).some(([k, v]) => !['group_size', 'bits', 'mode'].includes(k) && typeof v !== 'boolean')) {
+  const layerQuant = Object.entries(q).filter(([k, v]) => !['group_size', 'bits', 'mode'].includes(k) && typeof v !== 'boolean');
+  const quantOk = (b: number, g: number) => MLX_BITS.includes(b) && MLX_GROUPS.includes(g);
+  if (!bits || !num(q.group_size)) block('Its weights aren’t MLX-quantized (2- to 8-bit).');
+  else if (bits === 1) block('It has 1-bit weights, which need a patched MLX; the native engine runs 2- to 8-bit weights.');
+  else if ((q.mode && q.mode !== 'affine') || !quantOk(bits, num(q.group_size))) block('It uses a quantization scheme the native engine doesn’t support.');
+  else if (layerQuant.some(([, v]) => (obj(v).mode && obj(v).mode !== 'affine') || !quantOk(num(obj(v).bits), num(obj(v).group_size)))) {
     block('It uses a quantization scheme the native engine doesn’t support.');
-  } else checks.push({ level: 'ok', text: `${bits}-bit weights.` });
-  if (c.rope_scaling != null) block('It uses scaled RoPE, which the native engine doesn’t support.');
-  if (c.attention_bias === true) block('It uses attention bias, which the native engine doesn’t support.');
+  } else checks.push({ level: 'ok', text: layerQuant.length ? `${bits}-bit weights, some layers at other widths.` : `${bits}-bit weights.` });
+  if (!qwen35 && t.rope_scaling != null) block('It uses scaled RoPE, which the native engine doesn’t support.');
+  if (t.attention_bias === true) block('It uses attention bias, which the native engine doesn’t support.');
   const eos = obj(tokenizerConfig).eos_token;
   if (!str(eos) && !str(obj(eos).content)) block('Its tokenizer names no end-of-turn token.');
   const template = chatTemplate(tokenizerConfig, jinja);
   const thinking = !!template?.includes('enable_thinking');
   if (!template?.includes('<|im_start|>')) block('Its chat template isn’t ChatML, the format the native engine writes.');
   else checks.push({ level: 'ok', text: thinking ? 'Chat template with a thinking switch.' : 'Chat template (no thinking switch).' });
-  return { checks, layers: num(c.num_hidden_layers), bits, thinking };
+  return { checks, layers: num(t.num_hidden_layers), bits, thinking };
 }
 
 function access(info: Record<string, unknown>): Check[] {

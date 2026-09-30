@@ -301,9 +301,13 @@ pasting in whatever one search returns:
   be used. Two kinds are offered:
   - **GGUF**, on any computer: one file up to 2 GB (Andai recommends a
     4-bit K-quant when there's a choice), run like the built-in models.
-  - **MLX**, on Apple Silicon Macs: Qwen3 models quantized for MLX (4- to
-    8-bit, including larger ones like Qwen3 8B), run natively on the GPU.
-    Tested with Qwen3 8B 4-bit: about 115 tokens/second on an Apple M5 Max.
+  - **MLX**, on Apple Silicon Macs: Qwen3 and Qwen3.5 models quantized for
+    MLX (2- to 8-bit, mixed precision included, and larger ones like Qwen3
+    8B), run natively on the GPU. Qwen3.5 runs as a text model (its image
+    input isn't used); its mixture-of-experts versions and 1-bit builds
+    aren't supported. Tested with Qwen3 8B 4-bit (about 115 tokens/second on
+    an Apple M5 Max) and Qwen3.5 0.8B OptiQ 4/8-bit (about 300 tokens/second,
+    engine test on the same Mac).
   The model is pinned to the version you saw and each file is checked
   against its sha256 before it loads. Models that need a Hugging Face login
   (gated) or are private can't be added. These are third-party models Andai

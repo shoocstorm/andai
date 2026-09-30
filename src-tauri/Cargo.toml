@@ -28,6 +28,9 @@ regex-automata = { version = "0.4", default-features = false, features = ["std",
 # mlx-rs is pinned exactly: it wraps a specific MLX release (0.32).
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 mlx-rs = "=0.32.0"
+# The C API under mlx-rs (the same crate and build, already in the tree): Qwen3.5's
+# recurrence runs a custom Metal kernel, which mlx-rs doesn't wrap (llm/delta.rs).
+mlx-sys = "=0.6.0"
 # No `http` feature: the Rust side has no HTTP client (AGENTS.md §9).
 tokenizers = { version = "=0.23.2", default-features = false, features = ["onig"] }
 

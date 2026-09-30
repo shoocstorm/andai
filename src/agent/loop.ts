@@ -364,7 +364,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       note = 'Planned: no rule calls for another step, so answering.';
     } else if (settings.searchFirst && index === 0 && searchTool && needsLookup(prompt)) {
       action = searchTool.id;
-      note = 'Searched first, without a decision: a question about the knowledge base’s content starts with a search, which reads the matching text.';
+      note = 'Searched first, no decision: a question about the knowledge base’s content starts with a search';
     } else {
       try {
         const options = decisionOptions(tools, seed + index, found.length > 0);

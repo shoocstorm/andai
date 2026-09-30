@@ -161,12 +161,35 @@ describe('inspectHub', () => {
 });
 
 describe('mlxChecks mirrors Rust’s config check', () => {
-  it('accepts unquantized norms but not per-layer bit widths or other schemes', () => {
-    expect(mlxChecks({ ...qwenConfig, quantization: { ...qwenConfig.quantization, 'model.norm': false } }, qwenTokenizer, null).checks.every((c) => c.level !== 'block')).toBe(true);
-    const blocked = (q: object) => mlxChecks({ ...qwenConfig, quantization: q }, qwenTokenizer, null).checks.some((c) => c.level === 'block');
-    expect(blocked({ group_size: 64, bits: 4, 'model.layers.0.mlp.down_proj': { bits: 8 } })).toBe(true);
-    expect(blocked({ group_size: 64, bits: 4, mode: 'mxfp4' })).toBe(true);
-    expect(blocked({})).toBe(true);
+  const blocked = (config: object) => mlxChecks(config, qwenTokenizer, null).checks.some((c) => c.level === 'block');
+  it('accepts unquantized norms and mixed precision, but not other schemes', () => {
+    expect(blocked({ ...qwenConfig, quantization: { ...qwenConfig.quantization, 'model.norm': false } })).toBe(false);
+    const q = (quantization: object) => blocked({ ...qwenConfig, quantization });
+    expect(q({ group_size: 64, bits: 4, 'model.layers.0.mlp.down_proj': { bits: 8, group_size: 64 } })).toBe(false);
+    expect(q({ group_size: 64, bits: 4, 'model.layers.0.mlp.down_proj': { bits: 16, group_size: 64 } })).toBe(true);
+    expect(q({ group_size: 64, bits: 4, mode: 'mxfp4' })).toBe(true);
+    expect(q({ group_size: 128, bits: 1 })).toBe(true);
+    expect(q({})).toBe(true);
     expect(mlxChecks(qwenConfig, { eos_token: '<|im_end|>' }, '<|im_start|>').thinking).toBe(false);
+  });
+
+  // mlx-community/Qwen3.5-0.8B-OptiQ-4bit's config.json, trimmed.
+  const qwen35 = {
+    model_type: 'qwen3_5',
+    quantization: { group_size: 64, bits: 4, mode: 'affine', 'language_model.model.embed_tokens': { bits: 8, group_size: 64 } },
+    text_config: { model_type: 'qwen3_5_text', num_hidden_layers: 24, attn_output_gate: true, rope_parameters: { type: 'default', rope_theta: 10000000, partial_rotary_factor: 0.25 } },
+  };
+
+  it('accepts dense Qwen3.5 and reads its nested text config', () => {
+    const v = mlxChecks(qwen35, qwenTokenizer, null);
+    expect(v.checks.filter((c) => c.level === 'block')).toEqual([]);
+    expect([v.layers, v.bits]).toEqual([24, 4]);
+  });
+
+  it('refuses the Qwen3.5 variants Rust refuses', () => {
+    expect(blocked({ ...qwen35, text_config: { ...qwen35.text_config, num_experts: 256 } })).toBe(true);
+    expect(blocked({ ...qwen35, text_config: { ...qwen35.text_config, rope_parameters: { rope_type: 'yarn' } } })).toBe(true);
+    expect(blocked({ ...qwen35, quantization: { group_size: 128, bits: 1 } })).toBe(true);
+    expect(blocked({ ...qwen35, model_type: 'qwen3_5_moe' })).toBe(true);
   });
 });

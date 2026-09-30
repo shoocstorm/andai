@@ -1,0 +1,538 @@
+{
+ "source": "transformers + mlx-lm (models--mlx-community--Qwen3.5-0.8B-OptiQ-4bit)",
+ "cases": {
+  "system_user_nothink": {
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are Andai, a local assistant. Answer from the knowledge base when it helps."
+    },
+    {
+     "role": "user",
+     "content": "How long are refunds valid for a cancelled ferry?"
+    }
+   ],
+   "enable_thinking": false,
+   "text": "<|im_start|>system\nYou are Andai, a local assistant. Answer from the knowledge base when it helps.<|im_end|>\n<|im_start|>user\nHow long are refunds valid for a cancelled ferry?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+   "ids": [
+    248045,
+    8678,
+    198,
+    2523,
+    513,
+    1541,
+    2075,
+    11,
+    264,
+    2136,
+    17313,
+    13,
+    21134,
+    494,
+    279,
+    6337,
+    2255,
+    948,
+    424,
+    8346,
+    13,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    4199,
+    1248,
+    513,
+    70057,
+    2610,
+    364,
+    264,
+    24863,
+    49813,
+    30,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    248068,
+    271,
+    248069,
+    271
+   ],
+   "greedy": [
+    40,
+    1459,
+    914,
+    599,
+    2528,
+    310,
+    279,
+    3050,
+    49813,
+    2724,
+    579,
+    5138,
+    9883,
+    466,
+    279,
+    3447,
+    314,
+    678,
+    24863,
+    49813,
+    11390,
+    11,
+    430,
+    353
+   ],
+   "greedy_text": "I don't have access to the specific ferry company's internal policies or the details of your cancelled ferry ticket, as I",
+   "letter_ids": {
+    "A": 32,
+    "B": 33,
+    "C": 34
+   },
+   "first_logprobs": {
+    "A": -6.647056579589844,
+    "B": -11.772056579589844,
+    "C": -9.397056579589844
+   },
+   "first_top5": [
+    [
+     40,
+     -1.7095565795898438
+    ],
+    [
+     2053,
+     -1.9595565795898438
+    ],
+    [
+     3812,
+     -2.0845565795898438
+    ],
+    [
+     2381,
+     -2.4595565795898438
+    ],
+    [
+     15771,
+     -3.2095565795898438
+    ]
+   ]
+  },
+  "system_user_think": {
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are Andai, a local assistant. Answer from the knowledge base when it helps."
+    },
+    {
+     "role": "user",
+     "content": "Hi!"
+    }
+   ],
+   "enable_thinking": true,
+   "text": "<|im_start|>system\nYou are Andai, a local assistant. Answer from the knowledge base when it helps.<|im_end|>\n<|im_start|>user\nHi!<|im_end|>\n<|im_start|>assistant\n<think>\n",
+   "ids": [
+    248045,
+    8678,
+    198,
+    2523,
+    513,
+    1541,
+    2075,
+    11,
+    264,
+    2136,
+    17313,
+    13,
+    21134,
+    494,
+    279,
+    6337,
+    2255,
+    948,
+    424,
+    8346,
+    13,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    12675,
+    0,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    248068,
+    198
+   ]
+  },
+  "history": {
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are Andai, a local assistant. Answer from the knowledge base when it helps."
+    },
+    {
+     "role": "user",
+     "content": "What is Andai?"
+    },
+    {
+     "role": "assistant",
+     "content": "<think>\nThe user asks about the app.\n</think>\n\nAndai is a local-first agent."
+    },
+    {
+     "role": "user",
+     "content": "And what does it add for a vehicle? Ünïcödé ✓ 日本"
+    }
+   ],
+   "enable_thinking": false,
+   "text": "<|im_start|>system\nYou are Andai, a local assistant. Answer from the knowledge base when it helps.<|im_end|>\n<|im_start|>user\nWhat is Andai?<|im_end|>\n<|im_start|>assistant\nAndai is a local-first agent.<|im_end|>\n<|im_start|>user\nAnd what does it add for a vehicle? Ünïcödé ✓ 日本<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+   "ids": [
+    248045,
+    8678,
+    198,
+    2523,
+    513,
+    1541,
+    2075,
+    11,
+    264,
+    2136,
+    17313,
+    13,
+    21134,
+    494,
+    279,
+    6337,
+    2255,
+    948,
+    424,
+    8346,
+    13,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    3710,
+    369,
+    1541,
+    2075,
+    30,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    2939,
+    2075,
+    369,
+    264,
+    2136,
+    35718,
+    8057,
+    13,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    2939,
+    1092,
+    1503,
+    424,
+    884,
+    364,
+    264,
+    7083,
+    30,
+    158347,
+    245787,
+    2862,
+    164497,
+    50615,
+    220,
+    98823,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    248068,
+    271,
+    248069,
+    271
+   ]
+  },
+  "history_think": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "q1"
+    },
+    {
+     "role": "assistant",
+     "content": "a1"
+    },
+    {
+     "role": "user",
+     "content": "q2"
+    },
+    {
+     "role": "assistant",
+     "content": "<think>\nhmm\n</think>\n\na2"
+    },
+    {
+     "role": "assistant",
+     "content": "a3"
+    }
+   ],
+   "enable_thinking": true,
+   "text": "<|im_start|>user\nq1<|im_end|>\n<|im_start|>assistant\na1<|im_end|>\n<|im_start|>user\nq2<|im_end|>\n<|im_start|>assistant\n<think>\nhmm\n</think>\n\na2<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\na3<|im_end|>\n<|im_start|>assistant\n<think>\n",
+   "ids": [
+    248045,
+    846,
+    198,
+    80,
+    16,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    64,
+    16,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    80,
+    17,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    248068,
+    198,
+    71,
+    3693,
+    198,
+    248069,
+    271,
+    64,
+    17,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    248068,
+    271,
+    248069,
+    271,
+    64,
+    18,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    248068,
+    198
+   ]
+  },
+  "user_only": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "  leading and trailing spaces  "
+    }
+   ],
+   "enable_thinking": false,
+   "text": "<|im_start|>user\nleading and trailing spaces<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+   "ids": [
+    248045,
+    846,
+    198,
+    20028,
+    321,
+    26849,
+    12258,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    248068,
+    271,
+    248069,
+    271
+   ]
+  },
+  "decision": {
+   "messages": [
+    {
+     "role": "system",
+     "content": "Make the requested decision from the supplied state. Follow the output format exactly."
+    },
+    {
+     "role": "user",
+     "content": "State:\nUser request: What is the refund window for weather cancellations?\nKnowledge base: documents.\n\nQuestion:\nWhat should the agent do next?\n\nAllowed options:\nA. Answer now\nB. Search the knowledge base\nC. Ask a clarifying question\n\nReply with exactly one option letter from: A, B, C."
+    }
+   ],
+   "enable_thinking": false,
+   "text": "<|im_start|>system\nMake the requested decision from the supplied state. Follow the output format exactly.<|im_end|>\n<|im_start|>user\nState:\nUser request: What is the refund window for weather cancellations?\nKnowledge base: documents.\n\nQuestion:\nWhat should the agent do next?\n\nAllowed options:\nA. Answer now\nB. Search the knowledge base\nC. Ask a clarifying question\n\nReply with exactly one option letter from: A, B, C.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+   "ids": [
+    248045,
+    8678,
+    198,
+    7825,
+    279,
+    10897,
+    5307,
+    494,
+    279,
+    16713,
+    1528,
+    13,
+    10789,
+    279,
+    2468,
+    3443,
+    6681,
+    13,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    1349,
+    25,
+    198,
+    1421,
+    1622,
+    25,
+    3437,
+    369,
+    279,
+    20325,
+    3136,
+    364,
+    8831,
+    17916,
+    778,
+    30,
+    198,
+    77565,
+    2255,
+    25,
+    9017,
+    13,
+    271,
+    14162,
+    25,
+    198,
+    3710,
+    1220,
+    279,
+    8057,
+    635,
+    1727,
+    30,
+    271,
+    34211,
+    2519,
+    25,
+    198,
+    32,
+    13,
+    21134,
+    1381,
+    198,
+    33,
+    13,
+    7304,
+    279,
+    6337,
+    2255,
+    198,
+    34,
+    13,
+    19814,
+    264,
+    18905,
+    7520,
+    3296,
+    271,
+    20206,
+    440,
+    6681,
+    799,
+    2904,
+    6321,
+    494,
+    25,
+    357,
+    11,
+    417,
+    11,
+    351,
+    13,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    248068,
+    271,
+    248069,
+    271
+   ],
+   "greedy": [
+    32,
+    248046
+   ],
+   "greedy_text": "A<|im_end|>",
+   "letter_ids": {
+    "A": 32,
+    "B": 33,
+    "C": 34
+   },
+   "first_logprobs": {
+    "A": -0.4568138122558594,
+    "B": -1.2068138122558594,
+    "C": -2.8318138122558594
+   },
+   "first_top5": [
+    [
+     32,
+     -0.4568138122558594
+    ],
+    [
+     33,
+     -1.2068138122558594
+    ],
+    [
+     34,
+     -2.8318138122558594
+    ],
+    [
+     15666,
+     -5.456813812255859
+    ],
+    [
+     248068,
+     -6.081813812255859
+    ]
+   ]
+  }
+ }
+}
