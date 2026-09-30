@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-activity-write"
+description = "Enables the activity_write command without any pre-configured scope."
+commands.allow = ["activity_write"]
+
+[[permission]]
+identifier = "deny-activity-write"
+description = "Denies the activity_write command without any pre-configured scope."
+commands.deny = ["activity_write"]

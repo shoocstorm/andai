@@ -111,6 +111,9 @@ beforeEach(async () => {
   useEngine.setState({ status: 'idle', error: null });
 });
 
+/** A failed load is logged too; catch it, so the test says it happened instead of printing it. */
+const catchLoadError = () => vi.spyOn(console, 'error').mockImplementation(() => {});
+
 describe('loadModel integrity gate', () => {
   it('verifies a fresh download, then loads it', async () => {
     await loadModel('tiny');
@@ -121,7 +124,10 @@ describe('loadModel integrity gate', () => {
 
   it('removes and refuses a download whose bytes differ from the pin', async () => {
     state.blob = new Blob([new Uint8Array([1, 2, 3, 4, 5, 6, 7, 9])]);
+    const logged = catchLoadError();
     await loadModel('tiny');
+    expect(logged).toHaveBeenCalledWith('[engine] load failed', expect.objectContaining({ message: expect.stringMatching(/integrity check/) }));
+    logged.mockRestore();
     const s = useEngine.getState();
     expect(s.status).toBe('error');
     expect(s.error).toMatch(/integrity check.*sha256/);
@@ -142,7 +148,10 @@ describe('loadModel integrity gate', () => {
     await unloadModel();
     state.cached = []; // cache cleared behind our back; the mark survives in localStorage
     state.blob = new Blob([new Uint8Array(8)]);
+    const logged = catchLoadError();
     await loadModel('tiny');
+    expect(logged).toHaveBeenCalledWith('[engine] load failed', expect.objectContaining({ message: expect.stringMatching(/integrity check/) }));
+    logged.mockRestore();
     expect(useEngine.getState().status).toBe('error');
     expect(state.loaded).toBe(1);
   });
@@ -186,6 +195,8 @@ describe('what the engine reports', () => {
   });
 
   it('reports the GPU layers llama.cpp offloaded, not just that WebGPU exists', async () => {
+    // The engine reads these lines and still passes them on to the console.
+    const logged = vi.spyOn(console, 'log').mockImplementation(() => {});
     state.gpuLine = 'load_tensors: offloaded 29/29 layers to GPU';
     await loadModel('tiny');
     expect(useEngine.getState().info?.backend).toBe('WebGPU · 29/29 layers');
@@ -194,5 +205,7 @@ describe('what the engine reports', () => {
     await loadModel('tiny');
     expect(useEngine.getState().info?.backend).toBe('WASM · CPU (no GPU adapter)');
     expect(gpuFromLog('llama_context: n_ctx = 4096')).toBeNull();
+    expect(logged.mock.calls.map((c) => c[0])).toEqual([expect.stringMatching(/^load_tensors/), expect.stringMatching(/^ggml_webgpu/)]);
+    logged.mockRestore();
   });
 });

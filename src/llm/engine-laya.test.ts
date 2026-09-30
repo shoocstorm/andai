@@ -9,6 +9,16 @@ const laya = vi.hoisted(() => ({
   failLoad: null as Error | null,
 }));
 
+// jsdom has no OPFS, so wllama's real cache throws; Laya never uses it.
+vi.mock('@wllama/wllama', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@wllama/wllama')>()),
+  ModelManager: class {
+    async getModels() {
+      return [];
+    }
+  },
+}));
+
 vi.mock('./laya', () => ({
   layaStatus: async () => ({
     supported: laya.supported,
@@ -60,6 +70,7 @@ describe('Laya as the decision model', () => {
   });
 
   it('reports an unsupported Mac and a failed load as the decider error', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     laya.supported = false;
     await loadDecider('laya-multilingual');
     expect(useEngine.getState().decider).toMatchObject({ status: 'error', error: expect.stringMatching(/Apple Silicon/) });
@@ -68,6 +79,8 @@ describe('Laya as the decision model', () => {
     await loadDecider('laya-multilingual');
     expect(useEngine.getState().decider.error).toMatch(/type_emb/);
     expect(deciderLaya()).toBeNull();
+    expect(logged).toHaveBeenCalledTimes(2);
+    logged.mockRestore();
   });
 
   it('unloads in Rust, and a removal unloads first', async () => {

@@ -58,6 +58,16 @@ vi.mock('./native', async (importOriginal) => {
   };
 });
 
+// jsdom has no OPFS, so wllama's real cache throws; MLX models never use it.
+vi.mock('@wllama/wllama', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@wllama/wllama')>()),
+  ModelManager: class {
+    async getModels() {
+      return [];
+    }
+  },
+}));
+
 vi.mock('./laya', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./laya')>()),
   downloadCheckpoint: async (kind: string, c: { id: string }, onProgress: (p: unknown) => void) => {
