@@ -415,6 +415,12 @@ pub fn ug_status() -> UgStatus {
 /// no request (the browser does).
 #[tauri::command]
 pub fn open_ug_website() -> Result<(), String> {
+    open_in_system(UG_WEBSITE.as_ref()).map_err(|e| format!("could not open the browser: {e}"))
+}
+
+/// Hands `target` (a URL or a folder Rust chose, never one from the webview)
+/// to the system's default handler: Finder or the browser.
+pub(crate) fn open_in_system(target: &std::ffi::OsStr) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut cmd = Command::new("/usr/bin/open");
     #[cfg(windows)]
@@ -426,11 +432,11 @@ pub fn open_ug_website() -> Result<(), String> {
     };
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut cmd = Command::new("xdg-open");
-    cmd.arg(UG_WEBSITE).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.arg(target).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     match cmd.status() {
         Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("could not open the browser ({s})")),
-        Err(e) => Err(format!("could not open the browser: {e}")),
+        Ok(s) => Err(s.to_string()),
+        Err(e) => Err(e.to_string()),
     }
 }
 

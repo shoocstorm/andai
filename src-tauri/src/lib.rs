@@ -1,3 +1,4 @@
+mod activity;
 mod grants;
 mod laya;
 mod llm;
@@ -92,6 +93,7 @@ pub fn run() {
             Ok(())
         })
         .manage(ug::Indexing::default())
+        .manage(activity::ActivityLock::default())
         .manage(grants::FileGrants::default())
         .manage(mlx::Mlx::default())
         .manage(llm::Llm::default())
@@ -130,6 +132,10 @@ pub fn run() {
             llm::llm_generate,
             llm::llm_cancel,
             llm::llm_add_custom,
+            activity::activity_write,
+            activity::activity_info,
+            activity::activity_clear,
+            activity::activity_open,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Andai");

@@ -25,6 +25,7 @@ import {
 } from '../state/chat';
 import { recordSearch } from '../state/kb';
 import { recordToolRun, requestApproval, useTools } from '../state/tools';
+import { logActivity } from '../state/activity';
 import { addEvidence, mergeEvidence, type Found } from './evidence';
 import { agentState, LAYA_CHARS_PER_TOKEN, needsLookup, type Observation, type StatePassage } from './prompt';
 import { CALLERS, namedIdentifiers, planNext, searchAgainStep, type PlanInput } from './plan';
@@ -298,6 +299,8 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
   const step = (s: Omit<AgentStep, 'id' | 'index' | 'at'>): AgentStep => {
     const full = { id: uid(), index: index++, at: Date.now(), ...s };
     addAgentStep(msgId, full);
+    // The activity log (state/activity.ts): the step and its decision; the call follows in `patch`.
+    logActivity(msgId, 'step', { ...full, call: full.call ? { tool: full.call.tool, policy: full.call.policy, argChoices: full.call.argChoices ?? null } : null });
     return full;
   };
 
@@ -485,7 +488,15 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
       ...(mine.length ? { argChoices: mine.map((p) => ({ arg: p.arg, value: p.value, probability: p.probability, model: pickModel })) } : {}),
     };
     const s = step({ decision, action, note, fallback, failedDecision, call, ...(planned ? { planned: true } : {}) });
-    const patch = (p: Partial<ToolCallRecord>) => patchCall(msgId, s.id, p);
+    const patch = (p: Partial<ToolCallRecord>) => {
+      patchCall(msgId, s.id, p);
+      // The activity log: each argument writer call once settled (what it was sent and replied, or who
+      // set the arguments instead), and each tool call once it ended.
+      if (p.argIO) {
+        logActivity(msgId, 'args', { step: s.index, tool: tool.id, args: p.args ?? null, argsRaw: p.argsRaw ?? null, model: p.argModel ?? null, attempts: p.argAttempts ?? 0, choices: call.argChoices ?? null, error: p.error ?? null, io: p.argIO });
+      }
+      if (p.status === 'done' || p.status === 'error' || p.status === 'skipped' || p.status === 'denied') logActivity(msgId, 'tool', { step: s.index, tool: tool.id, ...p });
+    };
     calls++;
 
     // ── arguments ──

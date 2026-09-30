@@ -32,6 +32,13 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
   the Microsoft Edge WebView2 runtime (preinstalled on Windows 11) and won't
   fetch it for you.
 - There is no telemetry, analytics, crash reporting or account.
+- The optional **activity log** (Settings → Activity log, off by default)
+  is a local file, not telemetry: JSON lines in the app data folder's
+  `logs/`, owner-only, 20 MB a day at most, deleted after 7 days. It holds
+  your questions and passages from your documents, and it isn't removed
+  when you clear the conversation history (*Delete logs* does that). Rust
+  accepts only known event kinds and bounded sizes, names the files itself,
+  and deletes and opens only that folder.
 - *How it's tested:* the end-to-end test runs a local "canary" server that
   accepts any request, then tries to reach it from inside the app with a fetch
   and an image. The test fails if the canary receives anything.

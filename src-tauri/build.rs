@@ -36,6 +36,10 @@ const COMMANDS: &[&str] = &[
     "llm_generate",
     "llm_cancel",
     "llm_add_custom",
+    "activity_write",
+    "activity_info",
+    "activity_clear",
+    "activity_open",
 ];
 
 fn main() {

@@ -168,6 +168,12 @@ vi.mock('../kb/api', async (orig) => ({
   },
 }));
 
+const logged = vi.hoisted(() => [] as { turn: string; kind: string; data: Record<string, unknown> }[]);
+vi.mock('../state/activity', () => ({
+  logActivity: (turn: string, kind: string, data: Record<string, unknown>) => logged.push({ turn, kind, data }),
+  flushActivity: async () => {},
+}));
+
 const { runTurn, stopTurn } = await import('./turn');
 const { STOP } = await import('./loop');
 const { resolveApproval, setAgent, setPolicy, useTools } = await import('../state/tools');
@@ -204,6 +210,7 @@ const assistant = () => useChat.getState().messages.find((m) => m.role === 'assi
 const statuses = () => Object.fromEntries(assistant().steps!.map((s) => [s.kind, s.status]));
 
 beforeEach(() => {
+  logged.length = 0;
   clearChat();
   engine.loaded = true;
   engine.deltas = ['Hello', ' world'];
@@ -838,6 +845,22 @@ describe('runTurn (agent mode)', () => {
       await runTurn('How are refunds worked out?');
       expect(calls().map((c) => c.tool)).toEqual(['kb_search', 'kb_search']);
     });
+  });
+
+  it('writes the turn, each step, each argument writer call and each tool call to the activity log', async () => {
+    agent.decisions = [{ chosen: 'kb_search' }, { chosen: 'answer_now' }];
+    await runTurn('What headers does wllama need?');
+    const id = assistant().id;
+    expect(logged.every((e) => e.turn === id)).toBe(true);
+    expect(logged.map((e) => e.kind)).toEqual(['turn', 'step', 'args', 'tool', 'step', 'context', 'answer']);
+    expect(logged[0].data).toMatchObject({ question: 'What headers does wllama need?', mode: 'agent', kb: { name: 'Docs' } });
+    expect(logged[1].data).toMatchObject({ index: 0, action: 'kb_search', decision: { chosen: 'kb_search' } });
+    // what the writer was sent and replied
+    expect(logged[2].data).toMatchObject({ step: 0, tool: 'kb_search', args: { query: 'wllama COOP COEP headers', scope: 'broad' }, model: 'Qwen3 0.6B' });
+    expect((logged[2].data.io as { calls: { messages: { content: string }[] }[] }).calls[0].messages[0].content).toContain('What headers does wllama need?');
+    expect(logged[3].data).toMatchObject({ step: 0, tool: 'kb_search', status: 'done', argv: ['search', 'x'] });
+    expect(logged[5].data).toMatchObject({ system: expect.stringContaining('serve.json adds the COOP/COEP headers') });
+    expect(logged[6].data).toMatchObject({ text: 'Hello world', sources: ['README.md:11-13'] });
   });
 
   describe('passages scored as they arrive (with Laya, item 15)', () => {

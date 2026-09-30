@@ -42,7 +42,11 @@
     "allow-llm-unload",
     "allow-llm-generate",
     "allow-llm-cancel",
-    "allow-llm-add-custom"
+    "allow-llm-add-custom",
+    "allow-activity-write",
+    "allow-activity-info",
+    "allow-activity-clear",
+    "allow-activity-open"
   ],
   "remote": {
     "urls": [

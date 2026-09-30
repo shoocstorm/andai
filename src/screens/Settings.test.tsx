@@ -1,6 +1,5 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { loadDecider, removeLaya, removeLegacyCopies, useEngine } from '../llm/engine';
 import { DEFAULT_MODEL, isMlx, MODELS, setCustomModels, type WllamaDef } from '../llm/models';
@@ -179,5 +178,20 @@ describe('Settings', () => {
     const notes = screen.getAllByRole('note').filter((n) => /Needs about/.test(n.textContent ?? ''));
     expect(notes.map((n) => n.textContent)).toEqual([expect.stringMatching(/Needs about 22 GB of memory; this Mac has 16 GB/)]);
     setMlx(false);
+  });
+});
+
+describe('Settings · activity log', () => {
+  it('is off until switched on, and says the desktop app writes it', async () => {
+    const { useActivity } = await import('../state/activity');
+    const user = userEvent.setup();
+    render(<Settings />);
+    const toggle = screen.getByRole('switch', { name: 'Keep an activity log' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await user.click(toggle);
+    expect(useActivity.getState().enabled).toBe(true);
+    expect(screen.getByRole('switch', { name: 'Keep an activity log' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText(/written by the desktop app/)).toBeInTheDocument();
+    act(() => useActivity.setState({ enabled: false }));
   });
 });

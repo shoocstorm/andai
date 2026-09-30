@@ -1,9 +1,11 @@
-import { AlertTriangle, Check, CheckCircle2, Cpu, Download, GitFork, HardDrive, Loader2, Moon, Palette, Plus, Power, Radio, Sun, Trash2, X, Zap } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Cpu, Download, FolderOpen, GitFork, HardDrive, Loader2, Moon, Palette, Plus, Power, Radio, ScrollText, Sun, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Bar, Modal, fmtBytes } from '../components/ui';
+import { isTauri } from '@tauri-apps/api/core';
+import { Bar, Modal, Toggle, fmtBytes } from '../components/ui';
 import { evictModel, loadDecider, loadModel, refreshLaya, refreshNative, removeLaya, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
 import { removeCustomModel } from '../llm/custom';
 import { availableModels, isMlx, LAYA_MODELS, layaById, memoryFit, modelById, type LayaDef, type ModelDef } from '../llm/models';
+import { activityInfo, clearActivity, openActivityFolder, useActivity, type ActivityInfo } from '../state/activity';
 import { clearChat } from '../state/chat';
 import { useKb } from '../state/kb';
 import { useTheme, type Theme } from '../state/theme';
@@ -425,8 +427,89 @@ export function Settings() {
               <Trash2 size={13} /> Clear conversation history
             </button>
           </div>
+
+          <ActivityLog />
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The activity log (state/activity.ts, src-tauri/src/activity.rs): off by
+ * default, since it writes the user's questions and passages from their
+ * documents to disk, where they outlive a cleared conversation.
+ */
+function ActivityLog() {
+  const { enabled, setEnabled } = useActivity();
+  const desktop = isTauri();
+  const [info, setInfo] = useState<ActivityInfo | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const refresh = () => {
+    if (desktop) void activityInfo().then(setInfo, () => setInfo(null));
+  };
+  useEffect(refresh, [desktop, enabled]);
+  const bytes = info?.files.reduce((n, f) => n + f.bytes, 0) ?? 0;
+  return (
+    <div className="panel pad">
+      <div className="panel-head">
+        <ScrollText size={20} color="var(--violet)" />
+        <h3>Activity log</h3>
+        <span className={`right pill ${enabled ? 'green' : ''}`}>{enabled ? 'on' : 'off'}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <span style={{ fontSize: 14 }}>Keep an activity log</span>
+        <Toggle checked={enabled} onChange={setEnabled} label="Keep an activity log" />
+      </div>
+      <p className="muted" style={{ margin: '10px 0 12px', fontSize: 13.5 }}>
+        Writes each step the agent takes (its decisions, every argument writer call, tool calls, the context sent to the
+        model and the answer) as JSON lines, one file per day, on this computer. It includes your questions and passages
+        from your documents. Files are kept 7 days, and nothing leaves the machine.
+      </p>
+      {desktop ? (
+        <>
+          <dl className="st-dl">
+            <Row k="Folder" v={info?.dir ?? '—'} mono />
+            <Row k="Files" v={info ? `${info.files.length} · ${fmtBytes(bytes)}` : '—'} />
+          </dl>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button className="btn ghost sm" onClick={() => void openActivityFolder().catch((err: unknown) => toast({ tone: 'error', title: 'Couldn’t open the logs folder', body: String(err) }))}>
+              <FolderOpen size={13} /> Open folder
+            </button>
+            <button className="btn danger sm" disabled={!info?.files.length} onClick={() => setConfirming(true)}>
+              <Trash2 size={13} /> Delete logs
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
+          The log is written by the desktop app.
+        </p>
+      )}
+      <Modal open={confirming} onClose={() => setConfirming(false)}>
+        <h3>Delete the activity logs?</h3>
+        <p className="muted" style={{ margin: '4px 0 22px' }}>
+          This deletes {info?.files.length ?? 0} log file{info?.files.length === 1 ? '' : 's'} ({fmtBytes(bytes)}). Your
+          conversations aren’t affected.
+        </p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button className="btn ghost" onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+          <button
+            className="btn danger"
+            onClick={() => {
+              setConfirming(false);
+              void clearActivity()
+                .then((n) => toast({ tone: 'info', title: `${n} log file${n === 1 ? '' : 's'} deleted` }))
+                .catch((err: unknown) => toast({ tone: 'error', title: 'Couldn’t delete the logs', body: String(err) }))
+                .finally(refresh);
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -25,6 +25,7 @@ import { runAgent } from './loop';
 import { checkRelevance, KEEP_TOP, scoringRequest, type PassageScorer } from './relevance';
 import { checkClaims, supportSummary } from './claims';
 import { decidesWithLaya } from '../llm/decide';
+import { flushActivity, logActivity } from '../state/activity';
 
 let controller: AbortController | null = null;
 
@@ -97,6 +98,19 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
     streaming: true,
   };
   addMessage(msg);
+  // The activity log (state/activity.ts), when it's on: the turn, then each step as it happens.
+  const log = (kind: Parameters<typeof logActivity>[1], data: unknown) => logActivity(id, kind, data);
+  const tools = useTools.getState();
+  log('turn', {
+    question: prompt,
+    kb: kb ? { name: kb.name, kind: kb.kind, nodes: kb.nodes } : null,
+    mode: agent ? 'agent' : 'fixed',
+    model: model.name,
+    decider: deciderLaya()?.name ?? null,
+    seed: opts.seed ?? null,
+    settings: { maxSteps: tools.maxSteps, minConfidence: tools.minConfidence, searchFirst: tools.searchFirst, plan: tools.plan, searchAgain: tools.searchAgain },
+    history: history.length,
+  });
   controller = new AbortController();
   const signal = controller.signal;
   const started = performance.now();
@@ -159,6 +173,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
             hits = r.hits;
             // Sources are numbered as the prompt cites them, so they're set after the check.
             patchMessage(id, { sources: hits, relevance: r.record });
+            log('relevance', r.record);
             const dropped = r.record.items.length - hits.length;
             patchStep(id, 'filter', {
               status: 'done',
@@ -198,6 +213,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
       tokens: Math.round(chars / CHARS_PER_TOKEN),
     };
     patchMessage(id, { context });
+    log('context', { ...context, history: sentHistory.slice(0, -1) });
     patchStep(id, 'build', {
       status: 'done',
       detail: `${messages.length - 1} message${messages.length === 2 ? '' : 's'} · ~${context.tokens.toLocaleString()} tokens`,
@@ -244,6 +260,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
       }
     }
     patchMessage(id, { streaming: false });
+    log('answer', { text: reply, stats: useChat.getState().messages.find((m) => m.id === id)?.stats ?? null, sources: hits.map((h) => `${h.file}:${h.start_line}-${h.end_line}`) });
 
     if (relevance) {
       const sources = useChat.getState().messages.find((m) => m.id === id)?.sources ?? [];
@@ -260,6 +277,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
           });
         } else {
           patchMessage(id, { support: r });
+          log('claims', r);
           patchStep(id, 'verify', { status: 'done', detail: `${supportSummary(r.items)} · ${r.ms} ms` });
         }
       } catch (e) {
@@ -272,6 +290,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
       }
     }
   } catch (e) {
+    log('error', { stopped: isAbort(e) || signal.aborted, message: e instanceof Error ? e.message : String(e) });
     if (isAbort(e) || signal.aborted) {
       patchMessage(id, (m) => ({
         streaming: false,
@@ -290,5 +309,6 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
     }
   } finally {
     controller = null;
+    void flushActivity();
   }
 }

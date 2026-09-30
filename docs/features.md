@@ -362,11 +362,21 @@ executed**; every action says it's simulated.
   [security.md](security.md).
 - No telemetry, analytics or accounts. (This is about the desktop app; the
   browser deployment loads Google Analytics — see *Run in the browser*.)
+- **Activity log (off by default).** Settings → *Activity log* writes each
+  step the agent takes (its decisions, every argument writer call with what
+  it was sent and replied, tool calls, the context sent to the model, the
+  answer and its checks) as JSON lines to a daily file,
+  `logs/agent-YYYY-MM-DD.jsonl` in the app data folder (UTC days). It holds
+  your questions and passages from your documents, so it's owner-only,
+  capped at 20 MB a day and kept 7 days. It stays on your computer; *Open
+  folder* shows it and *Delete logs* removes it after you confirm.
+  Clearing the conversation history doesn't delete it.
 - Your data lives in the app data folder (knowledge-base copies:
   `~/Library/Application Support/dev.andai.agent/` on macOS,
   `%APPDATA%\dev.andai.agent\` on Windows), in `.ug/andai-*` in your home
   folder (knowledge graphs) and in the app's own storage (chats, settings,
-  cached models).
+  cached models). The activity log, when on, is in the app data folder's
+  `logs/`.
 
 ## Requirements & known limits
 
