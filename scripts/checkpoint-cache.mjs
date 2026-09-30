@@ -16,7 +16,14 @@ function kindOf(id) {
   if (typeof id !== 'string') return null;
   if (/^laya-[a-z]+$/.test(id)) return 'laya';
   if (/^[a-z0-9.-]+-mlx$/.test(id)) return 'llm';
+  // A model added from Hugging Face (llm/custom.rs): its folder plus the manifest Rust wrote.
+  if (/^hf-[a-z0-9.-]+$/.test(id)) return 'llm';
   return null;
+}
+
+/** A Hugging Face model's manifest (`<models>/llm/custom/<id>.json`), for ids that have one. */
+function manifestOf(base, id) {
+  return id.startsWith('hf-') ? join(base, 'custom', `${id}.json`) : null;
 }
 
 function copyTree(from, to) {
@@ -35,6 +42,12 @@ export function seedCheckpoint(appDataDir, id) {
   const kind = kindOf(id);
   if (!kind || !existsSync(join(CACHE, kind, id, '.verified'))) return false;
   copyTree(join(CACHE, kind, id), join(appDataDir, 'models', kind, id));
+  const manifest = manifestOf(join(CACHE, kind), id);
+  if (manifest) {
+    if (!existsSync(manifest)) return false;
+    mkdirSync(join(appDataDir, 'models', kind, 'custom'), { recursive: true });
+    copyFileSync(manifest, manifestOf(join(appDataDir, 'models', kind), id));
+  }
   console.log(`[checkpoint-cache] ${id} seeded from ${join(CACHE, kind)}`);
   return true;
 }
@@ -48,5 +61,10 @@ export function keepCheckpoint(appDataDir, id) {
   if (!existsSync(join(dir, '.verified')) || existsSync(join(cached, '.verified'))) return;
   rmSync(cached, { recursive: true, force: true });
   copyTree(dir, cached);
+  const manifest = manifestOf(join(appDataDir, 'models', kind), id);
+  if (manifest && existsSync(manifest)) {
+    mkdirSync(join(CACHE, kind, 'custom'), { recursive: true });
+    copyFileSync(manifest, manifestOf(join(CACHE, kind), id));
+  }
   console.log(`[checkpoint-cache] ${id} kept in ${join(CACHE, kind)}`);
 }

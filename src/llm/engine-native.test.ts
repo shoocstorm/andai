@@ -28,7 +28,7 @@ vi.mock('./native', async (importOriginal) => {
     }),
     nativeLoad: async (slot: string, id: string, nCtx: number) => {
       native.log.push(`load ${slot} ${id} ${nCtx}`);
-      return { ms: 5, layers: 28, bits: 4, nCtx };
+      return { ms: 5, layers: 28, bits: 4, arch: 'qwen3', nCtx };
     },
     nativeUnload: async (slot: string) => void native.log.push(`unload ${slot}`),
     nativeRemove: async (id: string) => {

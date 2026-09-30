@@ -59,7 +59,7 @@ const UNSUPPORTED: NativeStatus = { supported: false, chat: null, decider: null,
 
 /** In a plain browser (no Tauri) there's no MLX: same answer as a Windows or Intel build. */
 export const nativeStatus = (): Promise<NativeStatus> => (isTauri() ? invoke<NativeStatus>('llm_status') : Promise.resolve(UNSUPPORTED));
-export type NativeLoaded = { ms: number; layers: number; bits: number; nCtx: number };
+export type NativeLoaded = { ms: number; layers: number; bits: number; arch: string; nCtx: number };
 export const nativeLoad = (slot: NativeSlot, checkpoint: string, nCtx: number) => invoke<NativeLoaded>('llm_load', { slot, checkpoint, nCtx });
 export const nativeUnload = (slot: NativeSlot) => invoke<void>('llm_unload', { slot });
 export const nativeRemove = (checkpoint: string) => invoke<void>('llm_remove', { checkpoint });

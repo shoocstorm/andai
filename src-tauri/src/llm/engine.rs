@@ -185,8 +185,12 @@ impl Engine {
     }
 
     /// Layer count and weight bits.
-    pub fn shape(&self) -> (usize, i32) {
-        (self.model.cfg.layers, self.model.cfg.bits)
+    pub fn shape(&self) -> (usize, i32, &'static str) {
+        let arch = match self.model.cfg.arch {
+            Arch::Qwen3 => "qwen3",
+            Arch::Qwen35(_) => "qwen3_5",
+        };
+        (self.model.cfg.layers, self.model.cfg.bits, arch)
     }
 
     pub fn encode(&self, text: &str) -> R<Vec<u32>> {

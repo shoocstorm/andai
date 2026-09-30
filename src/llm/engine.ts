@@ -194,7 +194,7 @@ function nativeInfo(loaded: NativeLoaded): EngineInfo {
     threads: '— (GPU)',
     context: `${loaded.nCtx}`,
     layers: loaded.layers,
-    arch: `qwen3 · ${loaded.bits}-bit`,
+    arch: `${loaded.arch} · ${loaded.bits}-bit`,
     libllama: 'MLX 0.32 (mlx-rs, in Rust)',
     compat: false,
   };

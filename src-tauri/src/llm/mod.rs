@@ -331,6 +331,8 @@ pub struct Loaded {
     layers: usize,
     /// Weight bits, e.g. 4 or 8.
     bits: i32,
+    /// The architecture, `qwen3` or `qwen3_5`.
+    arch: &'static str,
     n_ctx: u32,
 }
 
@@ -354,16 +356,16 @@ pub async fn llm_load(app: AppHandle, mlx: State<'_, Mlx>, slot: Slot, checkpoin
                 let started = std::time::Instant::now();
                 m.llm[slot.index()] = None;
                 let engine = engine::Engine::load(&dir, n_ctx as usize)?;
-                let (layers, bits) = engine.shape();
+                let (layers, bits, arch) = engine.shape();
                 m.llm[slot.index()] = Some((c.id.to_string(), engine));
-                Ok(Loaded { ms: started.elapsed().as_secs_f64() * 1e3, layers, bits, n_ctx })
+                Ok(Loaded { ms: started.elapsed().as_secs_f64() * 1e3, layers, bits, arch, n_ctx })
             })
         })
         .await
     }
     #[cfg(not(mlx))]
     {
-        let _ = (app, mlx, slot, checkpoint, Loaded { ms: 0.0, layers: 0, bits: 0, n_ctx });
+        let _ = (app, mlx, slot, checkpoint, Loaded { ms: 0.0, layers: 0, bits: 0, arch: "", n_ctx });
         Err(UNSUPPORTED.into())
     }
 }
