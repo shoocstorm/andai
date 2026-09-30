@@ -114,6 +114,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
   controller = new AbortController();
   const signal = controller.signal;
   const started = performance.now();
+  let outcome: 'answered' | 'stopped' | 'failed' = 'answered';
 
   try {
     let hits: SearchHit[] = [];
@@ -148,6 +149,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
           hits = await kbSearch(kb.slug, prompt, kbState.k, kbState.maxChars);
           const ms = Math.round(performance.now() - t);
           recordSearch(ms, hits.length);
+          log('retrieve', { kb: kb.name, query: prompt, k: kbState.k, maxChars: kbState.maxChars, hits: hits.length, ms, sources: hits.map((h) => `${h.file}:${h.start_line}-${h.end_line}`) });
           patchMessage(id, { sources: hits });
           patchStep(id, 'retrieve', {
             status: 'done',
@@ -156,6 +158,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
               : `No matching passages in “${kb.name}”`,
           });
         } catch (e) {
+          log('retrieve', { kb: kb.name, query: prompt, error: e instanceof Error ? e.message : String(e) });
           patchStep(id, 'retrieve', { status: 'error', detail: `Search failed: ${e instanceof Error ? e.message : e}` });
         }
       }
@@ -290,7 +293,8 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
       }
     }
   } catch (e) {
-    log('error', { stopped: isAbort(e) || signal.aborted, message: e instanceof Error ? e.message : String(e) });
+    outcome = isAbort(e) || signal.aborted ? 'stopped' : 'failed';
+    log('error', { stopped: outcome === 'stopped', message: e instanceof Error ? e.message : String(e) });
     if (isAbort(e) || signal.aborted) {
       patchMessage(id, (m) => ({
         streaming: false,
@@ -309,6 +313,8 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
     }
   } finally {
     controller = null;
+    const m = useChat.getState().messages.find((x) => x.id === id);
+    log('done', { outcome, ms: Math.round(performance.now() - started), toolCalls: m?.agent?.filter((st) => st.call).length ?? 0, passages: m?.sources?.length ?? 0 });
     void flushActivity();
   }
 }

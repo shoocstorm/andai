@@ -13,7 +13,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
 }));
 
-const { flushActivity, logActivity, MAX_TEXT, useActivity } = await import('./activity');
+const { flushActivity, logActivity, logApp, MAX_TEXT, useActivity } = await import('./activity');
 
 beforeEach(async () => {
   await flushActivity();
@@ -47,8 +47,8 @@ describe('activity log', () => {
         cmd: 'activity_write',
         args: {
           events: [
-            { kind: 'turn', turn: 'm1', data: { question: 'Is there Wi-Fi?' } },
-            { kind: 'args', turn: 'm1', data: { tool: 'kb_search', args: { query: 'wifi' } } },
+            { kind: 'turn', turn: 'm1', level: 'info', summary: 'Asked “Is there Wi-Fi?” · no knowledge base', data: { question: 'Is there Wi-Fi?' } },
+            { kind: 'args', turn: 'm1', level: 'info', summary: 'Step: kb_search {"query":"wifi"}', data: { tool: 'kb_search', args: { query: 'wifi' } } },
           ],
         },
       },
@@ -77,6 +77,12 @@ describe('activity log', () => {
     const data = tauri.calls[0].args.events[0].data as { output: string };
     expect(data.output).toHaveLength(MAX_TEXT + '… (10 more characters)'.length);
     expect(data).not.toHaveProperty('fn');
+  });
+
+  it('logs model and knowledge base events under the app turn, with their summary and level', async () => {
+    logApp('model', { action: 'load-failed', slot: 'chat', model: 'Qwen3 1.7B', error: 'out of memory' });
+    await flushActivity();
+    expect(tauri.calls[0].args.events[0]).toMatchObject({ kind: 'model', turn: 'app', level: 'error', summary: 'Couldn’t load chat model Qwen3 1.7B: out of memory' });
   });
 
   it('never throws when a write fails', async () => {

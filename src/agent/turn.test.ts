@@ -418,6 +418,19 @@ describe('runTurn (fixed pipeline)', () => {
     expect(assistant().content).toBe('Hello world');
   });
 
+  it('logs the search, and how the turn ended', async () => {
+    await runTurn('What headers does wllama need?');
+    expect(logged.map((e) => e.kind)).toEqual(['turn', 'retrieve', 'context', 'answer', 'done']);
+    expect(logged[1].data).toMatchObject({ kb: 'Docs', query: 'What headers does wllama need?', hits: 1, sources: ['README.md:11-13'] });
+    expect(logged[4].data).toMatchObject({ outcome: 'answered', toolCalls: 0, passages: 1 });
+    logged.length = 0;
+    search.fail = new Error('ug exploded');
+    engine.fail = new Error('kv cache full');
+    await runTurn('hi');
+    expect(logged.find((e) => e.kind === 'retrieve')!.data).toMatchObject({ error: 'ug exploded' });
+    expect(logged.at(-1)).toMatchObject({ kind: 'done', data: { outcome: 'failed' } });
+  });
+
   it('refuses to run without a model and says how to fix it', async () => {
     engine.loaded = false;
     await runTurn('hi');
@@ -443,6 +456,7 @@ describe('runTurn (fixed pipeline)', () => {
     const m = assistant();
     expect(m.stopped).toBe(true);
     expect(m.streaming).toBe(false);
+    expect(logged.at(-1)).toMatchObject({ kind: 'done', data: { outcome: 'stopped' } });
     expect(m.steps!.every((s) => s.status !== 'running' && s.status !== 'queued')).toBe(true);
     expect(useChat.getState().messages.some((x) => x.role === 'error')).toBe(false);
   });
@@ -852,7 +866,7 @@ describe('runTurn (agent mode)', () => {
     await runTurn('What headers does wllama need?');
     const id = assistant().id;
     expect(logged.every((e) => e.turn === id)).toBe(true);
-    expect(logged.map((e) => e.kind)).toEqual(['turn', 'step', 'args', 'tool', 'step', 'context', 'answer']);
+    expect(logged.map((e) => e.kind)).toEqual(['turn', 'step', 'args', 'tool', 'step', 'context', 'answer', 'done']);
     expect(logged[0].data).toMatchObject({ question: 'What headers does wllama need?', mode: 'agent', kb: { name: 'Docs' } });
     expect(logged[1].data).toMatchObject({ index: 0, action: 'kb_search', decision: { chosen: 'kb_search' } });
     // what the writer was sent and replied
@@ -861,6 +875,7 @@ describe('runTurn (agent mode)', () => {
     expect(logged[3].data).toMatchObject({ step: 0, tool: 'kb_search', status: 'done', argv: ['search', 'x'] });
     expect(logged[5].data).toMatchObject({ system: expect.stringContaining('serve.json adds the COOP/COEP headers') });
     expect(logged[6].data).toMatchObject({ text: 'Hello world', sources: ['README.md:11-13'] });
+    expect(logged[7].data).toMatchObject({ outcome: 'answered', toolCalls: 1, passages: 1, ms: expect.any(Number) });
   });
 
   describe('passages scored as they arrive (with Laya, item 15)', () => {

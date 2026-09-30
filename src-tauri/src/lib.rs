@@ -134,6 +134,7 @@ pub fn run() {
             llm::llm_add_custom,
             activity::activity_write,
             activity::activity_info,
+            activity::activity_read,
             activity::activity_clear,
             activity::activity_open,
         ])

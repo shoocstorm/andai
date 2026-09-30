@@ -45,6 +45,7 @@
     "allow-llm-add-custom",
     "allow-activity-write",
     "allow-activity-info",
+    "allow-activity-read",
     "allow-activity-clear",
     "allow-activity-open"
   ],

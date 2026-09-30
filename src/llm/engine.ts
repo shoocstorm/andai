@@ -17,6 +17,7 @@
 
 import { ModelManager, Wllama, WllamaAbortError, type ChatCompletionParams, type ChatCompletionResponse } from '@wllama/wllama';
 import { create } from 'zustand';
+import { logApp } from '../state/activity';
 import { verifyBlobs } from './integrity';
 import { downloadCheckpoint, downloadLaya, layaLoad, layaRemove, layaStatus, layaUnload, type LayaStatus } from './laya';
 import { allModels, isMlx, layaById, MODELS, modelById, type LayaDef, type MlxDef, type ModelDef, type WllamaDef } from './models';
@@ -36,6 +37,12 @@ import {
 } from './native';
 
 const asset = (path: string) => new URL(path, window.location.href).href;
+
+/** The activity log's record of a model event (state/activity.ts; written only while the log is on). */
+const logModel = (action: 'load' | 'unload' | 'load-failed' | 'remove', slot: Slot | null, id: string, extra: Record<string, unknown> = {}) => {
+  const def = modelById(id) ?? layaById(id);
+  logApp('model', { action, slot, id, model: def?.name ?? id, engine: layaById(id) ? 'Laya' : isMlx(modelById(id)) ? 'MLX' : 'wllama', ...extra });
+};
 
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -285,6 +292,7 @@ export async function loadModel(id: string): Promise<void> {
         lastLoadMs: performance.now() - started,
         lastVerifyMs: null,
       });
+      logModel('load', 'chat', id, { ms: Math.round(performance.now() - started), backend: nativeInfo(loaded).backend, context: loaded.nCtx });
       localStorage.setItem('andai.lastModel', id);
       return;
     }
@@ -306,9 +314,12 @@ export async function loadModel(id: string): Promise<void> {
       info: readInfo(w, gpu),
       lastLoadMs: performance.now() - started,
     });
+    const info = useEngine.getState().info;
+    logModel('load', 'chat', id, { ms: Math.round(performance.now() - started), verifyMs: verifyMs === null ? null : Math.round(verifyMs), backend: info?.backend, threads: info?.threads, context: def.n_ctx });
     localStorage.setItem('andai.lastModel', id);
   } catch (e) {
     console.error('[engine] load failed', e);
+    logModel('load-failed', 'chat', id, { ms: Math.round(performance.now() - started), error: e instanceof Error ? e.message : String(e) });
     useEngine.setState({
       status: 'error',
       loadingId: null,
@@ -323,6 +334,8 @@ export async function loadModel(id: string): Promise<void> {
 export async function unloadModel(): Promise<void> {
   const w = wllama;
   const native = isMlx(loadedModel());
+  const was = useEngine.getState().loadedId;
+  if (was) logModel('unload', 'chat', was);
   wllama = null;
   useEngine.setState({ status: 'idle', loadedId: null, info: null, tokPerSec: null });
   await w?.exit().catch(() => {});
@@ -358,6 +371,7 @@ export async function loadDecider(id: string): Promise<void> {
   const setDecider = (patch: Partial<EngineState['decider']>) =>
     useEngine.setState((s) => ({ decider: { ...s.decider, ...patch } }));
   setDecider({ status: 'loading', loadingId: id, error: null, progress: { loaded: 0, total: def?.bytes ?? 0, speed: 0, phase: 'Connecting…' } });
+  const started = performance.now();
   try {
     if (laya) {
       const c = (await refreshLaya()).checkpoints.find((x) => x.id === id);
@@ -377,8 +391,10 @@ export async function loadDecider(id: string): Promise<void> {
     }
     setDecider({ status: 'ready', loadingId: null, loadedId: id, progress: null });
     localStorage.setItem('andai.lastDecider', id);
+    logModel('load', 'decider', id, { ms: Math.round(performance.now() - started) });
   } catch (e) {
     console.error('[engine] decider load failed', e);
+    logModel('load-failed', 'decider', id, { ms: Math.round(performance.now() - started), error: e instanceof Error ? e.message : String(e) });
     setDecider({ status: 'error', loadingId: null, progress: null, error: e instanceof Error ? e.message : String(e) });
   } finally {
     await (laya ? refreshLaya() : refreshCache());
@@ -390,6 +406,7 @@ export async function unloadDecider(): Promise<void> {
   const { loadedId } = useEngine.getState().decider;
   const laya = layaById(loadedId);
   const native = isMlx(modelById(loadedId));
+  if (loadedId) logModel('unload', 'decider', loadedId);
   deciderWllama = null;
   useEngine.setState((s) => ({ decider: { ...s.decider, status: 'idle', loadedId: null } }));
   localStorage.removeItem('andai.lastDecider');
@@ -402,6 +419,7 @@ export async function unloadDecider(): Promise<void> {
 export async function removeLaya(id: string): Promise<void> {
   if (useEngine.getState().decider.loadedId === id) await unloadDecider();
   await layaRemove(id);
+  logModel('remove', null, id);
   await refreshLaya();
 }
 
@@ -466,6 +484,7 @@ export async function evictModel(id: string): Promise<void> {
   if (useEngine.getState().decider.loadedId === id) await unloadDecider();
   if (isMlx(def)) {
     await nativeRemove(def.native);
+    logModel('remove', null, id);
     await refreshCache();
     return;
   }
@@ -473,6 +492,7 @@ export async function evictModel(id: string): Promise<void> {
   if (!mm) return;
   for (const m of await mm.getModels()) if (m.url === def.url) await m.remove();
   setVerified(def.url, null);
+  logModel('remove', null, id);
   await refreshCache();
 }
 

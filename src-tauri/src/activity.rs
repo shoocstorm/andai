@@ -10,7 +10,12 @@
 //! untrusted (AGENTS.md §9), so Rust bounds what it accepts either way: a
 //! closed set of kinds, sizes, and the daily cap. The file name and the time
 //! of day come from Rust's clock, never from the webview. Deleting and
-//! opening act on this folder only, and take no path.
+//! opening act on this folder only, and take no path; reading (the Logs
+//! screen) takes a file name, which must be exactly one of ours.
+//!
+//! Besides the agent's events, the app logs what it did to models and
+//! knowledge bases (turn id `app`), and every line may carry a one-line
+//! `summary` and a `level`, so the files read without the app.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,7 +29,13 @@ use tauri::{AppHandle, State};
 use crate::ug::{data_dir, open_in_system};
 
 /// What an event can be; anything else is refused.
-pub const KINDS: &[&str] = &["turn", "step", "args", "tool", "relevance", "context", "answer", "claims", "error"];
+pub const KINDS: &[&str] = &["turn", "step", "args", "tool", "retrieve", "relevance", "context", "answer", "claims", "error", "done", "model", "kb"];
+/// How bad an event is; anything else is refused.
+pub const LEVELS: &[&str] = &["info", "warn", "error"];
+/// A summary's bytes.
+const MAX_SUMMARY: usize = 1024;
+/// Events one read returns: the newest ones of the day.
+pub const READ_LIMIT: usize = 5000;
 /// Events per call, and bytes per event once serialized.
 const MAX_EVENTS: usize = 64;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
@@ -38,6 +49,11 @@ pub struct Event {
     kind: String,
     /// The assistant message the event belongs to.
     turn: String,
+    /// One line a person can read ("Searched “ferries” · 6 passages · 40 ms").
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    level: Option<String>,
     data: Value,
 }
 
@@ -47,7 +63,21 @@ struct Line<'a> {
     at: u64,
     kind: &'a str,
     turn: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<&'a str>,
     data: &'a Value,
+}
+
+/// One day's events as the Logs screen reads them.
+#[derive(Serialize)]
+pub struct LogDay {
+    /// Parsed lines, oldest first; the newest `READ_LIMIT` when the day has more.
+    events: Vec<Value>,
+    /// Lines in the file, and lines that weren't JSON (a cut line, an edit by hand).
+    total: usize,
+    bad: usize,
 }
 
 /// Serializes writes, so two calls can't interleave inside a line or race the cap.
@@ -140,7 +170,16 @@ fn line(e: &Event, at: u64) -> Result<String, String> {
     if e.turn.is_empty() || e.turn.len() > 64 || !e.turn.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err("An activity event's turn id must be 1–64 letters, digits, - or _.".into());
     }
-    let text = serde_json::to_string(&Line { at, kind: &e.kind, turn: &e.turn, data: &e.data }).map_err(|e| e.to_string())?;
+    if let Some(l) = &e.level {
+        if !LEVELS.contains(&l.as_str()) {
+            return Err("An activity event's level must be info, warn or error.".into());
+        }
+    }
+    if e.summary.as_ref().is_some_and(|s| s.len() > MAX_SUMMARY || s.contains('\n')) {
+        return Err(format!("An activity summary is one line of at most {MAX_SUMMARY} bytes."));
+    }
+    let line = Line { at, kind: &e.kind, turn: &e.turn, level: e.level.as_deref(), summary: e.summary.as_deref(), data: &e.data };
+    let text = serde_json::to_string(&line).map_err(|e| e.to_string())?;
     if text.len() > MAX_EVENT_BYTES {
         return Err(format!("An activity event is {} KB; the most is {} KB.", text.len() / 1024, MAX_EVENT_BYTES / 1024));
     }
@@ -195,6 +234,42 @@ pub async fn activity_info(app: AppHandle) -> Result<LogInfo, String> {
     Ok(LogInfo { dir: dir.to_string_lossy().into(), files })
 }
 
+/// Reads one day's file from `dir`: `name` must be exactly one of ours, a regular file (not a link).
+fn read_day(dir: &Path, name: &str) -> Result<LogDay, String> {
+    if day_of(name).is_none() {
+        return Err("Not an activity log file.".into());
+    }
+    let path = dir.join(name);
+    match fs::symlink_metadata(&path) {
+        Ok(m) if m.is_file() => {}
+        Ok(_) => return Err("Not an activity log file.".into()),
+        Err(_) => return Ok(LogDay { events: vec![], total: 0, bad: 0 }),
+    }
+    // A day stops at DAY_CAP, so this is bounded; lossy, since a cut line may split a character.
+    let bytes = fs::read(&path).map_err(|e| format!("Couldn't read the activity log: {e}"))?;
+    let text = String::from_utf8_lossy(&bytes);
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let total = lines.len();
+    let mut bad = 0;
+    let mut events: Vec<Value> = lines[total.saturating_sub(READ_LIMIT)..]
+        .iter()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok().filter(Value::is_object).or_else(|| {
+            bad += 1;
+            None
+        }))
+        .collect();
+    events.shrink_to_fit();
+    Ok(LogDay { events, total, bad })
+}
+
+/// One day's events for the Logs screen.
+#[tauri::command]
+pub async fn activity_read(app: AppHandle, lock: State<'_, ActivityLock>, name: String) -> Result<LogDay, String> {
+    let dir = logs_dir(&app)?;
+    let _held = lock.0.lock().map_err(|_| "The activity log is unavailable.".to_string())?;
+    read_day(&dir, &name)
+}
+
 /// Deletes every log file (only ours; the UI confirms first). Returns how many.
 #[tauri::command]
 pub async fn activity_clear(app: AppHandle, lock: State<'_, ActivityLock>) -> Result<usize, String> {
@@ -225,7 +300,7 @@ mod tests {
     const AT: u64 = 1_790_769_600_000;
 
     fn ev(kind: &str, data: Value) -> Event {
-        Event { kind: kind.into(), turn: "m1".into(), data }
+        Event { kind: kind.into(), turn: "m1".into(), summary: None, level: None, data }
     }
 
     #[test]
@@ -267,7 +342,7 @@ mod tests {
     fn refuses_unknown_kinds_bad_turn_ids_oversized_events_and_batches() {
         let dir = tempfile::tempdir().unwrap();
         assert!(append(dir.path(), &[ev("shell", json!({}))], AT).unwrap_err().contains("Unknown activity kind"));
-        let bad_turn = Event { kind: "turn".into(), turn: "../x".into(), data: json!({}) };
+        let bad_turn = Event { kind: "turn".into(), turn: "../x".into(), summary: None, level: None, data: json!({}) };
         assert!(append(dir.path(), &[bad_turn], AT).is_err());
         let big = ev("context", json!({"system": "x".repeat(MAX_EVENT_BYTES)}));
         assert!(append(dir.path(), &[big], AT).unwrap_err().contains("KB"));
@@ -303,5 +378,61 @@ mod tests {
         let mut left: Vec<String> = fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into()).collect();
         left.sort();
         assert_eq!(left, vec!["agent-2000-01-01.jsonl.keep", "agent-2026-09-24.jsonl", "agent-2026-09-30.jsonl", "notes.txt"]);
+    }
+
+    #[test]
+    fn writes_a_summary_and_level_when_given_and_refuses_bad_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = Event { kind: "kb".into(), turn: "app".into(), summary: Some("Indexed “Ferries”".into()), level: Some("warn".into()), data: json!({}) };
+        append(dir.path(), &[e], AT).unwrap();
+        let text = fs::read_to_string(dir.path().join("agent-2026-09-30.jsonl")).unwrap();
+        assert_eq!(text, format!("{{\"at\":{AT},\"kind\":\"kb\",\"turn\":\"app\",\"level\":\"warn\",\"summary\":\"Indexed “Ferries”\",\"data\":{{}}}}\n"));
+        let level = Event { kind: "kb".into(), turn: "app".into(), summary: None, level: Some("fatal".into()), data: json!({}) };
+        assert!(append(dir.path(), &[level], AT).is_err());
+        let long = Event { kind: "kb".into(), turn: "app".into(), summary: Some("x".repeat(MAX_SUMMARY + 1)), level: None, data: json!({}) };
+        assert!(append(dir.path(), &[long], AT).is_err());
+        let lines = Event { kind: "kb".into(), turn: "app".into(), summary: Some("a\nb".into()), level: None, data: json!({}) };
+        assert!(append(dir.path(), &[lines], AT).is_err());
+    }
+
+    #[test]
+    fn reads_back_a_day_newest_last_skipping_bad_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        append(dir.path(), &[ev("turn", json!({"question": "q"})), ev("done", json!({}))], AT).unwrap();
+        let path = dir.path().join("agent-2026-09-30.jsonl");
+        let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"not json\n[1]\n\n").unwrap();
+        let day = read_day(dir.path(), "agent-2026-09-30.jsonl").unwrap();
+        assert_eq!((day.total, day.bad, day.events.len()), (4, 2, 2));
+        assert_eq!(day.events[0]["kind"], json!("turn"));
+        // a day without a file is empty, not an error
+        let none = read_day(dir.path(), "agent-2026-09-29.jsonl").unwrap();
+        assert_eq!((none.total, none.events.len()), (0, 0));
+    }
+
+    #[test]
+    fn reads_only_the_newest_events_of_a_long_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let text: String = (0..READ_LIMIT + 3).map(|i| format!("{{\"i\":{i}}}\n")).collect();
+        fs::write(dir.path().join("agent-2026-09-30.jsonl"), text).unwrap();
+        let day = read_day(dir.path(), "agent-2026-09-30.jsonl").unwrap();
+        assert_eq!((day.total, day.events.len()), (READ_LIMIT + 3, READ_LIMIT));
+        assert_eq!(day.events[0]["i"], json!(3));
+    }
+
+    #[test]
+    fn reads_only_its_own_files_never_a_path_or_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("notes.txt"), "{}").unwrap();
+        for bad in ["notes.txt", "../agent-2026-09-30.jsonl", "/etc/passwd", "agent-2026-09-30.jsonl/..", ""] {
+            assert!(read_day(dir.path(), bad).is_err(), "{bad}");
+        }
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            fs::write(outside.path().join("secret"), "{\"secret\":1}\n").unwrap();
+            std::os::unix::fs::symlink(outside.path().join("secret"), dir.path().join("agent-2026-09-28.jsonl")).unwrap();
+            assert!(read_day(dir.path(), "agent-2026-09-28.jsonl").is_err());
+        }
     }
 }

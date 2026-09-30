@@ -38,6 +38,7 @@ const COMMANDS: &[&str] = &[
     "llm_add_custom",
     "activity_write",
     "activity_info",
+    "activity_read",
     "activity_clear",
     "activity_open",
 ];

@@ -104,13 +104,14 @@ Andai/
 │  ├─ screens/, shell/, components/
 │  ├─ theme/tokens.css       ALL colors, both themes
 │  ├─ lib/platform.ts        macOS vs Windows in the UI: shortcut labels (⌘ / Ctrl), traffic-light room
+│  ├─ lib/activityText.ts    PURE: activity log summaries + levels per event, grouping a day by question (Logs screen)
 │  ├─ mock/workflows.ts      data for the simulated Workflows screens
 │  ├─ smoke.ts               in-webview test harness (VITE_SMOKE)
 │  ├─ bench.ts               engine benchmark (VITE_SMOKE=bench; not in production builds)
 │  └─ eval.ts                agent eval harness (VITE_SMOKE=eval; not in production builds)
 ├─ src-tauri/
 │  ├─ src/lib.rs             app setup, navigation lock, drop → file grants
-│  ├─ src/activity.rs        activity log (off by default): JSONL per UTC day in app data logs/, 7 days, 20 MB/day
+│  ├─ src/activity.rs        activity log (off by default): JSONL per UTC day in app data logs/, 7 days, 20 MB/day; read back by the Logs screen
 │  ├─ src/ui_server.rs       loopback server for the release UI (http://localhost:14230)
 │  ├─ src/grants.rs          which files the webview may ingest (drop / Rust dialog only)
 │  ├─ src/ug.rs              knowledge bases → `ug gen/search/list/remove` CLI; KB kind
@@ -671,7 +672,7 @@ level defaults to *Ask*.
 | Native MLX chat models (download, verify, load, stream, stop, decide; Apple Silicon) | Real | `src-tauri/src/llm/`, `src-tauri/src/mlx.rs`, `llm/native.ts` |
 | Add a model from Hugging Face (search, compatibility check, pin, verified download; GGUF anywhere, MLX Qwen3 and Qwen3.5 on Apple Silicon) | Real | `llm/hub.ts`, `llm/custom.ts`, `screens/HubModels.tsx`, `src-tauri/src/llm/custom.rs` |
 | Appearance (light / dark; first run follows the OS) | Real | `state/theme.ts` |
-| Activity log (off by default; each step, argument writer call, tool call, context and answer as JSONL, 7 days) | Real | `state/activity.ts`, `src-tauri/src/activity.rs`, Settings |
+| Activity log (off by default; each step, argument writer call, tool call, context and answer, plus model and KB events, as JSONL with a one-line summary and level, 7 days) and its screen (⌘L: by question, filters, search, raw data) | Real | `state/activity.ts`, `lib/activityText.ts`, `src-tauri/src/activity.rs`, `screens/Logs.tsx`, Settings |
 | Layout: collapsible nav (⌘B), Execution Trace on/off (⌘J) | Real, persisted | `state/layout.ts` |
 | Workflows, approvals, tool library, node editor, run | **Simulated** | `mock/workflows.ts`, `screens/Workflow*.tsx` |
 | "Choose tool" menu: the tools offered for the selected KB, with their policy | Real | `screens/CommandCenter.tsx` (registry) |
@@ -1065,7 +1066,7 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | ug argument hardening, budgets clamped | `ug::search_query`, `ug::search_limits` | Rust unit tests |
 | Private files (0700 dirs / 0600 files; Unix only, see §2), 100 MB cap, absolute PATH only | `ug.rs` | Rust unit tests |
 | Windows installer makes no network request (WebView2 not bootstrapped) | `tauri.conf.json` | `security.test.ts` |
-| Activity log: a closed set of event kinds, turn ids `[A-Za-z0-9_-]{1,64}`, ≤ 64 events a call, ≤ 256 KB an event, 20 MB a day; file names and times from Rust's clock; 0700/0600; only `agent-YYYY-MM-DD.jsonl` files are read, pruned (7 days) or deleted; `activity_open` takes no argument. Off by default (a product decision, 2026-09-30); the webview decides when to write, so the caps are what bound it | `activity.rs` | Rust unit tests |
+| Activity log: a closed set of event kinds and levels, turn ids `[A-Za-z0-9_-]{1,64}`, a summary of one line ≤ 1 KB, ≤ 64 events a call, ≤ 256 KB an event, 20 MB a day; file names and times from Rust's clock; 0700/0600; only `agent-YYYY-MM-DD.jsonl` files are read, pruned (7 days) or deleted; `activity_read` takes only such a name (a regular file, not a link; the newest 5,000 lines), and the Logs screen shows it as plain text; `activity_open` takes no argument. Off by default (a product decision, 2026-09-30); the webview decides when to write, so the caps are what bound it | `activity.rs` | Rust unit tests |
 | `dev_log` / `dev_exit` need `ANDAI_SMOKE=1` | `lib.rs` | `security.test.ts` |
 | `open_ug_website` takes no argument: it opens only `ug::UG_WEBSITE` (the ug install page, shown when ug is missing) in the system browser; the app makes no request and `src/` names no URL | `ug.rs` | `tauri-acl.test.ts`, `security.test.ts` |
 | Webview holds no fs/shell/http/opener/dialog permission | `capabilities/default.json` | `security.test.ts` |

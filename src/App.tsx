@@ -8,6 +8,7 @@ import { initCustomModels } from './llm/custom';
 import { autoload } from './llm/engine';
 import { CommandCenter, composerRef } from './screens/CommandCenter';
 import { Knowledge } from './screens/Knowledge';
+import { Logs } from './screens/Logs';
 import { Persona } from './screens/Persona';
 import { Settings } from './screens/Settings';
 import { Tools } from './screens/Tools';
@@ -27,6 +28,7 @@ const SCREENS: Record<Route, () => React.ReactElement> = {
   tools: Tools,
   persona: Persona,
   settings: Settings,
+  logs: Logs,
 };
 
 /** Files dropped from Finder go to the KB on screen (Knowledge) or the one grounding chat. */
@@ -66,7 +68,7 @@ export function App() {
         if (e.key === 'Escape') stopTurn();
         return;
       }
-      const map: Record<string, Route> = { '1': 'command', '2': 'workflows', '3': 'knowledge', '4': 'persona', '5': 'tools', ',': 'settings' };
+      const map: Record<string, Route> = { '1': 'command', '2': 'workflows', '3': 'knowledge', '4': 'persona', '5': 'tools', ',': 'settings', l: 'logs', L: 'logs' };
       if (map[e.key]) {
         e.preventDefault();
         go(map[e.key]);

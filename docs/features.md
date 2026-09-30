@@ -325,7 +325,7 @@ pasting in whatever one search returns:
 - **Collapsible sidebar** (`⌘B`) and **hideable Execution Trace** (`⌘J`),
   both remembered.
 - **Keyboard shortcuts:** `⌘K` focus the input · `⌘1–5` switch screens ·
-  `⌘,` Settings · `Enter` send · `Shift+Enter` new line · `Esc` stop. On
+  `⌘,` Settings · `⌘L` Activity log · `Enter` send · `Shift+Enter` new line · `Esc` stop. On
   Windows, use `Ctrl` instead of `⌘`; the app shows the right key.
 
 ## Workflows & tools · Preview
@@ -372,9 +372,20 @@ executed**; every action says it's simulated.
   answer and its checks) as JSON lines to a daily file,
   `logs/agent-YYYY-MM-DD.jsonl` in the app data folder (UTC days). It holds
   your questions and passages from your documents, so it's owner-only,
-  capped at 20 MB a day and kept 7 days. It stays on your computer; *Open
-  folder* shows it and *Delete logs* removes it after you confirm.
-  Clearing the conversation history doesn't delete it.
+  capped at 20 MB a day and kept 7 days. It also notes what the app did to
+  your models (loaded, unloaded, failed to load, deleted) and knowledge
+  bases (created, files added, indexed, deleted), and each line starts with
+  a one-sentence summary and a level (info, warn, error), so the files read
+  without the app. It stays on your computer; *Open folder* shows it and
+  *Delete logs* removes it after you confirm. Clearing the conversation
+  history doesn't delete it.
+- **Activity log screen** (sidebar → *Activity log*, `⌘L`): one day at a
+  time, each question with every step the agent took for it (time since the
+  question, what kind of step, its summary) and the model and knowledge
+  base events between them. Filter to questions, models, knowledge or
+  problems (warnings and errors), search summaries and data, and open any
+  event to its logged data (copyable JSON). *Live* re-reads today's file
+  every 2 seconds. It shows the newest 5,000 events of a day.
 - Your data lives in the app data folder (knowledge-base copies:
   `~/Library/Application Support/dev.andai.agent/` on macOS,
   `%APPDATA%\dev.andai.agent\` on Windows), in `.ug/andai-*` in your home

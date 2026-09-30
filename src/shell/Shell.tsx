@@ -8,6 +8,7 @@ import {
   Database,
   HelpCircle,
   Radio,
+  ScrollText,
   Settings,
   SquareTerminal,
   UserRoundCog,
@@ -161,6 +162,17 @@ export function Sidebar() {
           <span className="nav-label">Settings</span>
           <span className="kbd">{shortcut(',')}</span>
         </button>
+        <button
+          className="nav-item"
+          aria-label="Activity log"
+          aria-current={route === 'logs' ? 'page' : undefined}
+          onClick={() => go('logs')}
+          {...tip('Activity log', shortcut('L'))}
+        >
+          <ScrollText size={19} />
+          <span className="nav-label">Activity log</span>
+          <span className="kbd">{shortcut('L')}</span>
+        </button>
         <button className="nav-item" aria-label="Support" onClick={() => setAbout(true)} {...tip('Support')}>
           <HelpCircle size={19} />
           <span className="nav-label">Support</span>
@@ -286,6 +298,7 @@ export function AboutModal() {
         <span className="kbd-hint">{shortcut('B')}</span> Collapse / expand the sidebar
         <span className="kbd-hint">{shortcut('J')}</span> Show / hide the Execution Trace
         <span className="kbd-hint">{shortcut(',')}</span> Settings &amp; models
+        <span className="kbd-hint">{shortcut('L')}</span> Activity log
         <span className="kbd-hint">Esc</span> Stop generating
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 24, gap: 10 }}>

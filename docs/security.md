@@ -38,7 +38,9 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
   your questions and passages from your documents, and it isn't removed
   when you clear the conversation history (*Delete logs* does that). Rust
   accepts only known event kinds and bounded sizes, names the files itself,
-  and deletes and opens only that folder.
+  and deletes and opens only that folder. The Activity log screen reads a
+  file back only by one of those names (never a path, never through a
+  link) and shows its contents as plain text.
 - *How it's tested:* the end-to-end test runs a local "canary" server that
   accepts any request, then tries to reach it from inside the app with a fetch
   and an image. The test fails if the canary receives anything.

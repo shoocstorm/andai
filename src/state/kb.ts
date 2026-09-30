@@ -18,6 +18,7 @@ import {
   type UgStatus,
 } from '../kb/api';
 import type { SourceView } from '../kb/source';
+import { logApp } from './activity';
 import { toast } from './ui';
 
 type KbState = {
@@ -58,6 +59,10 @@ export const useKb = create<KbState>()(
 );
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const nameOf = (slug: string) => useKb.getState().kbs.find((k) => k.slug === slug)?.name ?? slug;
+/** The activity log's record of a knowledge base event (state/activity.ts; written only while the log is on). */
+const logKb = (action: 'create' | 'index' | 'add' | 'sample' | 'remove' | 'delete' | 'kind', slug: string, extra: Record<string, unknown> = {}) =>
+  logApp('kb', { action, kb: nameOf(slug), slug, ...extra });
 
 function upsert(kb: KbInfo) {
   const kbs = useKb.getState().kbs;
@@ -89,9 +94,11 @@ export async function createKb(name: string): Promise<KbInfo | null> {
     const kb = await kbCreate(name);
     upsert(kb);
     useKb.setState({ selected: kb.slug, grounding: useKb.getState().grounding ?? kb.slug });
+    logKb('create', kb.slug);
     toast({ tone: 'ok', title: `Knowledge base “${kb.name}” created` });
     return kb;
   } catch (e) {
+    logApp('kb', { action: 'create', kb: name, error: errText(e) });
     toast({ tone: 'error', title: 'Could not create knowledge base', body: errText(e) });
     return null;
   }
@@ -100,9 +107,13 @@ export async function createKb(name: string): Promise<KbInfo | null> {
 export async function indexKb(slug: string) {
   const kb = useKb.getState().kbs.find((k) => k.slug === slug);
   if (kb) upsert({ ...kb, status: 'indexing' });
+  const started = performance.now();
   try {
     const next = await kbIndex(slug);
     upsert(next);
+    const ms = Math.round(performance.now() - started);
+    if (next.status === 'failed') logKb('index', slug, { ms, error: next.lastError ?? 'indexing failed' });
+    else logKb('index', slug, { ms, sources: next.sources.length, nodes: next.nodes, edges: next.edges, kind: next.kind });
     if (next.status === 'failed') {
       toast({ tone: 'error', title: `Indexing “${next.name}” failed`, body: next.lastError ?? undefined });
     } else if (next.sources.length) {
@@ -113,6 +124,7 @@ export async function indexKb(slug: string) {
       });
     }
   } catch (e) {
+    logKb('index', slug, { ms: Math.round(performance.now() - started), error: errText(e) });
     toast({ tone: 'error', title: 'Indexing failed', body: errText(e) });
     await refreshKbs();
   }
@@ -123,9 +135,11 @@ export async function addFiles(slug: string, paths: string[]) {
   try {
     const [kb, errors] = await kbAddFiles(slug, paths);
     upsert(kb);
+    logKb('add', slug, { files: paths.length - errors.length, names: paths.map((p) => p.split(/[\\/]/).pop()), skipped: errors });
     for (const e of errors) toast({ tone: 'warn', title: 'Skipped a file', body: e });
     if (kb.sources.some((s) => s.status === 'pending')) await indexKb(slug);
   } catch (e) {
+    logKb('add', slug, { error: errText(e) });
     toast({ tone: 'error', title: 'Could not add files', body: errText(e) });
   }
 }
@@ -138,10 +152,12 @@ export async function addSample(id: string): Promise<KbInfo | null> {
   try {
     const kb = await kbAddSample(id);
     upsert(kb);
+    logKb('sample', kb.slug, { sample: id });
     useKb.setState({ selected: kb.slug, grounding: kb.slug });
     if (kb.status === 'pending' || kb.status === 'failed') await indexKb(kb.slug);
     return useKb.getState().kbs.find((k) => k.slug === kb.slug) ?? kb;
   } catch (e) {
+    logApp('kb', { action: 'sample', kb: id, error: errText(e) });
     toast({ tone: 'error', title: 'Could not add the sample', body: errText(e) });
     return null;
   }
@@ -150,15 +166,19 @@ export async function addSample(id: string): Promise<KbInfo | null> {
 export async function removeSource(slug: string, file: string) {
   try {
     upsert(await kbRemoveSource(slug, file));
+    logKb('remove', slug, { file });
     await indexKb(slug);
   } catch (e) {
+    logKb('remove', slug, { file, error: errText(e) });
     toast({ tone: 'error', title: 'Could not remove source', body: errText(e) });
   }
 }
 
 export async function deleteKb(slug: string) {
+  const name = nameOf(slug);
   try {
     await kbDelete(slug);
+    logApp('kb', { action: 'delete', kb: name, slug });
     const s = useKb.getState();
     const kbs = s.kbs.filter((k) => k.slug !== slug);
     useKb.setState({
@@ -168,6 +188,7 @@ export async function deleteKb(slug: string) {
     });
     toast({ tone: 'info', title: 'Knowledge base deleted' });
   } catch (e) {
+    logApp('kb', { action: 'delete', kb: name, slug, error: errText(e) });
     toast({ tone: 'error', title: 'Could not delete', body: errText(e) });
   }
 }
@@ -176,7 +197,9 @@ export async function deleteKb(slug: string) {
 export async function setKind(slug: string, kind: KbKind | null) {
   try {
     upsert(await kbSetKind(slug, kind));
+    logKb('kind', slug, { kind });
   } catch (e) {
+    logKb('kind', slug, { kind, error: errText(e) });
     toast({ tone: 'error', title: 'Could not change the knowledge base kind', body: errText(e) });
   }
 }

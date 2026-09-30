@@ -122,7 +122,7 @@ or telemetry.
 ## Shortcuts
 
 `⌘K` focus the composer · `⌘1–5` switch screens · `⌘B` collapse the sidebar ·
-`⌘J` show the Execution Trace · `⌘,` Settings · `Esc` stop generating.
+`⌘J` show the Execution Trace · `⌘,` Settings · `⌘L` Activity log · `Esc` stop generating.
 On Windows, use `Ctrl` instead of `⌘`.
 
 ## Contributing

@@ -9,7 +9,7 @@ import { activityInfo, clearActivity, openActivityFolder, useActivity, type Acti
 import { clearChat } from '../state/chat';
 import { useKb } from '../state/kb';
 import { useTheme, type Theme } from '../state/theme';
-import { toast } from '../state/ui';
+import { toast, useUi } from '../state/ui';
 import { HubModels } from './HubModels';
 import { GetUltraGraph } from './Knowledge';
 
@@ -473,6 +473,9 @@ function ActivityLog() {
             <Row k="Files" v={info ? `${info.files.length} · ${fmtBytes(bytes)}` : '—'} />
           </dl>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button className="btn secondary sm" onClick={() => useUi.getState().go('logs')}>
+              <ScrollText size={13} /> View log
+            </button>
             <button className="btn ghost sm" onClick={() => void openActivityFolder().catch((err: unknown) => toast({ tone: 'error', title: 'Couldn’t open the logs folder', body: String(err) }))}>
               <FolderOpen size={13} /> Open folder
             </button>
