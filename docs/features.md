@@ -424,8 +424,8 @@ executed**; every action says it's simulated.
   test suite runs on Windows in CI. It hasn't been tested on a Windows PC yet.
   Needs the Microsoft Edge WebView2 runtime (preinstalled on Windows 11); the
   installer doesn't download it for you.
-- Knowledge bases need the **ug** CLI, in a release with `ug files` (after
-  0.1.22); with an older ug, Andai asks you to update it (`ug upgrade`).
+- Knowledge bases need the **ug** CLI, version 0.1.23 or later (it added
+  `ug files`); with an older ug, Andai asks you to update it (`ug upgrade`).
   It must be installed (on your PATH, or in
   `.local/bin`, `.cargo/bin` or `.ug/bin` in your home folder). On macOS,
   Andai can install it for you (Knowledge → **Install UltraGraph**).

@@ -7,6 +7,7 @@
 | [../README.md](../README.md) | Everyone | What Andai is, download, getting started |
 | [development.md](development.md) | Developers | How a turn works, build, run, test, release, the WebKit details |
 | [../AGENTS.md](../AGENTS.md) | Contributors & coding agents | Grounding rules, architecture, conventions, testing, releases, security (§9) |
+| [platform-facts.md](platform-facts.md) | Contributors & coding agents | Hard-won, measured facts about WebKit, Tauri, Windows, ug, wllama, MLX and Laya: what surprised us and what the code does about it (moved from AGENTS.md §2) |
 | [security.md](security.md) | Users, evaluators, security reviewers | Every security protection, what it means for you, how it's tested, and what isn't covered yet |
 | [decider.md](decider.md) | Contributors & coding agents | How a regular model decides the agent's next action: the choice-based prompt, the logprob readout, and a copy-paste prompt to reimplement it elsewhere |
 | [agentic-rag-improvements.md](agentic-rag-improvements.md) | Contributors & coding agents | Tracker for planned agent-loop accuracy and speed work, one item at a time |
