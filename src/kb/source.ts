@@ -4,7 +4,9 @@ import type { Source } from './api';
 /** One source as `kb_source` returns it (src-tauri/src/ug.rs `SourceView`). */
 export type SourceView = {
   source: Source;
-  /** The stored copy's text; null for a PDF, whose text only ug's index holds. */
+  /** Where the file is on disk. */
+  path: string;
+  /** The file's text; null for a PDF, whose text only ug's index holds. */
   text: string | null;
   textTruncated: boolean;
   /** ug's `file_context` JSON, or null with `structureError` saying why. */

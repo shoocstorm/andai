@@ -13,7 +13,6 @@ vi.mock('../state/kb', async (original) => ({
 
 const src = (file: string, kind: Source['kind'] = 'MD'): Source => ({
   file,
-  original: `/Users/me/${file}`,
   kind,
   bytes: 686,
   approxTokens: 171,
@@ -22,14 +21,16 @@ const src = (file: string, kind: Source['kind'] = 'MD'): Source => ({
 });
 
 const kb: KbInfo = {
-  slug: 'ferries',
+  slug: 'andai-ferries',
   name: 'Ferries',
   createdAt: 1,
   sources: [src('operations.md'), src('refund-policy.md')],
   lastIndexedAt: 1_700_000_100,
   lastError: null,
   kindOverride: null,
-  dir: '/x',
+  managed: true,
+  root: '/tmp/docs',
+  sourceCount: 0,
   status: 'ready',
   kind: 'document',
   nodes: 10,
@@ -40,6 +41,7 @@ const kb: KbInfo = {
 const TEXT = '# Handbook\n\n## Fleet\n\nMV Kestrel carries 212.\n\n## Routes\n\nHarlow to Pellin.\n';
 const view = (file: string, over: Partial<SourceView> = {}): SourceView => ({
   source: src(file),
+  path: `/Users/me/Library/Application Support/dev.andai.agent/kb/ferries/docs/${file}`,
   text: TEXT,
   textTruncated: false,
   structure: {
@@ -67,16 +69,15 @@ const openDialog = async () => {
   render(<Sources kb={kb} onDelete={() => {}} />);
   await user.click(screen.getByRole('button', { name: 'View operations.md' }));
   const dialog = await screen.findByRole('dialog', { name: 'Source operations.md' });
-  await within(dialog).findByText('/Users/me/operations.md');
+  await within(dialog).findByText(/kb\/ferries\/docs\/operations\.md$/);
   return { user, dialog: within(dialog) };
 };
 
 describe('source dialog', () => {
   it('opens from a source name with its metadata', async () => {
     const { dialog } = await openDialog();
-    expect(viewSource).toHaveBeenCalledWith('ferries', 'operations.md');
+    expect(viewSource).toHaveBeenCalledWith('andai-ferries', 'operations.md');
     expect(dialog.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
-    expect(dialog.getByText('docs/operations.md')).toBeInTheDocument();
     expect(dialog.getByText('andai-ferries')).toBeInTheDocument();
     expect(dialog.getByText('documentation')).toBeInTheDocument();
   });
@@ -104,7 +105,7 @@ describe('source dialog', () => {
     const { user, dialog } = await openDialog();
     expect(dialog.queryByRole('button', { name: 'elsewhere.md' })).toBeNull();
     await user.click(dialog.getByRole('button', { name: 'refund-policy.md' }));
-    await waitFor(() => expect(viewSource).toHaveBeenLastCalledWith('ferries', 'refund-policy.md'));
+    await waitFor(() => expect(viewSource).toHaveBeenLastCalledWith('andai-ferries', 'refund-policy.md'));
     expect(await screen.findByRole('dialog', { name: 'Source refund-policy.md' })).toBeInTheDocument();
   });
 

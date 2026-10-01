@@ -3,11 +3,12 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { SourceView } from './source';
 
 export type Source = {
+  /** Path in the knowledge base's folder: a bare name for Andai's own, repo-relative for other ug projects. */
   file: string;
-  original: string;
   kind: 'PDF' | 'MD' | 'TXT' | 'CSV' | 'CODE';
   bytes: number;
   approxTokens: number | null;
+  /** When the file was last written (seconds). */
   addedAt: number;
   status: 'pending' | 'indexed' | 'failed';
 };
@@ -15,24 +16,52 @@ export type Source = {
 /** What a KB holds; decides which agent tools apply (src-tauri/src/ug.rs `KbKind`). */
 export type KbKind = 'document' | 'code' | 'mixed';
 
+/**
+ * A knowledge base is a ug project (src-tauri/src/ug.rs): every project `ug list`
+ * reports, Andai's own named `andai-<slug>`.
+ */
 export type KbInfo = {
+  /** The ug project name; the id every command takes. */
   slug: string;
+  /** The project name without `andai-`. */
   name: string;
+  /** Andai keeps its files, so they can be added and removed; other projects index the user's own folder. */
+  managed: boolean;
+  /** The folder ug indexes. */
+  root: string;
   createdAt: number;
   sources: Source[];
+  /** All sources; a large repo lists only the first few thousand. */
+  sourceCount: number;
   lastIndexedAt: number | null;
   lastError: string | null;
-  /** The user's override; null when `kind` is derived from the sources. */
+  /** The user's choice (kept in this app's settings, state/kb.ts); null when `kind` comes from the sources or ug. */
   kindOverride: KbKind | null;
-  dir: string;
-  status: 'empty' | 'pending' | 'indexing' | 'ready' | 'failed';
+  /** `offline`: ug isn't installed, so nothing can be indexed or searched. */
+  status: 'offline' | 'empty' | 'pending' | 'indexing' | 'ready' | 'failed';
   kind: KbKind;
   nodes: number;
   edges: number;
   sizeBytes: number;
 };
 
-export type UgStatus = { found: boolean; path: string | null; version: string | null };
+export type UgStatus = {
+  found: boolean;
+  path: string | null;
+  version: string | null;
+  /** Andai can install ug itself on this platform (src-tauri/src/ug_install.rs). */
+  canInstall: boolean;
+  /** UltraGraph's own terminal one-liner, for installing by hand. */
+  installCommand: string;
+};
+
+/** One `ug-install` event: where the in-app install is (ug_install.rs `InstallProgress`). */
+export type UgInstallProgress = {
+  stage: 'lookup' | 'download' | 'verify' | 'install' | 'check';
+  version: string | null;
+  done: number;
+  total: number;
+};
 
 export type SearchHit = {
   id: string;
@@ -56,7 +85,11 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 }
 
 export const ugStatus = () =>
-  inTauri ? invoke<UgStatus>('ug_status') : Promise.resolve<UgStatus>({ found: false, path: null, version: null });
+  inTauri
+    ? invoke<UgStatus>('ug_status')
+    : Promise.resolve<UgStatus>({ found: false, path: null, version: null, canInstall: false, installCommand: '' });
+/** Downloads, verifies and installs ug for this user; progress arrives as `ug-install` events. Rust picks every URL and path. */
+export const ugInstall = () => call<UgStatus>('ug_install');
 /** Opens UltraGraph's site (install instructions) in the system browser; Rust holds the URL. */
 export const openUgWebsite = () => call<void>('open_ug_website');
 export const kbList = () => (inTauri ? invoke<KbInfo[]>('kb_list') : Promise.resolve<KbInfo[]>([]));
@@ -73,7 +106,6 @@ export const kbIndex = (slug: string) => call<KbInfo>('kb_index', { slug });
 /** A source's metadata, stored text and ug's outline of it, for the source dialog; Rust reads only files `kb.json` lists. */
 export const kbSource = (slug: string, file: string) => call<SourceView>('kb_source', { slug, file });
 
-export const kbSetKind = (slug: string, kind: KbKind | null) => call<KbInfo>('kb_set_kind', { slug, kind });
 /** Adds a bundled sample (kb/samples.ts) as a knowledge base, or returns the one already added. Index it next. */
 export const kbAddSample = (sample: string) => call<KbInfo>('kb_add_sample', { sample });
 

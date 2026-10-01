@@ -1,15 +1,15 @@
 {
   "bundle": {
-    "recorded": "2026-09-27",
+    "recorded": "2026-09-30",
     "metrics": {
       "app-js": {
-        "value": 1085565,
+        "value": 1210687,
         "unit": "bytes",
         "better": "lower",
         "tolerance": 1.1
       },
       "app-css": {
-        "value": 116123,
+        "value": 147591,
         "unit": "bytes",
         "better": "lower",
         "tolerance": 1.1
@@ -27,7 +27,7 @@
         "tolerance": 1.1
       },
       "dist-total": {
-        "value": 26680046,
+        "value": 26855736,
         "unit": "bytes",
         "better": "lower",
         "tolerance": 1.1

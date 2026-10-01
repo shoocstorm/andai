@@ -1,9 +1,14 @@
-//! Knowledge bases, backed by the `ug` CLI.
+//! Knowledge bases, backed by the `ug` CLI. A knowledge base *is* a ug
+//! project: the list comes from `ug list`, so every project the user indexed
+//! with ug shows up in Andai, and every one Andai makes shows up in ug.
 //!
-//! Each knowledge base is a folder under `<app data>/kb/<slug>/`:
-//!
-//!   kb.json   — name, sources and index status (owned by Andai)
-//!   docs/     — the normalized files `ug gen` indexes as project `andai-<slug>`
+//! Andai's own are named `andai-<slug>` and index the copies Andai keeps in
+//! `<app data>/kb/<slug>/docs/` (files can be added and removed there). A
+//! folder that ug has no project for yet (never indexed, or its graph was
+//! removed) is listed too, so the user's files never go missing from view.
+//! Everything else Andai shows comes from ug or the files themselves; there
+//! is no metadata file. Other projects index their own folder (`repoRoot`),
+//! which Andai only reads.
 //!
 //! Every ug call shells out to the CLI with `--json` where it exists. GUI apps
 //! on macOS don't inherit the login shell's PATH, so `ug_path()` also probes
@@ -11,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -28,39 +33,30 @@ const MAX_QUERY_BYTES: usize = 2048;
 /// Largest file a knowledge base accepts, so one drop can't fill the disk.
 const MAX_SOURCE_BYTES: u64 = 100 * 1024 * 1024;
 
-/// Slugs with a `ug gen` in flight; a second index request for one is refused.
+/// Knowledge bases with a `ug gen` in flight (a second run for one is
+/// refused), and the last indexing error per knowledge base: kept until its
+/// next run, not across restarts.
 #[derive(Default)]
-pub struct Indexing(pub Mutex<HashSet<String>>);
+pub struct Indexing {
+    pub(crate) busy: Mutex<HashSet<String>>,
+    errors: Mutex<HashMap<String, String>>,
+}
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
-    /// File name inside `docs/`.
+    /// Path inside the knowledge base's folder: a bare name for Andai's own,
+    /// repo-relative (`src/fare.ts`) for other projects.
     pub file: String,
-    /// Absolute path the user added it from.
-    pub original: String,
     /// Display type: PDF, MD, TXT, CSV, CODE.
     pub kind: String,
     pub bytes: u64,
     /// ~4 chars per token; `None` for binary formats (PDF).
     pub approx_tokens: Option<u64>,
+    /// When the file was last written (seconds): Andai's copy, or the file in the repo.
     pub added_at: u64,
     /// pending | indexed | failed
     pub status: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct KbMeta {
-    pub slug: String,
-    pub name: String,
-    pub created_at: u64,
-    pub sources: Vec<Source>,
-    pub last_indexed_at: Option<u64>,
-    pub last_error: Option<String>,
-    /// The user's choice of kind; `None` derives it from the sources.
-    #[serde(default)]
-    pub kind_override: Option<KbKind>,
 }
 
 /// What a knowledge base holds. It decides which agent tools apply: code
@@ -84,15 +80,29 @@ fn derive_kind(sources: &[Source]) -> KbKind {
     }
 }
 
+/// Most sources listed for one knowledge base; a large repo's rest is counted, not listed.
+const MAX_LISTED_SOURCES: usize = 5000;
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct KbInfo {
-    #[serde(flatten)]
-    pub meta: KbMeta,
-    pub dir: String,
-    /// empty | pending | indexing | ready | failed
+    /// The ug project name, which is also the id the webview uses.
+    pub slug: String,
+    /// What the UI shows: the project name without `andai-`.
+    pub name: String,
+    /// Andai keeps this knowledge base's files (`kb/<slug>/docs`), so files
+    /// can be added and removed. Other projects index the user's own folder.
+    pub managed: bool,
+    /// The folder ug indexes.
+    pub root: String,
+    pub created_at: u64,
+    pub last_indexed_at: Option<u64>,
+    pub last_error: Option<String>,
+    pub sources: Vec<Source>,
+    /// All of them, including those past `MAX_LISTED_SOURCES`.
+    pub source_count: usize,
+    /// offline (ug missing) | empty | pending | indexing | ready | failed
     pub status: String,
-    /// `kind_override` if set, else derived from the sources.
     pub kind: KbKind,
     pub nodes: u64,
     pub edges: u64,
@@ -105,6 +115,10 @@ pub struct UgStatus {
     pub found: bool,
     pub path: Option<String>,
     pub version: Option<String>,
+    /// Whether Andai can install ug itself here (ug_install.rs); else the website.
+    pub can_install: bool,
+    /// The terminal command UltraGraph's site gives, for installing by hand.
+    pub install_command: &'static str,
 }
 
 #[derive(Serialize, Clone)]
@@ -162,8 +176,11 @@ pub(crate) fn ug_path() -> Option<PathBuf> {
 /// webview, so `src/` still names no remote URL (security.test.ts).
 pub(crate) const UG_WEBSITE: &str = "https://ultra-graph.web.app";
 
+/// Kept here with the site's URL rather than in `src/`, which names no remote URL.
+const UG_INSTALL_COMMAND: &str = "curl -fsSL https://ultra-graph.web.app/install.sh | sh";
+
 pub(crate) const UG_MISSING: &str =
-    "The `ug` (UltraGraph) CLI was not found. Install it from https://ultra-graph.web.app, then restart Andai.";
+    "The `ug` (UltraGraph) CLI was not found. Install it from Knowledge or Settings (Install UltraGraph), or from https://ultra-graph.web.app.";
 
 fn ug() -> Result<Command, String> {
     let path = ug_path().ok_or(UG_MISSING)?;
@@ -254,17 +271,7 @@ pub(crate) fn kb_dir(app: &AppHandle, slug: &str) -> Result<PathBuf, String> {
     Ok(kb_root(app)?.join(slug))
 }
 
-pub(crate) fn read_meta(dir: &Path) -> Result<KbMeta, String> {
-    let raw = fs::read_to_string(dir.join("kb.json")).map_err(|e| e.to_string())?;
-    serde_json::from_str(&raw).map_err(|e| e.to_string())
-}
-
-pub(crate) fn write_meta(dir: &Path, meta: &KbMeta) -> Result<(), String> {
-    let raw = serde_json::to_string_pretty(meta).map_err(|e| e.to_string())?;
-    write_private(&dir.join("kb.json"), raw.as_bytes()).map_err(|e| e.to_string())
-}
-
-fn slugify(name: &str) -> String {
+pub(crate) fn slugify(name: &str) -> String {
     let mut slug = String::new();
     for c in name.trim().chars() {
         if c.is_ascii_alphanumeric() {
@@ -277,48 +284,286 @@ fn slugify(name: &str) -> String {
     if slug.is_empty() { "kb".into() } else { slug }
 }
 
-/// ug project stats keyed by project name.
-fn ug_projects() -> Vec<Value> {
-    let Ok(mut cmd) = ug() else { return vec![] };
-    cmd.args(["list", "--json", "--quick"]);
-    run_json(cmd)
-        .ok()
-        .and_then(|v| v.get("projects").and_then(|p| p.as_array()).cloned())
-        .unwrap_or_default()
+/// A ug project name as the webview may send it. It only ever names a project
+/// `ug list` reports or one of Andai's folders, and reaches ug as the value of
+/// `-n`, so it must not look like a flag.
+pub(crate) fn valid_project(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && !name.starts_with(['-', '.'])
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
 }
 
-fn info(dir: &Path, meta: KbMeta, projects: &[Value], indexing: &HashSet<String>) -> KbInfo {
-    let project = projects
+/// A repo-relative path with only normal components: no `..`, no root, no
+/// backslash, no control characters, nothing that starts like a flag.
+pub(crate) fn safe_rel_path(p: &str) -> bool {
+    !p.is_empty()
+        && p.len() <= 1024
+        && !p.starts_with('-')
+        && !p.contains('\\')
+        && !p.chars().any(char::is_control)
+        && Path::new(p).components().all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// One project from `ug list --json` (ug 0.1.22), with what Andai uses.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct UgProject {
+    pub name: String,
+    pub repo_root: PathBuf,
+    data_dir: PathBuf,
+    nodes: u64,
+    edges: u64,
+    size_bytes: u64,
+    created_at: u64,
+    updated_at: u64,
+    /// Indexed files changed or deleted since (`isStale`), or never ingested (`hasDb` false).
+    stale: bool,
+    repo_missing: bool,
+    kb_kind: Option<String>,
+}
+
+/// The projects in `ug list --json`, skipping any whose name or folders
+/// aren't what a real project has.
+fn parse_projects(list: &Value) -> Vec<UgProject> {
+    let num = |p: &Value, k: &str| p.get(k).and_then(Value::as_u64).unwrap_or(0);
+    let path = |p: &Value, k: &str| p.get(k).and_then(Value::as_str).map(PathBuf::from).filter(|p| p.is_absolute());
+    let Some(projects) = list.get("projects").and_then(Value::as_array) else { return vec![] };
+    projects
         .iter()
-        .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(&format!("{PROJECT_PREFIX}{}", meta.slug)));
-    let num = |k: &str| project.and_then(|p| p.get(k)).and_then(|v| v.as_u64()).unwrap_or(0);
-    let status = if indexing.contains(&meta.slug) {
-        "indexing"
-    } else if meta.sources.is_empty() {
-        "empty"
-    } else if meta.last_error.is_some() {
-        "failed"
-    } else if meta.sources.iter().any(|s| s.status == "pending") {
-        "pending"
-    } else {
-        "ready"
-    };
-    KbInfo {
-        dir: dir.to_string_lossy().into(),
-        status: status.into(),
-        kind: meta.kind_override.unwrap_or_else(|| derive_kind(&meta.sources)),
-        nodes: num("nodes"),
-        edges: num("edges"),
-        size_bytes: num("sizeBytes"),
-        meta,
+        .filter_map(|p| {
+            let name = p.get("name")?.as_str()?.to_string();
+            if !valid_project(&name) {
+                return None;
+            }
+            Some(UgProject {
+                repo_root: path(p, "repoRoot")?,
+                data_dir: path(p, "dataDir")?,
+                nodes: num(p, "nodes"),
+                edges: num(p, "edges"),
+                size_bytes: num(p, "sizeBytes"),
+                created_at: num(p, "createdAt"),
+                updated_at: num(p, "updatedAt"),
+                stale: p.get("isStale").and_then(Value::as_bool).unwrap_or(false)
+                    || p.get("hasDb").and_then(Value::as_bool) == Some(false),
+                repo_missing: p.get("repoMissing").and_then(Value::as_bool).unwrap_or(false),
+                kb_kind: p.get("kbKind").and_then(Value::as_str).map(String::from),
+                name,
+            })
+        })
+        .collect()
+}
+
+/// Every ug project, or `None` without ug. With no projects at all, ug 0.1.22
+/// exits 1 and prints a sentence instead of JSON, which reads as none here.
+pub(crate) fn ug_projects() -> Option<Vec<UgProject>> {
+    let mut cmd = ug().ok()?;
+    let out = cmd.args(["list", "--json"]).output().ok()?;
+    Some(serde_json::from_slice::<Value>(&out.stdout).map(|v| parse_projects(&v)).unwrap_or_default())
+}
+
+/// The files ug indexed, repo-relative and sorted. `ug list` only counts
+/// them; the names are in the project's `project.json` (`files`, ug 0.1.22).
+fn indexed_files(p: &UgProject) -> Vec<String> {
+    let Ok(f) = fs::File::open(p.data_dir.join("project.json")) else { return vec![] };
+    let mut raw = Vec::new();
+    if f.take(64 * 1024 * 1024).read_to_end(&mut raw).is_err() {
+        return vec![];
+    }
+    let mut files: Vec<String> = serde_json::from_slice::<Value>(&raw)
+        .ok()
+        .and_then(|v| v.get("files").and_then(Value::as_array).cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|f| f.as_str().map(String::from))
+        .filter(|f| safe_rel_path(f))
+        .collect();
+    files.sort();
+    files
+}
+
+/// Display type from a file. Andai stores TXT and CSV as Markdown it writes
+/// (`ingest_file`), headed by the original name, which tells them apart.
+fn kind_of(path: &Path) -> &'static str {
+    const CODE: [&str; 9] = ["ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "java", "rs"];
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "pdf" => "PDF",
+        "txt" | "text" | "log" | "rst" => "TXT",
+        "csv" | "tsv" => "CSV",
+        e if CODE.contains(&e) => "CODE",
+        "md" | "markdown" | "mdx" => {
+            let mut head = [0u8; 256];
+            let n = fs::File::open(path).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
+            let first = String::from_utf8_lossy(&head[..n]).lines().next().unwrap_or("").to_ascii_lowercase();
+            let converted = |exts: &[&str]| first.starts_with("# ") && exts.iter().any(|e| first.ends_with(&format!(".{e}")));
+            if converted(&["txt", "text", "log", "rst"]) {
+                "TXT"
+            } else if converted(&["csv", "tsv"]) {
+                "CSV"
+            } else {
+                "MD"
+            }
+        }
+        _ => "TXT",
     }
 }
 
-pub(crate) fn load_info(app: &AppHandle, slug: &str, indexing: &Indexing) -> Result<KbInfo, String> {
-    let dir = kb_dir(app, slug)?;
-    let meta = read_meta(&dir)?;
-    let busy = indexing.0.lock().unwrap().clone();
-    Ok(info(&dir, meta, &ug_projects(), &busy))
+fn mtime(meta: &fs::Metadata) -> u64 {
+    meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn source_at(root: &Path, file: &str, status: &str) -> Source {
+    let path = root.join(file);
+    let meta = fs::metadata(&path).ok();
+    let bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+    let kind = kind_of(&path);
+    Source {
+        file: file.into(),
+        kind: kind.into(),
+        bytes,
+        approx_tokens: if kind == "PDF" { None } else { Some(bytes / 4) },
+        added_at: meta.as_ref().map(mtime).unwrap_or(0),
+        status: status.into(),
+    }
+}
+
+/// Andai's copies in `docs/`: indexed when ug lists the file and it hasn't
+/// changed since the last index, else pending (failed after a failed run).
+fn managed_sources(docs: &Path, indexed: &HashSet<String>, indexed_at: Option<u64>, failed: bool) -> Vec<Source> {
+    let mut names: Vec<String> = fs::read_dir(docs)
+        .map(|d| {
+            d.flatten()
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .filter_map(|e| e.file_name().to_str().map(String::from))
+                .filter(|n| !n.starts_with('.'))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+        .iter()
+        .map(|n| {
+            let mut s = source_at(docs, n, "pending");
+            if indexed.contains(n) && indexed_at.is_some_and(|at| s.added_at <= at) {
+                s.status = "indexed".into();
+            } else if failed {
+                s.status = "failed".into();
+            }
+            s
+        })
+        .collect()
+}
+
+fn kb_status(engine: bool, indexing: bool, sources: usize, failed: bool, pending: bool) -> &'static str {
+    if !engine {
+        "offline"
+    } else if indexing {
+        "indexing"
+    } else if sources == 0 {
+        "empty"
+    } else if failed {
+        "failed"
+    } else if pending {
+        "pending"
+    } else {
+        "ready"
+    }
+}
+
+fn kind_from_ug(kind: Option<&str>) -> Option<KbKind> {
+    match kind? {
+        "docs" | "document" | "documents" => Some(KbKind::Document),
+        "code" => Some(KbKind::Code),
+        "mixed" => Some(KbKind::Mixed),
+        _ => None,
+    }
+}
+
+/// `andai-<slug>` → the folder Andai keeps its files in, if it has one.
+fn managed_docs(app: &AppHandle, project: &str) -> Result<Option<PathBuf>, String> {
+    match project.strip_prefix(PROJECT_PREFIX).filter(|s| valid_slug(s)) {
+        Some(slug) => Ok(Some(kb_dir(app, slug)?.join("docs")).filter(|d| d.is_dir())),
+        None => Ok(None),
+    }
+}
+
+/// Everything the UI shows about one knowledge base. `docs` is Andai's folder
+/// for it, `p` ug's project (none before the first index or without ug).
+fn build_info(project: &str, docs: Option<&Path>, p: Option<&UgProject>, engine: bool, state: &Indexing) -> KbInfo {
+    let indexing = state.busy.lock().unwrap().contains(project);
+    let last_error = state.errors.lock().unwrap().get(project).cloned();
+    let files = p.map(indexed_files).unwrap_or_default();
+    let indexed_at = p.filter(|p| p.nodes > 0).map(|p| p.updated_at);
+    let (mut sources, root) = match docs {
+        Some(docs) => {
+            let set: HashSet<String> = files.into_iter().collect();
+            (managed_sources(docs, &set, indexed_at, last_error.is_some()), docs.to_path_buf())
+        }
+        None => {
+            let root = p.map(|p| p.repo_root.clone()).unwrap_or_default();
+            (files.iter().map(|f| source_at(&root, f, "indexed")).collect(), root)
+        }
+    };
+    let source_count = sources.len();
+    let pending = sources.iter().any(|s| s.status != "indexed") || (docs.is_none() && p.is_some_and(|p| p.stale));
+    let last_error = last_error.or_else(|| {
+        p.filter(|p| p.repo_missing).map(|p| format!("The indexed folder {} is gone.", p.repo_root.display()))
+    });
+    let status = kb_status(engine, indexing, source_count, last_error.is_some(), pending);
+    let kind = match docs {
+        Some(_) => derive_kind(&sources),
+        None => kind_from_ug(p.and_then(|p| p.kb_kind.as_deref())).unwrap_or_else(|| derive_kind(&sources)),
+    };
+    sources.truncate(MAX_LISTED_SOURCES);
+    let folder_created = docs.and_then(|d| fs::metadata(d).ok()).map(|m| {
+        m.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or_else(|| mtime(&m))
+    });
+    KbInfo {
+        slug: project.into(),
+        name: project.strip_prefix(PROJECT_PREFIX).unwrap_or(project).into(),
+        managed: docs.is_some(),
+        root: root.to_string_lossy().into(),
+        created_at: p.map(|p| p.created_at).filter(|t| *t > 0).or(folder_created).unwrap_or(0),
+        last_indexed_at: indexed_at,
+        last_error,
+        sources,
+        source_count,
+        status: status.into(),
+        kind,
+        nodes: p.map(|p| p.nodes).unwrap_or(0),
+        edges: p.map(|p| p.edges).unwrap_or(0),
+        size_bytes: p.map(|p| p.size_bytes).unwrap_or(0),
+    }
+}
+
+/// A knowledge base the webview named: one of Andai's folders, or a project
+/// ug lists. Its root comes from app data or ug's registry, never the webview.
+pub(crate) struct Kb {
+    pub project: String,
+    pub root: PathBuf,
+    pub managed: bool,
+}
+
+pub(crate) fn resolve(app: &AppHandle, project: &str) -> Result<Kb, String> {
+    if !valid_project(project) {
+        return Err(format!("invalid knowledge base id: {project}"));
+    }
+    if let Some(docs) = managed_docs(app, project)? {
+        return Ok(Kb { project: project.into(), root: docs, managed: true });
+    }
+    let p = ug_projects()
+        .ok_or(UG_MISSING)?
+        .into_iter()
+        .find(|p| p.name == project)
+        .ok_or_else(|| format!("There's no knowledge base named “{project}”."))?;
+    Ok(Kb { project: p.name, root: p.repo_root, managed: false })
+}
+
+pub(crate) fn load_info(app: &AppHandle, project: &str, state: &Indexing) -> Result<KbInfo, String> {
+    let kb = resolve(app, project)?;
+    let projects = ug_projects();
+    let p = projects.as_ref().and_then(|ps| ps.iter().find(|p| p.name == kb.project));
+    Ok(build_info(&kb.project, kb.managed.then_some(kb.root.as_path()), p, projects.is_some(), state))
 }
 
 /// A source is addressed by its bare file name inside `docs/`.
@@ -347,7 +592,6 @@ fn search_limits(k: u32, max_chars: u32) -> (u32, u32) {
 
 /// Copy one file into `docs/`, converting formats ug can't parse into Markdown.
 pub(crate) fn ingest_file(docs: &Path, src: &Path) -> Result<Source, String> {
-    let original = src.to_string_lossy().to_string();
     let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("file").to_string();
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     let file_name = src.file_name().and_then(|s| s.to_str()).unwrap_or("file").to_string();
@@ -389,7 +633,6 @@ pub(crate) fn ingest_file(docs: &Path, src: &Path) -> Result<Source, String> {
     let bytes = fs::metadata(&target).map(|m| m.len()).unwrap_or(0);
     Ok(Source {
         file: target.file_name().unwrap().to_string_lossy().into(),
-        original,
         kind: kind.into(),
         bytes,
         approx_tokens: if kind == "PDF" { None } else { Some(bytes / 4) },
@@ -407,7 +650,13 @@ pub fn ug_status() -> UgStatus {
         let out = Command::new(p).arg("-v").output().ok()?;
         Some(strip_ansi(&String::from_utf8_lossy(&out.stdout)).trim().to_string())
     });
-    UgStatus { found: path.is_some(), path: path.map(|p| p.to_string_lossy().into()), version }
+    UgStatus {
+        found: path.is_some(),
+        path: path.map(|p| p.to_string_lossy().into()),
+        version,
+        can_install: crate::ug_install::asset_name().is_some(),
+        install_command: UG_INSTALL_COMMAND,
+    }
 }
 
 /// Opens UltraGraph's site in the default browser. It takes no argument, so
@@ -440,75 +689,87 @@ pub(crate) fn open_in_system(target: &std::ffi::OsStr) -> Result<(), String> {
     }
 }
 
+/// Every knowledge base: each ug project, then Andai's folders ug has no
+/// project for (never indexed, or the graph was removed). Without ug, only
+/// Andai's folders, all `offline`.
 #[tauri::command]
 pub async fn kb_list(app: AppHandle, indexing: State<'_, Indexing>) -> Result<Vec<KbInfo>, String> {
     let root = kb_root(&app)?;
-    let busy = indexing.0.lock().unwrap().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let projects = ug_projects();
-        let mut out: Vec<KbInfo> = fs::read_dir(&root)
-            .map_err(|e| e.to_string())?
-            .flatten()
-            .filter_map(|entry| {
-                let dir = entry.path();
-                read_meta(&dir).ok().map(|meta| info(&dir, meta, &projects, &busy))
-            })
-            .collect();
-        out.sort_by_key(|k| k.meta.created_at);
-        Ok(out)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let projects = tauri::async_runtime::spawn_blocking(ug_projects).await.map_err(|e| e.to_string())?;
+    let engine = projects.is_some();
+    let projects = projects.unwrap_or_default();
+    let mut out: Vec<KbInfo> = projects
+        .iter()
+        .map(|p| Ok(build_info(&p.name, managed_docs(&app, &p.name)?.as_deref(), Some(p), engine, &indexing)))
+        .collect::<Result<_, String>>()?;
+    for entry in fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
+        let Some(slug) = entry.file_name().to_str().map(String::from).filter(|s| valid_slug(s)) else { continue };
+        let project = format!("{PROJECT_PREFIX}{slug}");
+        let docs = entry.path().join("docs");
+        if docs.is_dir() && !projects.iter().any(|p| p.name == project) {
+            out.push(build_info(&project, Some(&docs), None, engine, &indexing));
+        }
+    }
+    out.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.slug.cmp(&b.slug)));
+    Ok(out)
 }
 
 #[tauri::command]
 pub fn kb_create(app: AppHandle, name: String, indexing: State<'_, Indexing>) -> Result<KbInfo, String> {
-    create_kb(&app, &name, &indexing)
-}
-
-/// A new, empty knowledge base named `name`, under a slug no other KB uses.
-pub(crate) fn create_kb(app: &AppHandle, name: &str, indexing: &Indexing) -> Result<KbInfo, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("Give the knowledge base a name.".into());
     }
     let base = slugify(name);
+    let taken: HashSet<String> = ug_projects().unwrap_or_default().into_iter().map(|p| p.name).collect();
     let mut slug = base.clone();
     let mut n = 2;
-    while kb_dir(app, &slug)?.exists() {
+    while kb_dir(&app, &slug)?.exists() || taken.contains(&format!("{PROJECT_PREFIX}{slug}")) {
         slug = format!("{base}-{n}");
         n += 1;
     }
-    let dir = kb_dir(app, &slug)?;
-    create_private_dir(&dir.join("docs")).map_err(|e| e.to_string())?;
-    let meta = KbMeta {
-        slug: slug.clone(),
-        name: name.into(),
-        created_at: now(),
-        sources: vec![],
-        last_indexed_at: None,
-        last_error: None,
-        kind_override: None,
-    };
-    write_meta(&dir, &meta)?;
-    load_info(app, &slug, indexing)
+    create_kb(&app, &slug, &indexing)
+}
+
+/// A new, empty knowledge base `andai-<slug>`. With ug, it's registered as a
+/// project right away (an empty `ug gen` takes a moment), so ug lists it too.
+pub(crate) fn create_kb(app: &AppHandle, slug: &str, indexing: &Indexing) -> Result<KbInfo, String> {
+    let docs = kb_dir(app, slug)?.join("docs");
+    create_private_dir(&docs).map_err(|e| e.to_string())?;
+    let project = format!("{PROJECT_PREFIX}{slug}");
+    if let Ok(mut cmd) = ug() {
+        let _ = cmd.arg("gen").arg(&docs).args(["-n", &project]).current_dir(&docs).stdout(Stdio::null()).output();
+    }
+    load_info(app, &project, indexing)
 }
 
 /// Ingests each path the user granted (see grants.rs) into `docs/`; returns
 /// one actionable message per file that was skipped.
-fn add_sources(docs: &Path, meta: &mut KbMeta, paths: &[String], grants: &FileGrants) -> Vec<String> {
+fn add_sources(docs: &Path, paths: &[String], grants: &FileGrants) -> Vec<String> {
     let mut errors = vec![];
     for p in paths {
         if Path::new(p).is_dir() {
             errors.push(format!("{p}: folders aren't supported yet — drop the files inside it"));
             continue;
         }
-        match grants.take(Path::new(p)).and_then(|src| ingest_file(docs, &src)) {
-            Ok(source) => meta.sources.push(source),
-            Err(e) => errors.push(e),
+        if let Err(e) = grants.take(Path::new(p)).and_then(|src| ingest_file(docs, &src)) {
+            errors.push(e);
         }
     }
     errors
+}
+
+/// Only Andai's own knowledge bases take files: another project indexes the
+/// user's folder, which Andai never writes to.
+fn managed(app: &AppHandle, project: &str) -> Result<Kb, String> {
+    let kb = resolve(app, project)?;
+    if !kb.managed {
+        return Err(format!(
+            "“{project}” indexes {} with ug; Andai doesn't change its files. Create a knowledge base in Andai to add files.",
+            kb.root.display()
+        ));
+    }
+    Ok(kb)
 }
 
 /// Copies files in; returns the updated KB plus per-file errors. Call `kb_index` after.
@@ -522,86 +783,81 @@ pub fn kb_add_files(
     indexing: State<'_, Indexing>,
     grants: State<'_, FileGrants>,
 ) -> Result<(KbInfo, Vec<String>), String> {
-    let dir = kb_dir(&app, &slug)?;
-    let docs = dir.join("docs");
-    create_private_dir(&docs).map_err(|e| e.to_string())?;
-    let mut meta = read_meta(&dir)?;
-    let errors = add_sources(&docs, &mut meta, &paths, &grants);
-    write_meta(&dir, &meta)?;
+    let kb = managed(&app, &slug)?;
+    let errors = add_sources(&kb.root, &paths, &grants);
     Ok((load_info(&app, &slug, &indexing)?, errors))
 }
 
 #[tauri::command]
-pub fn kb_remove_source(
-    app: AppHandle,
-    slug: String,
-    file: String,
-    indexing: State<'_, Indexing>,
-) -> Result<KbInfo, String> {
-    let dir = kb_dir(&app, &slug)?;
-    let mut meta = read_meta(&dir)?;
+pub fn kb_remove_source(app: AppHandle, slug: String, file: String, indexing: State<'_, Indexing>) -> Result<KbInfo, String> {
+    let kb = managed(&app, &slug)?;
     if !valid_source_name(&file) {
         return Err("invalid file name".into());
     }
-    let _ = fs::remove_file(dir.join("docs").join(&file));
-    meta.sources.retain(|s| s.file != file);
-    write_meta(&dir, &meta)?;
+    let _ = fs::remove_file(kb.root.join(&file));
     load_info(&app, &slug, &indexing)
 }
 
-/// Sets or clears (`None`) the user's override of the derived kind.
+/// Removes ug's graph and, for Andai's own, its copies of the files. Another
+/// project's folder is never touched: only ug's data for it goes.
 #[tauri::command]
-pub fn kb_set_kind(
-    app: AppHandle,
-    slug: String,
-    kind: Option<KbKind>,
-    indexing: State<'_, Indexing>,
-) -> Result<KbInfo, String> {
-    let dir = kb_dir(&app, &slug)?;
-    let mut meta = read_meta(&dir)?;
-    meta.kind_override = kind;
-    write_meta(&dir, &meta)?;
-    load_info(&app, &slug, &indexing)
-}
-
-#[tauri::command]
-pub async fn kb_delete(app: AppHandle, slug: String) -> Result<(), String> {
-    let dir = kb_dir(&app, &slug)?;
+pub async fn kb_delete(app: AppHandle, slug: String, indexing: State<'_, Indexing>) -> Result<(), String> {
+    let kb = resolve(&app, &slug)?;
+    if indexing.busy.lock().unwrap().contains(&kb.project) {
+        return Err("Wait for indexing to finish before deleting this knowledge base.".into());
+    }
+    indexing.errors.lock().unwrap().remove(&kb.project);
     tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(mut cmd) = ug() {
-            let _ = cmd.args(["remove", &format!("{PROJECT_PREFIX}{slug}"), "-y"]).output();
+        match ug() {
+            Ok(mut cmd) => {
+                let out = cmd.args(["remove", &kb.project, "-y"]).output().map_err(|e| e.to_string())?;
+                if !out.status.success() && !kb.managed {
+                    let err = strip_ansi(&String::from_utf8_lossy(&out.stderr));
+                    return Err(err.trim().lines().last().unwrap_or("ug remove failed").to_string());
+                }
+            }
+            Err(e) if !kb.managed => return Err(e),
+            Err(_) => {}
         }
-        fs::remove_dir_all(&dir).map_err(|e| e.to_string())
+        if kb.managed {
+            // `root` is `kb/<slug>/docs`; the folder to remove is its parent.
+            let dir = kb.root.parent().ok_or("invalid knowledge base folder")?;
+            fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// Runs `ug gen --with-embed` over `docs/`, streaming its progress lines as
-/// `kb-progress` events. Resolves with the updated KB once the run finishes.
+/// Runs `ug gen --with-embed` over the knowledge base's folder, streaming its
+/// progress lines as `kb-progress` events. Resolves with the updated KB once
+/// the run finishes.
 #[tauri::command]
 pub async fn kb_index(app: AppHandle, slug: String, indexing: State<'_, Indexing>) -> Result<KbInfo, String> {
-    let dir = kb_dir(&app, &slug)?;
-    if !indexing.0.lock().unwrap().insert(slug.clone()) {
+    let kb = resolve(&app, &slug)?;
+    if !kb.root.is_dir() {
+        return Err(format!("The folder {} is gone, so there's nothing to index.", kb.root.display()));
+    }
+    if !indexing.busy.lock().unwrap().insert(kb.project.clone()) {
         return Err("This knowledge base is already indexing.".into());
     }
     let _ = app.emit("kb-progress", Progress { slug: &slug, line: "Starting ug gen…".into() });
 
-    let (app2, slug2, dir2) = (app.clone(), slug.clone(), dir.clone());
+    let (app2, slug2) = (app.clone(), slug.clone());
+    let (project, root, own) = (kb.project.clone(), kb.root.clone(), kb.managed);
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let docs = dir2.join("docs");
-        let project = format!("{PROJECT_PREFIX}{slug2}");
-        let empty = fs::read_dir(&docs).map(|mut d| d.next().is_none()).unwrap_or(true);
-        if empty {
-            // Nothing left to index: drop the ug project so search can't return stale hits.
+        let empty = fs::read_dir(&root).map(|mut d| d.next().is_none()).unwrap_or(true);
+        if own && empty {
+            // Nothing left to index: drop the graph so search can't return stale hits.
             let _ = ug()?.args(["remove", &project, "-y"]).output();
             return Ok(());
         }
         let mut child = ug()?
             .arg("gen")
-            .arg(&docs)
+            .arg(&root)
             .args(["-n", &project, "--with-embed"])
-            .current_dir(&docs)
+            .current_dir(&root)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -643,24 +899,11 @@ pub async fn kb_index(app: AppHandle, slug: String, indexing: State<'_, Indexing
     .map_err(|e| e.to_string())
     .and_then(|r| r);
 
-    indexing.0.lock().unwrap().remove(&slug);
-    let mut meta = read_meta(&dir)?;
+    indexing.busy.lock().unwrap().remove(&kb.project);
     match &result {
-        Ok(()) => {
-            meta.last_error = None;
-            meta.last_indexed_at = Some(now());
-            for s in &mut meta.sources {
-                s.status = "indexed".into();
-            }
-        }
-        Err(e) => {
-            meta.last_error = Some(e.clone());
-            for s in meta.sources.iter_mut().filter(|s| s.status == "pending") {
-                s.status = "failed".into();
-            }
-        }
-    }
-    write_meta(&dir, &meta)?;
+        Ok(()) => indexing.errors.lock().unwrap().remove(&kb.project),
+        Err(e) => indexing.errors.lock().unwrap().insert(kb.project.clone(), e.clone()),
+    };
     let _ = app.emit(
         "kb-progress",
         Progress { slug: &slug, line: result.clone().map(|_| "Index ready.".into()).unwrap_or_else(|e| e) },
@@ -670,27 +913,21 @@ pub async fn kb_index(app: AppHandle, slug: String, indexing: State<'_, Indexing
 
 /// GraphRAG search over one knowledge base: `ug search … --snippets --json`.
 #[tauri::command]
-pub async fn kb_search(
-    app: AppHandle,
-    slug: String,
-    query: String,
-    k: u32,
-    max_chars: u32,
-) -> Result<Value, String> {
-    let dir = kb_dir(&app, &slug)?;
+pub async fn kb_search(app: AppHandle, slug: String, query: String, k: u32, max_chars: u32) -> Result<Value, String> {
+    let kb = resolve(&app, &slug)?;
     let query = search_query(&query)?;
     let (k, max_chars) = search_limits(k, max_chars);
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = ug()?;
         cmd.arg("search")
             .arg(&query)
-            .args(["-n", &format!("{PROJECT_PREFIX}{slug}")])
+            .args(["-n", &kb.project])
             .args(["-k", &k.to_string(), "--max-chars", &max_chars.to_string()])
             .arg("--snippets")
             .arg("--repo-root")
-            .arg(dir.join("docs"))
+            .arg(&kb.root)
             .arg("--json")
-            .current_dir(dir.join("docs"));
+            .current_dir(&kb.root);
         run_json(cmd)
     })
     .await
@@ -708,8 +945,10 @@ const STRUCTURE_CHARS: u32 = 30_000;
 #[serde(rename_all = "camelCase")]
 pub struct SourceView {
     pub source: Source,
-    /// The knowledge base's copy as text, up to `MAX_VIEW_BYTES`. `None` for a
-    /// PDF: its text exists only in ug's index (the outline's page entries).
+    /// Where the file is on disk.
+    pub path: String,
+    /// The file as text, up to `MAX_VIEW_BYTES`. `None` for a PDF: its text
+    /// exists only in ug's index (the outline's page entries).
     pub text: Option<String>,
     pub text_truncated: bool,
     /// ug's `file_context` report: facts, outline and related files.
@@ -719,25 +958,32 @@ pub struct SourceView {
 }
 
 /// The source the knowledge base lists under exactly this name. The webview
-/// names a file; only one `kb.json` lists is ever read (AGENTS.md §9).
-fn listed_source<'a>(meta: &'a KbMeta, file: &str) -> Result<&'a Source, String> {
-    if !valid_source_name(file) {
+/// names a file; only one the knowledge base lists is ever read (AGENTS.md §9).
+fn listed_source<'a>(sources: &'a [Source], file: &str) -> Result<&'a Source, String> {
+    if !safe_rel_path(file) {
         return Err("invalid file name".into());
     }
-    meta.sources.iter().find(|s| s.file == file).ok_or_else(|| format!("“{file}” isn't in this knowledge base."))
+    sources.iter().find(|s| s.file == file).ok_or_else(|| format!("“{file}” isn't in this knowledge base."))
 }
 
-/// Up to `cap` bytes of a regular file as text. A symlink is refused, not
-/// followed: `docs/` only ever holds copies Andai wrote.
-fn read_text_capped(path: &Path, cap: usize) -> Result<(String, bool), String> {
-    let meta = fs::symlink_metadata(path).map_err(|e| format!("Can't read the stored copy: {e}"))?;
+/// Up to `cap` bytes of a regular file inside `root` as text. A symlink is
+/// refused, not followed, and so is anything that resolves outside `root`.
+fn read_text_capped(root: &Path, file: &str, cap: usize) -> Result<(String, bool), String> {
+    let path = root.join(file);
+    let meta = fs::symlink_metadata(&path).map_err(|e| format!("Can't read the file: {e}"))?;
     if !meta.is_file() {
-        return Err("The stored copy isn't a regular file.".into());
+        return Err("The file isn't a regular file.".into());
+    }
+    let (Ok(real), Ok(base)) = (path.canonicalize(), root.canonicalize()) else {
+        return Err("Can't resolve the file.".into());
+    };
+    if !real.starts_with(&base) {
+        return Err("The file is outside the knowledge base.".into());
     }
     let mut bytes = Vec::new();
-    fs::File::open(path)
+    fs::File::open(&real)
         .and_then(|f| f.take(cap as u64 + 1).read_to_end(&mut bytes))
-        .map_err(|e| format!("Can't read the stored copy: {e}"))?;
+        .map_err(|e| format!("Can't read the file: {e}"))?;
     let truncated = bytes.len() > cap;
     bytes.truncate(cap);
     let mut text = String::from_utf8_lossy(&bytes).into_owned();
@@ -752,7 +998,7 @@ fn read_text_capped(path: &Path, cap: usize) -> Result<(String, bool), String> {
 
 /// ug's arguments for one file's report. The file goes by its node id
 /// (`file:<name>`), so a name that starts with `-` can't parse as a flag.
-fn structure_args(slug: &str, file: &str) -> Vec<String> {
+fn structure_args(project: &str, file: &str) -> Vec<String> {
     vec![
         "file_context".into(),
         format!("file:{file}"),
@@ -761,32 +1007,31 @@ fn structure_args(slug: &str, file: &str) -> Vec<String> {
         "-k".into(),
         "1".into(),
         "-n".into(),
-        format!("{PROJECT_PREFIX}{slug}"),
+        project.into(),
         "--json".into(),
     ]
 }
 
-/// Everything the source dialog shows about one source: metadata from
-/// `kb.json`, the stored copy's text, and ug's outline and relations for it.
+/// Everything the source dialog shows about one source: what the knowledge
+/// base lists for it, its text, and ug's outline and relations for it.
 #[tauri::command]
-pub async fn kb_source(app: AppHandle, slug: String, file: String) -> Result<SourceView, String> {
-    let dir = kb_dir(&app, &slug)?;
-    let meta = read_meta(&dir)?;
-    let source = listed_source(&meta, &file)?.clone();
+pub async fn kb_source(app: AppHandle, slug: String, file: String, indexing: State<'_, Indexing>) -> Result<SourceView, String> {
+    let info = load_info(&app, &slug, &indexing)?;
+    let kb = resolve(&app, &slug)?;
+    let source = listed_source(&info.sources, &file)?.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let docs = dir.join("docs");
         let (text, text_truncated) = if source.kind == "PDF" {
             (None, false)
         } else {
-            let (t, cut) = read_text_capped(&docs.join(&source.file), MAX_VIEW_BYTES)?;
+            let (t, cut) = read_text_capped(&kb.root, &source.file, MAX_VIEW_BYTES)?;
             (Some(t), cut)
         };
         let report = if source.status != "indexed" {
             Err("Not indexed yet: its structure appears once ug has indexed it.".to_string())
         } else {
             ug_path().ok_or_else(|| UG_MISSING.to_string()).and_then(|bin| {
-                let args = structure_args(&slug, &source.file);
-                crate::tools::run(&bin, &args, &docs, std::time::Duration::from_secs(20), 1024 * 1024)
+                let args = structure_args(&kb.project, &source.file);
+                crate::tools::run(&bin, &args, &kb.root, std::time::Duration::from_secs(20), 1024 * 1024)
             })
         };
         let (structure, structure_error) = match report {
@@ -794,7 +1039,8 @@ pub async fn kb_source(app: AppHandle, slug: String, file: String) -> Result<Sou
             Ok(_) => (None, Some("ug's report on this file was too large to read.".into())),
             Err(e) => (None, Some(e)),
         };
-        Ok(SourceView { source, text, text_truncated, structure, structure_error })
+        let path = kb.root.join(&source.file).to_string_lossy().into_owned();
+        Ok(SourceView { source, path, text, text_truncated, structure, structure_error })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -805,18 +1051,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn meta(sources: Vec<Source>, last_error: Option<&str>) -> KbMeta {
-        KbMeta {
-            slug: "docs".into(),
-            name: "Docs".into(),
-            created_at: 1,
-            sources,
-            last_indexed_at: None,
-            last_error: last_error.map(Into::into),
-            kind_override: None,
-        }
-    }
-
     fn source(status: &str) -> Source {
         source_of("MD", status)
     }
@@ -824,7 +1058,6 @@ mod tests {
     fn source_of(kind: &str, status: &str) -> Source {
         Source {
             file: "a.md".into(),
-            original: "/x/a.md".into(),
             kind: kind.into(),
             bytes: 4,
             approx_tokens: Some(1),
@@ -852,33 +1085,39 @@ mod tests {
 
     #[test]
     fn the_source_dialog_reads_only_listed_sources() {
-        let m = meta(vec![source("indexed")], None);
-        assert_eq!(listed_source(&m, "a.md").unwrap().file, "a.md");
-        for bad in ["kb.json", "../kb.json", "b.md", "docs/a.md", ""] {
-            assert!(listed_source(&m, bad).is_err(), "{bad:?} should be refused");
+        let nested = Source { file: "src/fare.ts".into(), ..source("indexed") };
+        let listed = [source("indexed"), nested];
+        assert_eq!(listed_source(&listed, "a.md").unwrap().file, "a.md");
+        assert_eq!(listed_source(&listed, "src/fare.ts").unwrap().file, "src/fare.ts");
+        for bad in ["kb.json", "../a.md", "b.md", "/a.md", "src/../a.md", ""] {
+            assert!(listed_source(&listed, bad).is_err(), "{bad:?} should be refused");
         }
     }
 
     #[test]
     fn source_text_is_capped_and_never_follows_a_symlink() {
         let d = tempfile::tempdir().unwrap();
-        let file = d.path().join("a.md");
-        fs::write(&file, "héllo").unwrap();
-        assert_eq!(read_text_capped(&file, 64).unwrap(), ("héllo".into(), false));
+        fs::write(d.path().join("a.md"), "héllo").unwrap();
+        assert_eq!(read_text_capped(d.path(), "a.md", 64).unwrap(), ("héllo".into(), false));
         // A cut inside "é" (2 bytes) drops the half character instead of showing U+FFFD.
-        assert_eq!(read_text_capped(&file, 2).unwrap(), ("h".into(), true));
+        assert_eq!(read_text_capped(d.path(), "a.md", 2).unwrap(), ("h".into(), true));
         #[cfg(unix)]
         {
-            let link = d.path().join("link.md");
-            std::os::unix::fs::symlink(&file, &link).unwrap();
-            assert!(read_text_capped(&link, 64).is_err());
+            std::os::unix::fs::symlink(d.path().join("a.md"), d.path().join("link.md")).unwrap();
+            assert!(read_text_capped(d.path(), "link.md", 64).is_err());
+            // A folder linked from outside the root doesn't let a file escape it.
+            let outside = tempfile::tempdir().unwrap();
+            fs::write(outside.path().join("secret.md"), "key").unwrap();
+            std::os::unix::fs::symlink(outside.path(), d.path().join("out")).unwrap();
+            assert!(read_text_capped(d.path(), "out/secret.md", 64).is_err());
         }
-        assert!(read_text_capped(d.path(), 64).is_err(), "a directory isn't a source");
+        fs::create_dir(d.path().join("dir")).unwrap();
+        assert!(read_text_capped(d.path(), "dir", 64).is_err(), "a directory isn't a source");
     }
 
     #[test]
     fn structure_args_name_the_file_by_id_so_it_cannot_be_a_flag() {
-        let a = structure_args("kb", "--base-url.md");
+        let a = structure_args("andai-kb", "--base-url.md");
         assert_eq!(a[..2], ["file_context", "file:--base-url.md"]);
         assert!(a.ends_with(&["-n".into(), "andai-kb".into(), "--json".into()]));
     }
@@ -940,10 +1179,10 @@ mod tests {
         let grants = FileGrants::default();
         grants.grant([&mine]);
 
-        let mut m = meta(vec![], None);
         let paths = [mine, secret].map(|p| p.to_string_lossy().to_string());
-        let errors = add_sources(docs.path(), &mut m, &paths, &grants);
-        assert_eq!(m.sources.iter().map(|s| s.file.as_str()).collect::<Vec<_>>(), ["mine.md"]);
+        let errors = add_sources(docs.path(), &paths, &grants);
+        let added: Vec<_> = fs::read_dir(docs.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(added, ["mine.md"]);
         assert_eq!(errors.len(), 1);
         assert!(errors[0].contains("secret.md") && errors[0].contains("not added by you"), "{errors:?}");
         assert!(!docs.path().join("secret.md").exists());
@@ -1041,59 +1280,140 @@ mod tests {
     }
 
     #[test]
-    fn status_is_derived_from_sources_errors_and_indexing() {
-        let dir = Path::new("/tmp/kb/docs");
-        let idle = HashSet::new();
-        let busy: HashSet<String> = ["docs".to_string()].into();
-        let status = |m: KbMeta, i: &HashSet<String>| info(dir, m, &[], i).status;
-
-        assert_eq!(status(meta(vec![], None), &idle), "empty");
-        assert_eq!(status(meta(vec![source("pending")], None), &idle), "pending");
-        assert_eq!(status(meta(vec![source("indexed")], None), &idle), "ready");
-        assert_eq!(status(meta(vec![source("indexed")], Some("boom")), &idle), "failed");
-        assert_eq!(status(meta(vec![source("indexed")], Some("boom")), &busy), "indexing", "indexing wins");
+    fn status_says_what_blocks_the_knowledge_base_first() {
+        assert_eq!(kb_status(false, false, 3, false, false), "offline", "no ug: nothing works");
+        assert_eq!(kb_status(true, true, 3, true, true), "indexing", "indexing wins");
+        assert_eq!(kb_status(true, false, 0, false, false), "empty");
+        assert_eq!(kb_status(true, false, 3, true, true), "failed");
+        assert_eq!(kb_status(true, false, 3, false, true), "pending");
+        assert_eq!(kb_status(true, false, 3, false, false), "ready");
     }
 
     #[test]
-    fn kind_is_derived_from_sources_unless_overridden() {
-        let kind = |m: KbMeta| info(Path::new("/tmp"), m, &[], &HashSet::new()).kind;
-        assert_eq!(kind(meta(vec![], None)), KbKind::Document);
-        assert_eq!(kind(meta(vec![source("indexed"), source_of("PDF", "indexed")], None)), KbKind::Document);
-        assert_eq!(kind(meta(vec![source_of("CODE", "indexed")], None)), KbKind::Code);
-        assert_eq!(kind(meta(vec![source("indexed"), source_of("CODE", "indexed")], None)), KbKind::Mixed);
-        let mut m = meta(vec![source_of("CODE", "indexed")], None);
-        m.kind_override = Some(KbKind::Document);
-        assert_eq!(kind(m), KbKind::Document, "the user's choice wins");
+    fn kind_is_derived_from_sources_or_taken_from_ug() {
+        assert_eq!(derive_kind(&[]), KbKind::Document);
+        assert_eq!(derive_kind(&[source("indexed"), source_of("PDF", "indexed")]), KbKind::Document);
+        assert_eq!(derive_kind(&[source_of("CODE", "indexed")]), KbKind::Code);
+        assert_eq!(derive_kind(&[source("indexed"), source_of("CODE", "indexed")]), KbKind::Mixed);
+        assert_eq!(kind_from_ug(Some("docs")), Some(KbKind::Document));
+        assert_eq!(kind_from_ug(Some("code")), Some(KbKind::Code));
+        assert_eq!(kind_from_ug(Some("mixed")), Some(KbKind::Mixed));
+        assert_eq!(kind_from_ug(Some("weird")), None);
     }
 
     #[test]
-    fn kb_json_without_a_kind_override_still_loads() {
-        let raw = r#"{"slug":"a","name":"A","createdAt":1,"sources":[],"lastIndexedAt":null,"lastError":null}"#;
-        assert_eq!(serde_json::from_str::<KbMeta>(raw).unwrap().kind_override, None);
-        let bad = r#"{"slug":"a","name":"A","createdAt":1,"sources":[],"lastIndexedAt":null,"lastError":null,"kindOverride":"evil"}"#;
-        assert!(serde_json::from_str::<KbMeta>(bad).is_err());
+    fn project_names_and_paths_from_the_webview_are_held_to_safe_shapes() {
+        for ok in ["andai-docs", "tidewater-code", "my.repo_2"] {
+            assert!(valid_project(ok), "{ok:?}");
+        }
+        for bad in ["", "-n", "--base-url", ".hidden", "a/b", "a b", "..", "a\0b", &"x".repeat(129)] {
+            assert!(!valid_project(bad), "{bad:?} should be rejected");
+        }
+        for ok in ["a.md", "src/fare.ts", "docs/guide/intro.md"] {
+            assert!(safe_rel_path(ok), "{ok:?}");
+        }
+        for bad in ["", "/etc/passwd", "../a", "src/../../a", "-flag", "a\\b", "./a", "a\nb"] {
+            assert!(!safe_rel_path(bad), "{bad:?} should be rejected");
+        }
+    }
+
+    fn project(name: &str, root: &Path, data: &Path) -> Value {
+        json!({
+            "name": name, "repoRoot": root, "dataDir": data, "nodes": 9, "edges": 8, "sizeBytes": 1234,
+            "createdAt": 100, "updatedAt": 4_000_000_000u64, "isStale": false, "hasDb": true,
+            "repoMissing": false, "kbKind": "code",
+        })
     }
 
     #[test]
-    fn graph_stats_come_from_the_matching_ug_project() {
-        let projects = vec![
-            json!({ "name": "andai-other", "nodes": 99, "edges": 99, "sizeBytes": 99 }),
-            json!({ "name": "andai-docs", "nodes": 9, "edges": 8, "sizeBytes": 1234 }),
-        ];
-        let kb = info(Path::new("/tmp"), meta(vec![], None), &projects, &HashSet::new());
-        assert_eq!((kb.nodes, kb.edges, kb.size_bytes), (9, 8, 1234));
-        let none = info(Path::new("/tmp"), meta(vec![], None), &[], &HashSet::new());
-        assert_eq!((none.nodes, none.edges), (0, 0));
+    fn reads_ug_list_and_skips_projects_that_dont_look_real() {
+        let list = json!({ "projects": [
+            project("andai-docs", Path::new("/r"), Path::new("/d")),
+            project("--evil", Path::new("/r"), Path::new("/d")),
+            { "name": "relative", "repoRoot": "r", "dataDir": "/d" },
+            { "name": "no-root", "dataDir": "/d" },
+        ]});
+        let ps = parse_projects(&list);
+        assert_eq!(ps.len(), 1);
+        assert_eq!((ps[0].name.as_str(), ps[0].nodes, ps[0].updated_at), ("andai-docs", 9, 4_000_000_000));
+        assert_eq!(ps[0].kb_kind.as_deref(), Some("code"));
+        // ug 0.1.22 prints a sentence, not JSON, when there are no projects.
+        assert!(parse_projects(&json!({})).is_empty());
+        let mut never_ingested = project("p", Path::new("/r"), Path::new("/d"));
+        never_ingested["hasDb"] = json!(false);
+        assert!(parse_projects(&json!({ "projects": [never_ingested] }))[0].stale);
+    }
+
+    /// A ug project's data dir with `project.json` listing `files`.
+    fn ug_project(name: &str, root: &Path, files: &[&str]) -> (tempfile::TempDir, UgProject) {
+        let data = tempfile::tempdir().unwrap();
+        fs::write(data.path().join("project.json"), json!({ "name": name, "files": files }).to_string()).unwrap();
+        let p = parse_projects(&json!({ "projects": [project(name, root, data.path())] })).remove(0);
+        (data, p)
     }
 
     #[test]
-    fn kb_info_serializes_flat_camel_case_for_the_frontend() {
-        let kb = info(Path::new("/tmp"), meta(vec![source("indexed")], None), &[], &HashSet::new());
+    fn andai_knowledge_bases_list_their_copies_against_what_ug_indexed() {
+        let docs = tempfile::tempdir().unwrap();
+        fs::write(docs.path().join("a.md"), "# A").unwrap();
+        fs::write(docs.path().join("b.md"), "# B").unwrap();
+        fs::write(docs.path().join("log.md"), "# log.txt\n\nline").unwrap();
+        fs::write(docs.path().join(".DS_Store"), "").unwrap();
+        let (_data, p) = ug_project("andai-docs", docs.path(), &["a.md", "log.md", "../escape.md"]);
+        let state = Indexing::default();
+
+        let kb = build_info("andai-docs", Some(docs.path()), Some(&p), true, &state);
+        assert_eq!((kb.name.as_str(), kb.managed, kb.nodes, kb.size_bytes), ("docs", true, 9, 1234));
+        let files: Vec<_> = kb.sources.iter().map(|s| (s.file.as_str(), s.kind.as_str(), s.status.as_str())).collect();
+        assert_eq!(files, [("a.md", "MD", "indexed"), ("b.md", "MD", "pending"), ("log.md", "TXT", "indexed")]);
+        assert_eq!((kb.status.as_str(), kb.kind), ("pending", KbKind::Document), "a new file waits for the next index");
+
+        state.errors.lock().unwrap().insert("andai-docs".into(), "ug gen failed: boom".into());
+        let failed = build_info("andai-docs", Some(docs.path()), Some(&p), true, &state);
+        assert_eq!((failed.status.as_str(), failed.sources[1].status.as_str()), ("failed", "failed"));
+        assert_eq!(failed.last_error.as_deref(), Some("ug gen failed: boom"));
+
+        state.busy.lock().unwrap().insert("andai-docs".into());
+        assert_eq!(build_info("andai-docs", Some(docs.path()), Some(&p), true, &state).status, "indexing");
+
+        // ug gone: the folder is still listed, every knowledge base offline.
+        let offline = build_info("andai-docs", Some(docs.path()), None, false, &Indexing::default());
+        assert_eq!((offline.status.as_str(), offline.sources.len(), offline.nodes), ("offline", 3, 0));
+    }
+
+    #[test]
+    fn other_ug_projects_list_the_files_ug_indexed_in_their_repo() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir(repo.path().join("src")).unwrap();
+        fs::write(repo.path().join("src/fare.ts"), "export const x = 1;").unwrap();
+        fs::write(repo.path().join("README.md"), "# R").unwrap();
+        let (_data, mut p) = ug_project("tidewater", repo.path(), &["src/fare.ts", "README.md"]);
+        let kb = build_info("tidewater", None, Some(&p), true, &Indexing::default());
+        assert_eq!((kb.name.as_str(), kb.managed, kb.status.as_str()), ("tidewater", false, "ready"));
+        assert_eq!(kb.root, repo.path().to_string_lossy());
+        let files: Vec<_> = kb.sources.iter().map(|s| (s.file.as_str(), s.kind.as_str(), s.bytes)).collect();
+        assert_eq!(files, [("README.md", "MD", 3), ("src/fare.ts", "CODE", 19)]);
+        assert_eq!(kb.kind, KbKind::Code, "ug's own kind");
+
+        p.stale = true;
+        assert_eq!(build_info("tidewater", None, Some(&p), true, &Indexing::default()).status, "pending");
+        p.repo_missing = true;
+        let gone = build_info("tidewater", None, Some(&p), true, &Indexing::default());
+        assert_eq!(gone.status, "failed");
+        assert!(gone.last_error.unwrap().contains("is gone"));
+    }
+
+    #[test]
+    fn kb_info_serializes_camel_case_for_the_frontend() {
+        let docs = tempfile::tempdir().unwrap();
+        fs::write(docs.path().join("a.md"), "# A").unwrap();
+        let kb = build_info("andai-a", Some(docs.path()), None, true, &Indexing::default());
         let v = serde_json::to_value(&kb).unwrap();
-        for key in ["slug", "name", "createdAt", "sources", "lastIndexedAt", "lastError", "kindOverride", "dir", "status", "kind", "nodes", "sizeBytes"] {
+        for key in ["slug", "name", "managed", "root", "createdAt", "sources", "sourceCount", "lastIndexedAt", "lastError", "status", "kind", "nodes", "sizeBytes"] {
             assert!(v.get(key).is_some(), "missing {key} in {v}");
         }
         assert!(v["sources"][0].get("approxTokens").is_some());
+        assert!(v["sources"][0].get("addedAt").is_some());
     }
 
     /// Real ug round trip: gen --with-embed → search → remove.
@@ -1125,11 +1445,11 @@ mod tests {
             .arg("--repo-root")
             .arg(docs.path());
         let result = run_json(search);
-        let listed = ug_projects().iter().any(|p| p["name"] == project.as_str());
-        let slug = project.strip_prefix(PROJECT_PREFIX).unwrap();
+        let listed = ug_projects().unwrap_or_default().into_iter().find(|p| p.name == project);
+        let files = listed.as_ref().map(indexed_files).unwrap_or_default();
         let structure = crate::tools::run(
             &ug_path().unwrap(),
-            &structure_args(slug, "notes.md"),
+            &structure_args(&project, "notes.md"),
             docs.path(),
             std::time::Duration::from_secs(20),
             1024 * 1024,
@@ -1142,7 +1462,9 @@ mod tests {
         assert!(outline.contains("\"Isolation\"") && outline.contains("\"outline\""), "outline should list the headings: {outline}");
 
         let items = result.expect("search JSON")["items"].as_array().cloned().unwrap_or_default();
-        assert!(listed, "project should appear in `ug list --json`");
+        let listed = listed.expect("project should appear in `ug list --json`");
+        assert_eq!(listed.repo_root.canonicalize().unwrap(), docs.path().canonicalize().unwrap());
+        assert_eq!(files, ["notes.md"], "project.json lists the indexed files");
         assert!(!items.is_empty(), "search returned no items");
         let text = serde_json::to_string(&items).unwrap();
         assert!(text.contains("Cross-Origin-Embedder-Policy"), "snippet should carry the passage: {text}");

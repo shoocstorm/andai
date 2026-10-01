@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ug-install"
+description = "Enables the ug_install command without any pre-configured scope."
+commands.allow = ["ug_install"]
+
+[[permission]]
+identifier = "deny-ug-install"
+description = "Denies the ug_install command without any pre-configured scope."
+commands.deny = ["ug_install"]

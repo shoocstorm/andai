@@ -50,6 +50,19 @@ the product.
    downloads (no new CSP source); no credentials, no user data in the
    request beyond the search text; `llm/hub.ts` is the only caller and
    `security.test.ts` holds its one guarded `fetch`.
+   **Recorded decision (2026-09-30):** *Install UltraGraph* (shown when ug is
+   missing: a launch dialog, Knowledge, Settings, the top-bar badge) installs
+   ug from inside Andai. Rust (`ug_install.rs`, the only place that runs
+   `curl`) asks `api.github.com` for `shoocstorm/ug`'s latest release and
+   downloads the platform's archive from `github.com/shoocstorm/ug/releases/download/…`
+   (redirected to GitHub's asset CDN) with the system `/usr/bin/curl`:
+   `-q` (no `.curlrc`), HTTPS only incl. redirects, scrubbed env. The
+   webview passes no argument and makes no request (no CSP change); the
+   archive must match the release's size and sha256 or it is deleted; it
+   installs where `install.sh` does (`~/.local/share/ultragraph/.ug`, link in
+   `~/.local/bin`) and refuses when ug is already found. macOS and Linux
+   x64 only; Windows keeps the website button. `security.test.ts` holds the
+   URLs and flags.
 5. **User data is sacred.** Never delete, overwrite, or migrate user data
    (`~/Library/Application Support/dev.andai.agent/` or
    `%APPDATA%\dev.andai.agent\` on Windows, including its `logs/`,
@@ -100,7 +113,7 @@ Andai/
 │  ├─ kb/api.ts              typed wrappers over the Rust ug bridge + hit dedupe
 │  ├─ kb/source.ts          PURE: reads ug's file_context report (outline, facts, related files) for the source dialog
 │  ├─ kb/samples.ts          the bundled sample knowledge bases (Tidewater Ferries) and their suggested questions
-│  ├─ state/                 zustand stores: chat, kb, tools, persona, theme, layout, ui (persisted where noted)
+│  ├─ state/                 zustand stores: chat, kb, ugInstall, tools, persona, theme, layout, ui (persisted where noted)
 │  ├─ screens/, shell/, components/
 │  ├─ theme/tokens.css       ALL colors, both themes
 │  ├─ lib/platform.ts        macOS vs Windows in the UI: shortcut labels (⌘ / Ctrl), traffic-light room
@@ -114,7 +127,8 @@ Andai/
 │  ├─ src/activity.rs        activity log (off by default): JSONL per UTC day in app data logs/, 7 days, 20 MB/day; read back by the Logs screen
 │  ├─ src/ui_server.rs       loopback server for the release UI (http://localhost:14230)
 │  ├─ src/grants.rs          which files the webview may ingest (drop / Rust dialog only)
-│  ├─ src/ug.rs              knowledge bases → `ug gen/search/list/remove` CLI; KB kind
+│  ├─ src/ug.rs              knowledge bases = ug projects (`ug list`), Andai's own `andai-<slug>` over kb/<slug>/docs; `ug gen/search/remove`
+│  ├─ src/ug_install.rs      Install UltraGraph: GitHub release → system curl → sha256 → ~/.local/bin/ug (§1.4)
 │  ├─ src/tools.rs           agent tool calls: closed enum → validated argv → ug (scrubbed env, 20 s, 256 KB)
 │  ├─ src/samples.rs         sample knowledge bases: closed list → bundled files (tests/fixtures/eval/) copied in, then indexed
 │  ├─ src/mlx.rs             the one MLX thread (Apple Silicon): owns every model on MLX, runs jobs from commands
@@ -651,6 +665,22 @@ level defaults to *Ask*.
   negated, so lower ranks higher (items come sorted by it ascending; graph
   neighbours last). Its absolute value means little, so the UI shows it
   relative to the best match in the same list (`kb/match.ts`).
+- **A knowledge base is a ug project** (2026-10-01, a product decision: no
+  `kb.json`). `ug list --json` (ug 0.1.22) reports `name`, `repoRoot`,
+  `dataDir`, node/edge counts, `sizeBytes`, `createdAt`/`updatedAt`
+  (seconds), `isStale`, `hasDb`, `repoMissing` and `kbKind`
+  (`docs`/`code`/`mixed`; an empty project says `code`); the full list (with
+  the staleness scan) took a few ms. It doesn't name the files: those are
+  `files` in `<dataDir>/project.json`. With **no projects at all it exits 1
+  and prints a sentence, not JSON**, read as an empty list. `ug gen` on an
+  empty folder registers a 0-file project, so Andai's new KBs show in ug at
+  once. `updatedAt` lands after the copied files' mtimes (measured), which is
+  how a copy reads as indexed (in `project.json`, mtime ≤ `updatedAt`) or
+  pending. `UG_HOME` relocates every project (the embedder cache stays in
+  `~/Library/Caches/ug/models`), so the e2e, eval and bench runners set it
+  and never see the user's projects. `ug uninstall` deletes **all**
+  projects; Andai's copies in app data survive and list as never indexed.
+  ug 0.1.22 overflowed its stack indexing this repo's `src/` (exit 134).
 - **ug's lookups fail with the useful message in stdout JSON** (`"error":
   "No symbol named …, try find_symbols"`) and exit 1 with a bare `error:` on
   stderr. `tools::run` surfaces the JSON message.
@@ -663,7 +693,8 @@ level defaults to *Ask*.
 |---|---|---|
 | Chat, streaming, stop, think folding | Real | `llm/engine.ts`, `agent/turn.ts` |
 | Reasoning chips, Execution Trace, stats | Real (actual step timings, tokens, tok/s; every decision and tool call) | `agent/turn.ts`, `agent/loop.ts`, `screens/AgentTrace.tsx` |
-| Knowledge bases: create, ingest, index, search, delete; view a source's details, content and structure | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts`, `screens/SourceDialog.tsx` |
+| Knowledge bases: every ug project (`ug list`, no metadata file), create, ingest, index, search, delete; view a source's details, content and structure; read-only for projects Andai didn't create; listed `offline` without ug | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts`, `screens/SourceDialog.tsx` |
+| Install ug from inside Andai (launch prompt, Knowledge, Settings; release lookup, download progress, sha256, install; macOS/Linux, website on Windows) | Real | `src-tauri/src/ug_install.rs`, `state/ugInstall.ts`, `screens/UgSetup.tsx` |
 | Sample knowledge bases (Tidewater Ferries: documents, code, both), suggested questions | Real (bundled files, indexed by the user's ug) | `src-tauri/src/samples.rs`, `kb/samples.ts`, `screens/Knowledge.tsx` |
 | Laya decision model (download, verify, load, decide, stop question, relevance check, search scope, claim check; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
 | Agent tool loop: decisions, 8 ug tools, per-tool policy, approvals, decision model, Tools screen | Real | `agent/loop.ts`, `agent/tools/`, `llm/decide.ts`, `state/tools.ts`, `screens/Tools.tsx`, `src-tauri/src/tools.rs` |
@@ -845,7 +876,9 @@ Rules:
   once and watch it go red.
 - The e2e harness **must not** touch user data: `ANDAI_DATA_DIR` isolates KB
   files, and the harness snapshots and restores chat and KB selection. The ug
-  project it creates (`andai-e2e-docs`) is removed before it reports `OK`.
+  project it creates (`andai-e2e-docs`) is removed before it reports `OK`,
+  and it lives in the run's own `UG_HOME`, so the user's ug projects (which
+  Andai lists) never appear in a run. The eval and bench runners do the same.
 - **Performance is a tested behavior.** A change that makes a baselined
   metric worse than its tolerance fails `bun run perf` or the e2e run. If the
   cost is intended, re-record the baseline with `--update` in the same change
@@ -1018,7 +1051,7 @@ When you change one, change its test and record the reason here.
 
 | Asset | Where |
 |---|---|
-| The user's documents | KB copies in app data, ug graphs in `~/.ug/andai-*` |
+| The user's documents | KB copies in app data, ug graphs in `~/.ug/` (Andai's are `andai-*`), and the folders the user's own ug projects index |
 | Chats, persona, settings | webview storage (localStorage) |
 | Anything else readable by the user | the filesystem the Rust side can reach |
 
@@ -1043,7 +1076,8 @@ access (rely on FileVault). Encryption at rest is planned (below).
 3. **Egress is deny-by-default.** CSP `connect-src` is `self`, IPC and Hugging
    Face. Nothing in `src/` besides `llm/models.ts` names a remote URL, only
    `llm/laya.ts` calls `fetch` (a Laya or MLX checkpoint, from pinned commit
-   URLs), and the Rust side has no HTTP client.
+   URLs), and the Rust side has no HTTP client; its one request path is the
+   user-started ug install, through the system curl (§1.4).
 4. **Users choose files, never the webview.** `kb_add_files` only accepts a
    path the user granted by drag-and-drop or the dialog opened by Rust
    (`grants.rs`). Each grant is one file, canonicalized and consumed once.
@@ -1068,6 +1102,7 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Windows installer makes no network request (WebView2 not bootstrapped) | `tauri.conf.json` | `security.test.ts` |
 | Activity log: a closed set of event kinds and levels, turn ids `[A-Za-z0-9_-]{1,64}`, a summary of one line ≤ 1 KB, ≤ 64 events a call, ≤ 256 KB an event, 20 MB a day; file names and times from Rust's clock; 0700/0600; only `agent-YYYY-MM-DD.jsonl` files are read, pruned (7 days) or deleted; `activity_read` takes only such a name (a regular file, not a link; the newest 5,000 lines), and the Logs screen shows it as plain text; `activity_open` takes no argument. Off by default (a product decision, 2026-09-30); the webview decides when to write, so the caps are what bound it | `activity.rs` | Rust unit tests |
 | `dev_log` / `dev_exit` need `ANDAI_SMOKE=1` | `lib.rs` | `security.test.ts` |
+| `ug_install` takes no argument: fixed GitHub URLs (asset URL must be `…/releases/download/<tag>/<exact asset name>`), system curl with `-q`, HTTPS-only redirects and a scrubbed env; release JSON ≤ 2 MB, archive ≤ 512 MB, size + sha256 (the release's `digest`, else its `.sha256` file) checked before unpacking; unpacked beside the old folder first; never replaces an existing ug or a non-link `~/.local/bin/ug`; one install at a time | `ug_install.rs` | Rust unit tests (asset picking, checksum, install, bad archive); `cargo test installs_the_latest_release_for_real -- --ignored` (network); `security.test.ts` |
 | `open_ug_website` takes no argument: it opens only `ug::UG_WEBSITE` (the ug install page, shown when ug is missing) in the system browser; the app makes no request and `src/` names no URL | `ug.rs` | `tauri-acl.test.ts`, `security.test.ts` |
 | Webview holds no fs/shell/http/opener/dialog permission | `capabilities/default.json` | `security.test.ts` |
 | Model downloads pinned to a commit and verified (size + sha256) before load; mismatch → removed | `llm/models.ts`, `llm/integrity.ts`, `engine.loadModel` | `integrity.test.ts` (FIPS vectors, tamper), `engine.test.ts` (gate), `models.test.ts` (pinning); e2e logs the check |
@@ -1075,13 +1110,13 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Laya decisions: state ≤ 64 KB, question ≤ 2 KB, 2–16 options with `[a-z0-9_]` ids, text ≤ 1 KB; mask tokens stripped from all input | `laya/mod.rs` `validate`, `laya/prompt.rs` | Rust unit tests |
 | Laya relevance and claim checks: a fixed statement in Rust (`RELEVANT`, `SUPPORTS`), never text from the webview; 1–24 passages or claims, request ≤ 4 KB, statement ≤ 2 KB, passage ≤ 16 KB, source ≤ 512 bytes | `laya/mod.rs` `validate_passages`, `validate_claims` | Rust unit tests |
 | MLX chat models: closed catalog in Rust (commit, sizes, sha256), the same verified store as Laya; generation bounded (1–512 messages ≤ 512 KB, no NUL, max_tokens ≤ 8192, sampling ranges, grammar ≤ 8 KB, context 512–32768); roles are system/user/assistant only | `llm/catalog.rs`, `laya/store.rs`, `llm/mod.rs` `validate` | Rust unit tests; `test:llm` |
-| Source dialog (`kb_source`): the file must be one `kb.json` lists (bare name, exact match), read from the KB's own `docs/` copy, never through a symlink, at most 512 KB; its outline comes from `ug file_context file:<name>` (a node id, so a name can't parse as a flag) under `tools::run` (scrubbed env, 20 s, 1 MB cap). Text is shown through `<Markdown>` or as plain text | `ug.rs` `kb_source`, `screens/SourceDialog.tsx` | Rust unit tests; `test:ug` checks the outline against real ug; `SourceDialog.test.tsx` |
+| Source dialog (`kb_source`): the file must be one the KB lists (Andai's `docs/` copies, or the repo-relative paths in the ug project's `project.json`; normal components only, exact match), read from the KB's root (app data, or the `repoRoot` ug recorded), never through a symlink nor resolving outside the root, at most 512 KB; its outline comes from `ug file_context file:<name>` (a node id, so a name can't parse as a flag) under `tools::run` (scrubbed env, 20 s, 1 MB cap). Text is shown through `<Markdown>` or as plain text | `ug.rs` `kb_source`, `screens/SourceDialog.tsx` | Rust unit tests; `test:ug` checks the outline against real ug; `SourceDialog.test.tsx` |
 | Sample knowledge bases: a closed list of ids; files only from the app's resource folder, copied like a user's | `samples.rs` | Rust unit tests |
 | Models added from Hugging Face: only public, ungated repos; pinned to the commit seen when picked; GGUF by its LFS sha256 (the webview's integrity gate); MLX through Rust: repo/commit syntax, a closed set of file names (config, tokenizer, template, safetensors; no pickle, no code), sizes and caps (32 GB a file, 64 GB a model, 16 MB inline, 32 models), config and template checked before any download, manifest written and re-validated by Rust, inline files re-hashed on every load. Search results and model data are shown as text, never Markdown or HTML; no model card is rendered | `llm/hub.ts`, `llm/custom.ts`, `src-tauri/src/llm/custom.rs`, `config.rs` | `hub.test.ts`, `custom.test.ts`, Rust unit tests, `security.test.ts`; e2e (search, inspect, add, remove) |
 | Only `llm/laya.ts` may `fetch`, and only `pinnedFileUrl(...)` (pinned HF commits); tokenizers built without its `http` feature | `llm/laya.ts`, `llm/models.ts`, `Cargo.toml` | `security.test.ts`, `models.test.ts` |
 | Pre-pinning model copies removed only after the user confirms | `engine.removeLegacyCopies`, Settings | `Settings.test.tsx` |
 | Retrieved passages fenced as untrusted data; a passage can't close its fence | `agent/prompt.ts` | `prompt.test.ts` |
-| Agent tools: closed enum, no unknown fields, flag-like and KB-escaping args rejected (incl. symlinks), scrubbed env, 20 s kill, 256 KB cap, one KB's project only | `tools.rs` | Rust unit tests; `test:ug` runs every tool against real ug; e2e |
+| Agent tools: closed enum, no unknown fields, flag-like and KB-escaping args rejected (incl. symlinks), scrubbed env, 20 s kill, 256 KB cap, one KB's project only. A KB id is a project name (`valid_project`) that resolves to Andai's folder or a project `ug list` reports; its root comes from app data or ug's registry, never the webview | `tools.rs` | Rust unit tests; `test:ug` runs every tool against real ug; e2e |
 | Tools registered in code only; read-only by default Auto, other risks default Ask; Off is never offered; Ask waits for approval; every call traced | `agent/tools/registry.ts`, `agent/loop.ts`, `state/tools.ts` | `tools.test.ts`, `turn.test.ts` |
 | No known vulnerabilities in shipped dependencies | `bun run audit`, `ci.yml` (audit job), `release.yml` (verify) | CI |
 

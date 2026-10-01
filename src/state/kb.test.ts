@@ -19,7 +19,9 @@ const mk = (over: Partial<KbInfo> = {}): KbInfo => ({
   lastError: null,
   kindOverride: null,
   kind: 'document',
-  dir: '/tmp/docs',
+  managed: true,
+  root: '/tmp/docs',
+  sourceCount: 0,
   status: 'empty',
   nodes: 0,
   edges: 0,
@@ -35,7 +37,7 @@ vi.mock('../kb/api', async (orig) => {
   return {
     ...real,
     kbList: async () => bridge.kbs,
-    ugStatus: async () => ({ found: true, path: '/bin/ug', version: 'ug version 0.1.21' }),
+    ugStatus: async () => ({ found: true, path: '/bin/ug', version: 'ug version 0.1.21', canInstall: true, installCommand: '' }),
     kbCreate: async (name: string) => {
       guard('create');
       return mk({ slug: name.toLowerCase(), name });
@@ -56,7 +58,7 @@ vi.mock('../kb/api', async (orig) => {
     kbIndex: async (slug: string) => {
       bridge.indexCalls.push(slug);
       guard('index');
-      const sources = [{ file: 'a.md', original: '/x/a.md', kind: 'MD' as const, bytes: 4, approxTokens: 1, addedAt: 1, status: 'indexed' as const }];
+      const sources = [{ file: 'a.md', kind: 'MD' as const, bytes: 4, approxTokens: 1, addedAt: 1, status: 'indexed' as const }];
       return mk({ slug, sources, status: 'ready', nodes: 9, edges: 8, ...bridge.indexResult });
     },
     kbRemoveSource: async (slug: string) => mk({ slug, sources: [], status: 'pending' }),
@@ -64,12 +66,12 @@ vi.mock('../kb/api', async (orig) => {
   };
 });
 
-const { addFiles, createKb, deleteKb, refreshKbs, useKb } = await import('./kb');
+const { addFiles, createKb, deleteKb, refreshKbs, setKind, useKb } = await import('./kb');
 const { useUi } = await import('./ui');
 
 beforeEach(() => {
   Object.assign(bridge, { kbs: [], indexCalls: [], addErrors: [], indexResult: null, fail: {} });
-  useKb.setState({ kbs: [], selected: null, grounding: null, logs: {} });
+  useKb.setState({ kbs: [], selected: null, grounding: null, logs: {}, kindOverrides: {} });
   useUi.setState({ toasts: [] });
 });
 const lastToast = () => useUi.getState().toasts.at(-1);
@@ -130,9 +132,22 @@ describe('knowledge base actions', () => {
     expect(useKb.getState().ug?.found).toBe(true);
   });
 
+  it('keeps the user’s kind for a knowledge base in settings, over what Rust reports, until cleared', async () => {
+    const code = { file: 'a.ts', kind: 'CODE' as const, bytes: 1, approxTokens: 1, addedAt: 1, status: 'indexed' as const };
+    bridge.kbs = [mk({ kind: 'code', sources: [code] })];
+    await refreshKbs();
+    setKind('docs', 'mixed');
+    expect(useKb.getState().kbs[0]).toMatchObject({ kind: 'mixed', kindOverride: 'mixed' });
+    await refreshKbs();
+    expect(useKb.getState().kbs[0]).toMatchObject({ kind: 'mixed', kindOverride: 'mixed' });
+    expect(JSON.parse(localStorage.getItem('andai.kb')!).state.kindOverrides).toEqual({ docs: 'mixed' });
+    setKind('docs', null);
+    expect(useKb.getState().kbs[0]).toMatchObject({ kind: 'code', kindOverride: null });
+  });
+
   it('persists only preferences, never the KB list or logs', async () => {
     useKb.setState({ kbs: [mk()], logs: { docs: [{ at: 1, line: 'x' }] }, k: 16, grounding: 'docs' });
     const saved = JSON.parse(localStorage.getItem('andai.kb')!).state;
-    expect(Object.keys(saved).sort()).toEqual(['grounding', 'k', 'maxChars', 'selected']);
+    expect(Object.keys(saved).sort()).toEqual(['grounding', 'k', 'kindOverrides', 'maxChars', 'selected']);
   });
 });

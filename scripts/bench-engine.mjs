@@ -42,6 +42,7 @@ const env = {
   VITE_SMOKE: 'bench',
   VITE_BENCH: JSON.stringify({ model, configs, maxTokens: Number(process.env.BENCH_TOKENS ?? 192), contextWords: Number(process.env.BENCH_CONTEXT_WORDS ?? 400) }),
   ANDAI_DATA_DIR: dataDir,
+  UG_HOME: join(dataDir, 'ug'),
   ANDAI_SMOKE: '1',
 };
 seedCheckpoint(dataDir, model);

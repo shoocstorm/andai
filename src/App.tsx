@@ -19,6 +19,8 @@ import { AboutModal, Sidebar, StatusBar, Toasts, TopBar } from './shell/Shell';
 import { useLayout } from './state/layout';
 import { addFiles, createKb, refreshKbs, startKbEvents, useKb } from './state/kb';
 import { useUi, type Route } from './state/ui';
+import { promptUgSetupIfMissing } from './state/ugInstall';
+import { UgSetupDialog } from './screens/UgSetup';
 
 const SCREENS: Record<Route, () => React.ReactElement> = {
   command: CommandCenter,
@@ -55,7 +57,7 @@ export function App() {
   const Screen = SCREENS[route];
 
   useEffect(() => {
-    void refreshKbs();
+    void refreshKbs().then(promptUgSetupIfMissing);
     void startKbEvents();
     initCustomModels(); // before autoload: the last model may be one the user added
     void autoload();
@@ -128,6 +130,7 @@ export function App() {
       <StatusBar />
       <Toasts />
       <AboutModal />
+      <UgSetupDialog />
       <AnimatePresence>
         {dragging && route !== 'knowledge' && (
           <motion.div className="drop-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

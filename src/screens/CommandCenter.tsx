@@ -5,7 +5,9 @@ import {
   CircleDashed,
   Code2,
   Database,
+  Download,
   FileText,
+  FolderGit2,
   HelpCircle,
   ListFilter,
   ShieldCheck,
@@ -21,6 +23,7 @@ import {
   Send,
   Sparkles,
   Square,
+  TriangleAlert,
   Cpu,
   Wrench,
   X,
@@ -33,7 +36,7 @@ import { Bar, CopyButton, Markdown, Stat, fmtTime } from '../components/ui';
 import { NeuralCore } from '../components/NeuralCore';
 import { debugReport } from '../agent/debugReport';
 import { inTauri } from '../kb/api';
-import { sampleByName } from '../kb/samples';
+import { sampleByProject } from '../kb/samples';
 import { loadModel, useEngine } from '../llm/engine';
 import { layaById, modelById, recommendedModel } from '../llm/models';
 import { clearChat, splitThink, useChat, type Message, type TraceStep } from '../state/chat';
@@ -42,6 +45,7 @@ import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
 import { toast, useUi } from '../state/ui';
+import { openUgSetup } from '../state/ugInstall';
 import { AgentStepCard, ApprovalCard, callChipText, callLive, ContextDialog, traceCallId, CopyTraceButton, DecisionSummary, MatchBadge, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
 import { shortcut } from '../lib/platform';
@@ -495,7 +499,7 @@ function EmptyHub() {
   const kbs = useKb((s) => s.kbs);
   const grounding = useKb((s) => s.grounding);
   // Grounded in a bundled sample: suggest questions it can answer.
-  const sample = sampleByName(kbs.find((k) => k.slug === grounding)?.name);
+  const sample = sampleByProject(grounding);
   const [addingSample, setAddingSample] = useState(false);
   const go = useUi((s) => s.go);
   const name = usePersona((s) => s.agentName);
@@ -603,7 +607,7 @@ function Composer() {
   const busy = useChat((s) => s.messages.some((m) => m.streaming));
   const loaded = useEngine((s) => s.loadedId);
   const name = usePersona((s) => s.agentName);
-  const { kbs, grounding } = useKb();
+  const { kbs, grounding, ug } = useKb();
   const kb = kbs.find((k) => k.slug === grounding);
   const policies = useTools((s) => s.policies);
   const agentMode = useTools((s) => s.agentMode);
@@ -632,9 +636,10 @@ function Composer() {
     if (!inTauri) return toast({ tone: 'warn', title: 'Desktop app required', body: 'Files are indexed by ug natively.' });
     const paths = await pickFiles('Add to knowledge base');
     if (!paths.length) return;
-    let target = kb;
+    // Files go into one of Andai's own knowledge bases; a ug project indexes the user's folder as is.
+    let target = kb?.managed ? kb : undefined;
     if (!target) {
-      target = kbs[0] ?? (await createKb('Quick Drop')) ?? undefined;
+      target = kbs.find((k) => k.managed) ?? (await createKb('Quick Drop')) ?? undefined;
       if (!target) return;
       useKb.setState({ grounding: target.slug });
     }
@@ -699,13 +704,29 @@ function Composer() {
             onClick={() => setMenu(menu === 'kb' ? null : 'kb')}
             title="Knowledge base used to ground answers"
           >
-            <Database size={13} />
+            {kb?.status === 'offline' ? <TriangleAlert size={13} color="var(--amber)" /> : <Database size={13} />}
             {groundingLabel}
+            {kb?.status === 'offline' && <span className="pill amber">needs ug</span>}
             {kb && kb.status === 'indexing' && <Loader2 size={12} className="spin" />}
             <ChevronDown size={13} />
           </button>
           {menu === 'kb' && (
             <Menu onClose={() => setMenu(null)} align="right">
+              {ug && !ug.found && inTauri && (
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    setMenu(null);
+                    openUgSetup();
+                  }}
+                >
+                  <Download size={15} color="var(--amber)" />
+                  <div style={{ flex: 1 }}>
+                    <div>Install UltraGraph</div>
+                    <div className="sub">Knowledge bases need ug to be searched</div>
+                  </div>
+                </button>
+              )}
               <button
                 className="menu-item"
                 aria-selected={!grounding}
@@ -728,11 +749,12 @@ function Composer() {
                     setMenu(null);
                   }}
                 >
-                  <Database size={15} color="var(--violet)" />
+                  {k.managed ? <Database size={15} color="var(--violet)" /> : <FolderGit2 size={15} color="var(--violet)" />}
                   <div style={{ flex: 1 }}>
                     <div>{k.name}</div>
                     <div className="sub">
-                      {k.sources.length} sources · {k.nodes.toLocaleString()} nodes · {k.status}
+                      {k.sourceCount} sources · {k.nodes.toLocaleString()} nodes · {k.status === 'offline' ? 'needs ug' : k.status}
+                      {!k.managed && ' · ug project'}
                     </div>
                   </div>
                   {k.slug === grounding && <Check size={14} color="var(--blue)" />}

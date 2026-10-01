@@ -590,6 +590,7 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
   font-weight: 600;
   font-size: 13.5px;
 }

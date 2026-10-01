@@ -6,6 +6,7 @@ mod mlx;
 mod samples;
 mod tools;
 mod ug;
+mod ug_install;
 #[cfg_attr(debug_assertions, allow(dead_code))]
 mod ui_server;
 
@@ -93,6 +94,7 @@ pub fn run() {
             Ok(())
         })
         .manage(ug::Indexing::default())
+        .manage(ug_install::Installing::default())
         .manage(activity::ActivityLock::default())
         .manage(grants::FileGrants::default())
         .manage(mlx::Mlx::default())
@@ -102,6 +104,7 @@ pub fn run() {
             dev_exit,
             ug::ug_status,
             ug::open_ug_website,
+            ug_install::ug_install,
             ug::kb_list,
             ug::kb_create,
             ug::kb_add_files,
@@ -110,7 +113,6 @@ pub fn run() {
             ug::kb_delete,
             ug::kb_index,
             ug::kb_search,
-            ug::kb_set_kind,
             samples::kb_add_sample,
             tools::kb_tool,
             ug::kb_source,

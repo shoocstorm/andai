@@ -77,6 +77,8 @@ const env = {
   VITE_SMOKE: 'eval',
   VITE_EVAL: JSON.stringify({ model, decider, seed, kbs, cases: cases.map(({ id, kb, prompt, history }) => ({ id, kb, prompt, history })) }),
   ANDAI_DATA_DIR: join(dataDir, 'app'),
+  // Its own ug projects: Andai lists every ug project, and the user's stay out of the run (AGENTS.md §6).
+  UG_HOME: join(dataDir, 'ug'),
   ANDAI_SMOKE: '1',
   ANDAI_E2E_FILES: files.join(','),
 };

@@ -89,8 +89,10 @@ choice, just more slowly.
    Builds are not signed yet. On macOS, right-click Andai.app → *Open* the
    first time.
 2. **Install [ug](https://ultra-graph.web.app)**, the local engine that turns
-   your files into a searchable knowledge graph. Andai shows you how if it's
-   missing.
+   your files into a searchable knowledge graph. If it's missing, Andai
+   offers to install it on first launch: click **Install UltraGraph** (about
+   25 MB from its GitHub release, checked against its sha256, no password).
+   On Windows, Andai links to its download page instead.
 3. **Load a model** in *Settings → Models*. On an Apple Silicon Mac, pick
    **Qwen3 1.7B · MLX** (980 MB); elsewhere, **Qwen3 0.6B** (639 MB). It
    downloads once and is verified before it loads.

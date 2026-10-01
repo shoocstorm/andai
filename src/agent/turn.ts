@@ -40,7 +40,7 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
   const persona = usePersona.getState();
   const kbState = useKb.getState();
   const kb = kbState.kbs.find((k) => k.slug === kbState.grounding) ?? null;
-  const searchable = kb && kb.status !== 'empty' && kb.nodes > 0;
+  const searchable = kb && kb.status !== 'empty' && kb.status !== 'offline' && kb.nodes > 0;
 
   const history = useChat.getState().messages;
   addMessage({ id: uid(), role: 'user', content: prompt, createdAt: Date.now() });
@@ -71,7 +71,13 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
         {
           kind: 'retrieve',
           title: 'Knowledge retrieval',
-          detail: searchable ? `Searching knowledge base “${kb.name}”…` : kb ? `“${kb.name}” is not indexed yet` : 'No knowledge base selected',
+          detail: searchable
+            ? `Searching knowledge base “${kb.name}”…`
+            : kb?.status === 'offline'
+              ? `UltraGraph (ug) isn't installed, so “${kb.name}” can't be searched; answering without it`
+              : kb
+                ? `“${kb.name}” is not indexed yet`
+                : 'No knowledge base selected',
           status: searchable ? 'queued' : 'skipped',
         },
       ];

@@ -11,12 +11,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
-use crate::ug::{kb_dir, search_query, strip_ansi, ug_path, PROJECT_PREFIX};
+use crate::ug::{resolve, search_query, strip_ansi, ug_path};
 
 /// Wall-clock limit for one tool run; ug answers these from its graph in well under a second.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(20);
@@ -107,8 +107,7 @@ fn rel_path(s: &str, docs: &Path) -> Result<String, String> {
 
 /// Validates a call and returns ug's arguments (after the binary), in order.
 /// Pure, so the whole policy is unit-tested without running ug.
-pub fn plan(call: &ToolCall, slug: &str, docs: &Path) -> Result<Vec<String>, String> {
-    let project = format!("{PROJECT_PREFIX}{slug}");
+pub fn plan(call: &ToolCall, project: &str, docs: &Path) -> Result<Vec<String>, String> {
     let mut a: Vec<String> = vec![];
     match call {
         ToolCall::Search { query, k, expand, max_chars } => {
@@ -168,7 +167,7 @@ pub fn plan(call: &ToolCall, slug: &str, docs: &Path) -> Result<Vec<String>, Str
         }
         ToolCall::Overview {} => a.push("project_overview".into()),
     }
-    a.extend(["-n".into(), project, "--json".into()]);
+    a.extend(["-n".into(), project.into(), "--json".into()]);
     Ok(a)
 }
 
@@ -274,19 +273,17 @@ pub fn run(bin: &Path, args: &[String], cwd: &Path, timeout: Duration, cap: usiz
     Ok(ToolOutput { output, truncated, bytes, ms: started.elapsed().as_millis() as u64, argv: args.to_vec() })
 }
 
-fn docs_dir(app: &AppHandle, slug: &str) -> Result<PathBuf, String> {
-    let docs = kb_dir(app, slug)?.join("docs");
-    if !docs.is_dir() {
-        return Err("This knowledge base has no documents yet.".into());
-    }
-    Ok(docs)
-}
-
-/// Runs one validated, read-only ug tool against a knowledge base.
+/// Runs one validated, read-only ug tool against a knowledge base: its ug
+/// project, with the folder it indexes (Andai's copies, or the repo ug
+/// recorded) as the root every path argument must stay inside.
 #[tauri::command]
 pub async fn kb_tool(app: AppHandle, slug: String, call: ToolCall) -> Result<ToolOutput, String> {
-    let docs = docs_dir(&app, &slug)?;
-    let args = plan(&call, &slug, &docs)?;
+    let kb = resolve(&app, &slug)?;
+    if !kb.root.is_dir() {
+        return Err("This knowledge base's folder is missing.".into());
+    }
+    let docs = kb.root;
+    let args = plan(&call, &kb.project, &docs)?;
     let bin = ug_path().ok_or(crate::ug::UG_MISSING)?;
     tauri::async_runtime::spawn_blocking(move || run(&bin, &args, &docs, TOOL_TIMEOUT, MAX_OUTPUT_BYTES))
         .await
@@ -320,14 +317,14 @@ mod tests {
     fn search_is_scoped_clamped_and_never_a_flag() {
         let d = docs();
         let call = ToolCall::Search { query: "--base-url http://evil".into(), k: 999, expand: false, max_chars: 1 };
-        let a = plan(&call, "kb", d.path()).unwrap();
+        let a = plan(&call, "andai-kb", d.path()).unwrap();
         assert_eq!(a[..2], ["search", " --base-url http://evil"]);
         assert!(a.windows(2).any(|w| w == ["-k", "20"]));
         assert!(a.windows(2).any(|w| w == ["--max-chars", "100"]));
         assert!(a.contains(&"--no-expand".to_string()));
         assert!(a.ends_with(&["-n".into(), "andai-kb".into(), "--json".into()]));
         let empty = ToolCall::Search { query: "  ".into(), k: 8, expand: true, max_chars: 4000 };
-        assert!(plan(&empty, "kb", d.path()).is_err());
+        assert!(plan(&empty, "andai-kb", d.path()).is_err());
     }
 
     #[test]
@@ -341,7 +338,7 @@ mod tests {
             ToolCall::GetCode { symbol: None, file: Some("-f".into()), start: None, end: None },
         ];
         for c in calls {
-            assert!(plan(&c, "kb", d.path()).is_err(), "{c:?} should be rejected");
+            assert!(plan(&c, "andai-kb", d.path()).is_err(), "{c:?} should be rejected");
         }
     }
 
@@ -350,11 +347,11 @@ mod tests {
         let d = docs();
         for bad in ["../kb.json", "/etc/passwd", "a/../../x", "..", "a\\b", "x\0y", "a\nb"] {
             let c = ToolCall::FileContext { file: bad.into(), max_chars: 1000 };
-            assert!(plan(&c, "kb", d.path()).is_err(), "{bad:?} should be rejected");
+            assert!(plan(&c, "andai-kb", d.path()).is_err(), "{bad:?} should be rejected");
         }
         for ok in ["a.ts", "./a.ts", "src/**/*.ts", "missing.md"] {
             let c = ToolCall::FileContext { file: ok.into(), max_chars: 1000 };
-            assert!(plan(&c, "kb", d.path()).is_ok(), "{ok:?} should be allowed");
+            assert!(plan(&c, "andai-kb", d.path()).is_ok(), "{ok:?} should be allowed");
         }
     }
 
@@ -366,37 +363,37 @@ mod tests {
         std::fs::write(outside.path().join("secret"), "key").unwrap();
         std::os::unix::fs::symlink(outside.path().join("secret"), d.path().join("link")).unwrap();
         let c = ToolCall::GetCode { symbol: None, file: Some("link".into()), start: None, end: None };
-        assert!(plan(&c, "kb", d.path()).unwrap_err().contains("inside the knowledge base"));
+        assert!(plan(&c, "andai-kb", d.path()).unwrap_err().contains("inside the knowledge base"));
     }
 
     #[test]
     fn symbol_lookups_are_bounded() {
         let d = docs();
         let many = ToolCall::FindSymbols { names: vec!["a".into(); 6], node_type: None, file_prefix: None };
-        assert!(plan(&many, "kb", d.path()).is_err());
+        assert!(plan(&many, "andai-kb", d.path()).is_err());
         let bad_type = ToolCall::FindSymbols { names: vec!["a".into()], node_type: Some("Evil".into()), file_prefix: None };
-        assert!(plan(&bad_type, "kb", d.path()).is_err());
+        assert!(plan(&bad_type, "andai-kb", d.path()).is_err());
         let ok = ToolCall::FindSymbols {
             names: vec!["build*".into()],
             node_type: Some("Function".into()),
             file_prefix: Some("src/".into()),
         };
-        let a = plan(&ok, "kb", d.path()).unwrap();
+        let a = plan(&ok, "andai-kb", d.path()).unwrap();
         assert_eq!(a[..2], ["find_symbols", "build*"]);
-        assert!(plan(&ToolCall::FindUsages { symbol: "x".repeat(MAX_NAME_BYTES + 1) }, "kb", d.path()).is_err());
+        assert!(plan(&ToolCall::FindUsages { symbol: "x".repeat(MAX_NAME_BYTES + 1) }, "andai-kb", d.path()).is_err());
     }
 
     #[test]
     fn code_ranges_are_clamped() {
         let d = docs();
         let c = ToolCall::GetCode { symbol: None, file: Some("a.ts".into()), start: Some(0), end: Some(100_000) };
-        let a = plan(&c, "kb", d.path()).unwrap();
+        let a = plan(&c, "andai-kb", d.path()).unwrap();
         assert!(a.windows(2).any(|w| w == ["-s", "1"]));
         assert!(a.windows(2).any(|w| w == ["-e", &MAX_CODE_LINES.to_string()]));
         let both = ToolCall::GetCode { symbol: Some("a".into()), file: Some("a.ts".into()), start: None, end: None };
-        assert!(plan(&both, "kb", d.path()).is_err());
+        assert!(plan(&both, "andai-kb", d.path()).is_err());
         let neither = ToolCall::GetCode { symbol: None, file: None, start: None, end: None };
-        assert!(plan(&neither, "kb", d.path()).is_err());
+        assert!(plan(&neither, "andai-kb", d.path()).is_err());
     }
 
     #[cfg(unix)]
@@ -460,7 +457,7 @@ mod tests {
         )
         .unwrap();
         let slug = format!("tooltest-{}", std::process::id());
-        let project = format!("{PROJECT_PREFIX}{slug}");
+        let project = format!("andai-{slug}");
         let gen = Command::new(&bin).arg("gen").arg(docs.path()).args(["-n", &project, "--with-embed"]).output().unwrap();
         let cleanup = || {
             let _ = Command::new(&bin).args(["remove", &project, "-y"]).output();
@@ -481,7 +478,7 @@ mod tests {
         ];
         let mut failures = vec![];
         for (call, key) in calls {
-            let args = plan(&call, &slug, docs.path()).unwrap();
+            let args = plan(&call, &project, docs.path()).unwrap();
             match run(&bin, &args, docs.path(), TOOL_TIMEOUT, MAX_OUTPUT_BYTES) {
                 Ok(out) if out.output.get(key).is_some() => {}
                 Ok(out) => failures.push(format!("{call:?}: no {key:?} in {}", out.output)),

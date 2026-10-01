@@ -3,9 +3,9 @@ import {
   CloudUpload,
   Code2,
   Database,
-  ExternalLink,
   FileText,
   FileType2,
+  FolderGit2,
   Loader2,
   MessageSquareText,
   Plus,
@@ -18,10 +18,12 @@ import {
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Bar, Modal, Segmented, Slider, fmtAgo, fmtBytes } from '../components/ui';
-import { inTauri, kbPickFiles, openUgWebsite, type KbInfo, type KbKind, type Source } from '../kb/api';
+import { inTauri, kbPickFiles, type KbInfo, type KbKind, type Source } from '../kb/api';
 import { SAMPLES, type SampleDef } from '../kb/samples';
 import { SourceDialog } from './SourceDialog';
-import { addFiles, addSample, createKb, deleteKb, indexKb, removeSource, setKind, useKb } from '../state/kb';
+import { UgInstall } from './UgSetup';
+import { useUgInstall } from '../state/ugInstall';
+import { addFiles, addSample, createKb, deleteKb, derivedKind, indexKb, removeSource, setKind, useKb } from '../state/kb';
 import { toast, useUi } from '../state/ui';
 
 export async function pickFiles(title: string): Promise<string[]> {
@@ -35,6 +37,7 @@ export async function pickFiles(title: string): Promise<string[]> {
 
 export function Knowledge() {
   const { kbs, selected, loaded, ug } = useKb();
+  const installed = useUgInstall((s) => s.stage === 'done');
   const kb = kbs.find((k) => k.slug === selected) ?? null;
   const [creating, setCreating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -48,12 +51,10 @@ export function Knowledge() {
               title="Desktop runtime required"
               body="Knowledge bases are built by the native ug engine. Run Andai with `bun run tauri dev` to ingest documents."
             />
-          ) : ug && !ug.found ? (
-            <Notice
-              title="Install UltraGraph to build knowledge bases"
-              body="Andai turns your files into a local semantic knowledge graph with ug (UltraGraph), a fast, private knowledge-graph engine that runs entirely on your machine. Install it from the UltraGraph website with one command, then restart Andai."
-              action={<GetUltraGraph />}
-            />
+          ) : ug && (!ug.found || installed) ? (
+            <div className="panel pad">
+              <UgInstall variant="card" />
+            </div>
           ) : null}
 
           <KbTabs kbs={kbs} selected={selected} onNew={() => setCreating(true)} />
@@ -88,10 +89,17 @@ export function Knowledge() {
       <CreateKbModal open={creating} onClose={() => setCreating(false)} />
       <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)}>
         <h3>Delete “{kb?.name}”?</h3>
-        <p className="muted" style={{ margin: '4px 0 22px' }}>
-          This removes its {kb?.sources.length ?? 0} copied source files and the ug graph <span className="mono">andai-{kb?.slug}</span>.
-          Your original files are not touched.
-        </p>
+        {kb?.managed ? (
+          <p className="muted" style={{ margin: '4px 0 22px' }}>
+            This removes its {kb.sourceCount} copied source files and the ug graph <span className="mono">{kb.slug}</span>. Your
+            original files are not touched.
+          </p>
+        ) : (
+          <p className="muted" style={{ margin: '4px 0 22px' }}>
+            This removes the ug graph <span className="mono">{kb?.slug}</span>, for Andai and for ug alike. The folder it indexes,{' '}
+            <span className="mono">{kb?.root}</span>, is not touched; <span className="mono">ug gen</span> there builds it again.
+          </p>
+        )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button className="btn ghost" onClick={() => setConfirmDelete(false)}>
             Cancel
@@ -124,22 +132,6 @@ function Notice({ title, body, action }: { title: string; body: string; action?:
   );
 }
 
-/** Opens UltraGraph's site, where the `ug` CLI is installed from. */
-export function GetUltraGraph() {
-  return (
-    <button
-      className="btn primary sm"
-      onClick={() =>
-        openUgWebsite().catch((e) =>
-          toast({ tone: 'error', title: 'Could not open ultra-graph.web.app', body: String(e) }),
-        )
-      }
-    >
-      Get UltraGraph <span className="mono">ultra-graph.web.app</span> <ExternalLink size={13} />
-    </button>
-  );
-}
-
 function KbTabs({ kbs, selected, onNew }: { kbs: KbInfo[]; selected: string | null; onNew: () => void }) {
   const grounding = useKb((s) => s.grounding);
   return (
@@ -149,9 +141,10 @@ function KbTabs({ kbs, selected, onNew }: { kbs: KbInfo[]; selected: string | nu
           key={k.slug}
           className="kn-tab"
           aria-pressed={k.slug === selected}
+          title={k.managed ? k.slug : `ug project · ${k.root}`}
           onClick={() => useKb.setState({ selected: k.slug })}
         >
-          <Database size={14} />
+          {k.managed ? <Database size={14} /> : <FolderGit2 size={14} aria-label="ug project" />}
           {k.name}
           {k.status === 'indexing' && <Loader2 size={12} className="spin" />}
           {k.slug === grounding && (
@@ -176,6 +169,21 @@ function Ingest({ kb, onNeedKb }: { kb: KbInfo | null; onNeedKb: () => void }) {
     const paths = await pickFiles(`Add to “${kb.name}”`);
     if (paths.length) await addFiles(kb.slug, paths);
   };
+  if (kb && !kb.managed) {
+    // A ug project indexes the user's own folder; Andai reads it but never writes to it.
+    return (
+      <motion.div className="panel kn-drop" layout>
+        <div className="kn-drop-icon">{busy ? <Loader2 size={30} className="spin" /> : <FolderGit2 size={30} />}</div>
+        <h2 className="display">{busy ? 'Assimilating intelligence…' : 'Indexed by ug'}</h2>
+        <p className="muted">
+          <b>“{kb.name}”</b> is a ug project over <span className="mono selectable">{kb.root}</span>.
+          <br />
+          Andai searches it as is. To change what it holds, edit that folder and re-index, or run{' '}
+          <span className="mono">ug gen</span> there.
+        </p>
+      </motion.div>
+    );
+  }
   return (
     <motion.div className={`panel kn-drop${dragging ? ' over' : ''}`} layout>
       <div className="kn-drop-icon">{busy ? <Loader2 size={30} className="spin" /> : <CloudUpload size={30} />}</div>
@@ -207,14 +215,19 @@ export function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) 
   const [viewing, setViewing] = useState<string | null>(null);
   const healthy = kb.sources.filter((s) => s.status === 'indexed').length;
   const indexing = kb.status === 'indexing';
+  const offline = kb.status === 'offline';
   return (
     <div className="panel kn-table">
       <div className="kn-table-head">
         <span className="label blue" style={{ fontSize: 15, letterSpacing: '0.14em' }}>
           Indexed_Sources
         </span>
-        <span className="pill violet">Total: {kb.sources.length}</span>
-        <span className="pill blue">Healthy: {healthy}</span>
+        <span className="pill violet">Total: {kb.sourceCount.toLocaleString()}</span>
+        {offline ? (
+          <span className="pill amber" title="ug (UltraGraph) isn't installed">Needs ug</span>
+        ) : (
+          <span className="pill blue">Healthy: {healthy}</span>
+        )}
         <KindPicker kb={kb} />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button
@@ -224,7 +237,7 @@ export function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) 
           >
             <MessageSquareText size={13} /> {grounding === kb.slug ? 'Grounding chat' : 'Use in chat'}
           </button>
-          <button className="btn ghost sm" disabled={indexing || !kb.sources.length} onClick={() => void indexKb(kb.slug)}>
+          <button className="btn ghost sm" disabled={indexing || offline || !kb.sources.length} onClick={() => void indexKb(kb.slug)}>
             <RefreshCw size={13} className={indexing ? 'spin' : ''} /> Re-index
           </button>
           <button className="btn ghost sm" onClick={onDelete} disabled={indexing} title="Delete knowledge base">
@@ -266,18 +279,21 @@ export function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) 
                 </td>
                 <td className="mono kn-num">{s.approxTokens != null ? `~${s.approxTokens.toLocaleString()}` : fmtBytes(s.bytes)}</td>
                 <td>
-                  <SyncStatus status={indexing && s.status === 'pending' ? 'updating' : status} />
+                  <SyncStatus status={offline ? 'offline' : indexing && s.status === 'pending' ? 'updating' : status} />
                 </td>
                 <td className="muted">{fmtAgo(s.status === 'indexed' ? (kb.lastIndexedAt ?? s.addedAt) : s.addedAt)}</td>
                 <td style={{ textAlign: 'right' }}>
-                  <button
-                    className="icon-btn kn-remove"
-                    title="Remove source"
-                    disabled={indexing}
-                    onClick={() => void removeSource(kb.slug, s.file)}
-                  >
-                    <X size={15} />
-                  </button>
+                  {kb.managed && (
+                    <button
+                      className="icon-btn kn-remove"
+                      title="Remove source"
+                      aria-label={`Remove ${s.file}`}
+                      disabled={indexing}
+                      onClick={() => void removeSource(kb.slug, s.file)}
+                    >
+                      <X size={15} />
+                    </button>
+                  )}
                 </td>
               </tr>
             );
@@ -286,7 +302,12 @@ export function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) 
       </table>
       {!kb.sources.length && (
         <div className="empty" style={{ padding: 34 }}>
-          <div>No sources yet — drop files anywhere on this screen.</div>
+          <div>{kb.managed ? 'No sources yet — drop files anywhere on this screen.' : 'ug indexed no files in this project.'}</div>
+        </div>
+      )}
+      {kb.sourceCount > kb.sources.length && (
+        <div className="muted" style={{ padding: '10px 16px', fontSize: 12.5 }}>
+          Showing the first {kb.sources.length.toLocaleString()} of {kb.sourceCount.toLocaleString()} files.
         </div>
       )}
       {kb.lastError && !indexing && (
@@ -312,9 +333,9 @@ function KindPicker({ kb }: { kb: KbInfo }) {
       <select
         aria-label="Knowledge base kind"
         value={kb.kindOverride ?? 'auto'}
-        onChange={(e) => void setKind(kb.slug, e.target.value === 'auto' ? null : (e.target.value as KbKind))}
+        onChange={(e) => setKind(kb.slug, e.target.value === 'auto' ? null : (e.target.value as KbKind))}
       >
-        <option value="auto">Auto · {KIND_LABEL[kb.kindOverride ? deriveLabel(kb) : kb.kind]}</option>
+        <option value="auto">Auto · {KIND_LABEL[kb.kindOverride ? derivedKind(kb) : kb.kind]}</option>
         <option value="document">Documents</option>
         <option value="code">Code</option>
         <option value="mixed">Mixed</option>
@@ -323,18 +344,13 @@ function KindPicker({ kb }: { kb: KbInfo }) {
   );
 }
 
-/** Same rule as `derive_kind` in src-tauri/src/ug.rs, to label the Auto option while an override is set. */
-function deriveLabel(kb: KbInfo): KbKind {
-  const code = kb.sources.filter((s) => s.kind === 'CODE').length;
-  return code === 0 ? 'document' : code === kb.sources.length ? 'code' : 'mixed';
-}
-
 function SyncStatus({ status }: { status: string }) {
   const map: Record<string, [string, string]> = {
     indexed: ['Indexed', 'var(--blue)'],
     updating: ['Updating', 'var(--amber)'],
     pending: ['Pending', 'var(--text-3)'],
     failed: ['Failed', 'var(--red)'],
+    offline: ['Needs ug', 'var(--amber)'],
   };
   const [label, color] = map[status] ?? ['—', 'var(--text-3)'];
   return (
@@ -488,7 +504,7 @@ export function Samples({ title, onAdded }: { title: string; onAdded?: () => voi
       <div className="kn-sample-grid">
         {SAMPLES.map((sample) => {
           const Icon = SAMPLE_ICON[sample.kind];
-          const added = kbs.some((k) => k.name === sample.name);
+          const added = kbs.some((k) => k.slug === sample.project);
           return (
             <div key={sample.id} className="kn-sample">
               <Icon size={17} />

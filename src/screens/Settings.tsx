@@ -11,7 +11,8 @@ import { useKb } from '../state/kb';
 import { useTheme, type Theme } from '../state/theme';
 import { toast, useUi } from '../state/ui';
 import { HubModels } from './HubModels';
-import { GetUltraGraph } from './Knowledge';
+import { UgInstall } from './UgSetup';
+import { useUgInstall } from '../state/ugInstall';
 
 /**
  * The optional second model that scores the agent's next action
@@ -155,6 +156,7 @@ export function Settings() {
   const e = useEngine();
   const ug = useKb((s) => s.ug);
   const kbs = useKb((s) => s.kbs);
+  const installed = useUgInstall((s) => s.stage === 'done');
   const [legacyFor, setLegacyFor] = useState<ModelDef | null>(null);
   const [hubOpen, setHubOpen] = useState(false);
   const [removing, setRemoving] = useState<ModelDef | null>(null);
@@ -396,13 +398,9 @@ export function Settings() {
               <Row k="Graph nodes" v={kbs.reduce((n, k) => n + k.nodes, 0).toLocaleString()} />
               <Row k="On disk" v={fmtBytes(kbs.reduce((n, k) => n + k.sizeBytes, 0))} />
             </dl>
-            {ug && !ug.found && (
+            {ug && (!ug.found || installed) && (
               <div className="st-ug-missing">
-                <p className="muted" style={{ margin: '12px 0 10px', fontSize: 13.5 }}>
-                  Knowledge bases need <b>ug (UltraGraph)</b>, a fast local knowledge-graph engine. Install it from the
-                  UltraGraph website, then restart Andai.
-                </p>
-                <GetUltraGraph />
+                <UgInstall variant="card" />
               </div>
             )}
           </div>

@@ -1,15 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { SAMPLES, sampleByName } from './samples';
+import { SAMPLES, sampleByProject } from './samples';
 
 const root = join(__dirname, '../..');
 
 describe('sample knowledge bases', () => {
-  it('match the closed list Rust installs from, by id and name', () => {
+  it('match the closed list Rust installs from, by id, project and name', () => {
     const rust = readFileSync(join(root, 'src-tauri/src/samples.rs'), 'utf8');
-    const pinned = [...rust.matchAll(/Sample \{ id: "([\w-]+)", name: "([^"]+)"/g)].map((m) => [m[1], m[2]]);
-    expect(SAMPLES.map((s) => [s.id, s.name])).toEqual(pinned);
+    const pinned = [...rust.matchAll(/Sample \{ id: "([\w-]+)", slug: "([\w-]+)", name: "([^"]+)"/g)].map((m) => [m[1], `andai-${m[2]}`, m[3]]);
+    expect(pinned).toHaveLength(SAMPLES.length);
+    expect(SAMPLES.map((s) => [s.id, s.project, s.name])).toEqual(pinned);
   });
 
   it('suggest only eval questions asked of the same kind of knowledge base', () => {
@@ -26,8 +27,9 @@ describe('sample knowledge bases', () => {
     }
   });
 
-  it('recognizes an added sample by its name', () => {
-    expect(sampleByName('Tidewater Ferries · Code')?.id).toBe('tidewater-code');
-    expect(sampleByName('My docs')).toBeUndefined();
+  it('recognizes an added sample by its ug project', () => {
+    expect(sampleByProject('andai-tidewater-ferries-code')?.id).toBe('tidewater-code');
+    expect(sampleByProject('andai-my-docs')).toBeUndefined();
+    expect(sampleByProject(null)).toBeUndefined();
   });
 });

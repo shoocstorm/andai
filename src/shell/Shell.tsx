@@ -25,7 +25,9 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { ReactNode } from 'react';
 import { useEngine } from '../llm/engine';
 import { modelById } from '../llm/models';
+import { inTauri } from '../kb/api';
 import { useKb } from '../state/kb';
+import { openUgSetup } from '../state/ugInstall';
 import { usePersona } from '../state/persona';
 import { useLayout } from '../state/layout';
 import { otherTheme, useTheme } from '../state/theme';
@@ -72,8 +74,9 @@ export function TopBar() {
       <button
         className="icon-btn"
         data-state={ug?.found ? 'ok' : 'warn'}
-        title={ug?.found ? `ug knowledge engine · ${ug.version}` : 'ug (UltraGraph) not installed · get it at ultra-graph.web.app'}
-        onClick={() => go('knowledge')}
+        title={ug?.found ? `ug knowledge engine · ${ug.version}` : 'ug (UltraGraph) not installed · click to install'}
+        aria-label={ug?.found ? 'Knowledge engine' : 'Install UltraGraph'}
+        onClick={() => (ug && !ug.found && inTauri ? openUgSetup() : go('knowledge'))}
       >
         <Radio size={19} />
       </button>

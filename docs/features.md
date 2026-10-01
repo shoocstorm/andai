@@ -217,8 +217,24 @@ pasting in whatever one search returns:
   splits documents along their structure (headings, pages, symbols), links the
   sections into a graph and embeds them locally. Live indexing progress is
   shown as it runs.
-- **Multiple knowledge bases.** Keep separate collections (e.g. *Specs*,
-  *Research*) and choose which one grounds the chat from the composer.
+- **One-click ug install.** If ug isn't installed, Andai asks at launch (and
+  on Knowledge and Settings) and installs it for you: it finds UltraGraph's
+  latest GitHub release, downloads this Mac's build with a progress bar,
+  checks it against the release's published sha256, and installs it to
+  `~/.local/bin/ug`, where UltraGraph's own installer puts it. No password,
+  no restart. The terminal command is one click away if you prefer it. On
+  macOS (Apple Silicon and Intel); Windows links to the download page.
+- **Multiple knowledge bases.** Keep separate collections (e.g. *specs*,
+  *research*) and choose which one grounds the chat from the composer.
+- **One list with ug.** A knowledge base *is* a ug project: Andai lists
+  every project ug has (`ug list`), including ones you indexed yourself with
+  `ug gen`, and the ones Andai creates appear in ug as `andai-<name>`.
+  Andai keeps no list of its own. A project you indexed with ug is
+  read-only in Andai: it searches the folder ug recorded, and you can
+  re-index it or delete its graph (the folder itself is never touched), but
+  files are only added to and removed from knowledge bases Andai created.
+- **Without ug**, your knowledge bases stay listed, marked *Needs ug*, and
+  chat answers without them and says why, until UltraGraph is installed.
 - **Sample knowledge bases** to try the agent before adding your own files:
   *Tidewater Ferries*, a made-up ferry operator, as **documents** (seven:
   operations and crew handbooks, a refund policy, a fleet maintenance
@@ -228,8 +244,9 @@ pasting in whatever one search returns:
   Center then suggests questions the sample can answer. Offered on the
   Knowledge screen, in *New knowledge base*, and as *Try a sample* when you
   have none. A sample is an ordinary knowledge base: delete it any time.
-- **Kind: documents, code or mixed**, set automatically from your files and
-  changeable next to the source list. It decides which agent tools apply:
+- **Kind: documents, code or mixed**, set automatically from your files (or
+  ug's own label for a project) and changeable next to the source list; your
+  choice is kept in Andai's settings. It decides which agent tools apply:
   the code tools (symbols, callers) are offered only for code.
 - **Look inside a source.** Click a file's name in the source list to open
   it: **Overview** (size, tokens, lines, where it was added from, when it was
@@ -388,8 +405,8 @@ executed**; every action says it's simulated.
   every 2 seconds. It shows the newest 5,000 events of a day.
 - Your data lives in the app data folder (knowledge-base copies:
   `~/Library/Application Support/dev.andai.agent/` on macOS,
-  `%APPDATA%\dev.andai.agent\` on Windows), in `.ug/andai-*` in your home
-  folder (knowledge graphs) and in the app's own storage (chats, settings,
+  `%APPDATA%\dev.andai.agent\` on Windows), in `.ug/` in your home
+  folder (knowledge graphs: Andai's are `andai-*`) and in the app's own storage (chats, settings,
   cached models). The activity log, when on, is in the app data folder's
   `logs/`.
 
@@ -405,7 +422,8 @@ executed**; every action says it's simulated.
   Needs the Microsoft Edge WebView2 runtime (preinstalled on Windows 11); the
   installer doesn't download it for you.
 - Knowledge bases need the **ug** CLI installed (on your PATH, or in
-  `.local/bin`, `.cargo/bin` or `.ug/bin` in your home folder).
+  `.local/bin`, `.cargo/bin` or `.ug/bin` in your home folder). On macOS,
+  Andai can install it for you (Knowledge → **Install UltraGraph**).
 - Builds are currently **unsigned**: on first launch on macOS, right-click
   Andai.app → Open; on Windows, choose *More info* → *Run anyway* if
   SmartScreen warns.

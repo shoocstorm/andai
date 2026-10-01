@@ -25,7 +25,7 @@ describe('Command Center', () => {
   });
 
   it('suggests the sample’s own questions when chat is grounded in a sample knowledge base', () => {
-    const kb = { slug: 'tidewater-ferries-code', name: 'Tidewater Ferries · Code', kind: 'code', status: 'ready', sources: [] };
+    const kb = { slug: 'andai-tidewater-ferries-code', name: 'Tidewater Ferries · Code', kind: 'code', status: 'ready', sources: [] };
     useKb.setState({ kbs: [kb as never], grounding: kb.slug });
     render(<CommandCenter />);
     expect(screen.getByText(/Try asking Tidewater Ferries · Code/)).toBeInTheDocument();

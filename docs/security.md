@@ -28,6 +28,12 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
   The app enforces this with a **content security policy**: it can reach
   `huggingface.co` and Hugging Face's download CDN (`*.hf.co`), and nothing
   else.
+- One exception, also started only by you: **Install UltraGraph** (shown
+  when ug is missing) asks GitHub for ug's latest release and downloads it
+  with the system `curl`, HTTPS only. The addresses are fixed in the app,
+  the download must match the size and sha256 the release publishes or it's
+  discarded, and nothing about you or your files is sent. It installs to
+  `~/.local/bin/ug` and never replaces a ug you already have.
 - On Windows, the installer doesn't download anything either: Andai needs
   the Microsoft Edge WebView2 runtime (preinstalled on Windows 11) and won't
   fetch it for you.
@@ -98,9 +104,10 @@ base (see *Agentic retrieval* in [features.md](features.md)).
   files `0600`). On Windows the folder is inside your user profile
   (`%APPDATA%`) and inherits its permissions: your account, SYSTEM and
   administrators can read it. Andai doesn't set tighter permissions there yet.
-- Viewing a source (click its name on the Knowledge screen) reads only
-  Andai's own copy of a file the knowledge base lists, never an arbitrary
-  path, and shows it as inert text: no images load and links can only be
+- Viewing a source (click its name on the Knowledge screen) reads only a
+  file the knowledge base lists (Andai's copy, or a file ug indexed in a
+  project's folder), never an arbitrary path or one that leads out of that
+  folder, and shows it as inert text: no images load and links can only be
   copied.
 
 ### Andai only shows its own interface
@@ -175,8 +182,9 @@ base (see *Agentic retrieval* in [features.md](features.md)).
 | What | Where |
 |---|---|
 | Knowledge-base copies of your files | macOS: `~/Library/Application Support/dev.andai.agent/kb/` (owner-only)<br>Windows: `%APPDATA%\dev.andai.agent\kb\` (your profile's permissions) |
-| Knowledge graphs | `.ug/andai-*` in your home folder (`~` or `%USERPROFILE%`) |
+| Knowledge graphs | `.ug/` in your home folder (`~` or `%USERPROFILE%`); Andai's are `andai-*`, and Andai also lists the projects you indexed with ug |
 | Chats, persona, settings, cached models | The app's own webview storage |
 
 Deleting a knowledge base in Andai removes its copies and its graph. Your
-originals are never touched.
+originals are never touched. Deleting a project you indexed with ug removes
+only ug's graph of it, never the folder it indexed.

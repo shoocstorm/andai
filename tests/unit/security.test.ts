@@ -137,6 +137,23 @@ describe('egress (AGENTS.md §1.4)', () => {
       expect(deps, crate).not.toMatch(new RegExp(`^${crate}\\s*=`, 'm'));
   });
 
+  it('only the ug installer makes requests from Rust: system curl, HTTPS only, fixed GitHub URLs, verified by sha256', () => {
+    // A product decision (AGENTS.md §1.4, 2026-09-30): the user-initiated ug install.
+    const rust = readdirSync(join(ROOT, 'src-tauri/src'), { recursive: true })
+      .map((f) => String(f).replaceAll('\\', '/'))
+      .filter((f) => f.endsWith('.rs'));
+    expect(rust.filter((f) => /Command::new\([^)]*(curl|wget)/.test(read(`src-tauri/src/${f}`)))).toEqual(['ug_install.rs']);
+    const src = read('src-tauri/src/ug_install.rs');
+    const code = src.slice(0, src.indexOf('#[cfg(test)]'));
+    expect([...code.matchAll(/"https:\/\/[^"]*"/g)].map((m) => m[0]).sort()).toEqual([
+      '"https://api.github.com/repos/shoocstorm/ug/releases/latest"',
+      '"https://github.com/shoocstorm/ug/releases/download/"',
+    ]);
+    expect(code).toMatch(/"--proto", "=https", "--proto-redir", "=https"/);
+    expect(code).toMatch(/if hash != expected/);
+    expect(code).toMatch(/if ug_path\(\)\.is_some\(\)/); // never replaces an install the user has
+  });
+
   it('the Laya tokenizer brings no HTTP client (tokenizers without its `http` feature)', () => {
     // tokenizers' `http` feature downloads from the Hub through hf-hub + ureq.
     // (reqwest and hyper are in the lockfile only as an optional Tauri feature

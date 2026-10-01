@@ -10,7 +10,6 @@ import {
   kbIndex,
   kbList,
   kbRemoveSource,
-  kbSetKind,
   kbSource,
   ugStatus,
   type KbInfo,
@@ -31,6 +30,8 @@ type KbState = {
   grounding: string | null;
   k: number;
   maxChars: number;
+  /** What the user says a KB holds, by slug, over what Andai derives; decides which agent tools apply. */
+  kindOverrides: Record<string, KbKind>;
   logs: Record<string, { at: number; line: string }[]>;
   lastSearch: { ms: number; hits: number } | null;
   hits24h: number;
@@ -46,6 +47,7 @@ export const useKb = create<KbState>()(
       grounding: null,
       k: 8,
       maxChars: 6000,
+      kindOverrides: {},
       logs: {},
       lastSearch: null,
       hits24h: 0,
@@ -53,7 +55,7 @@ export const useKb = create<KbState>()(
     {
       name: 'andai.kb',
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ selected: s.selected, grounding: s.grounding, k: s.k, maxChars: s.maxChars }),
+      partialize: (s) => ({ selected: s.selected, grounding: s.grounding, k: s.k, maxChars: s.maxChars, kindOverrides: s.kindOverrides }),
     },
   ),
 );
@@ -64,7 +66,14 @@ const nameOf = (slug: string) => useKb.getState().kbs.find((k) => k.slug === slu
 const logKb = (action: 'create' | 'index' | 'add' | 'sample' | 'remove' | 'delete' | 'kind', slug: string, extra: Record<string, unknown> = {}) =>
   logApp('kb', { action, kb: nameOf(slug), slug, ...extra });
 
-function upsert(kb: KbInfo) {
+/** Rust reports what a KB holds; the user's override, kept here, wins. */
+function withKind(kb: KbInfo): KbInfo {
+  const override = useKb.getState().kindOverrides[kb.slug] ?? null;
+  return { ...kb, kindOverride: override, kind: override ?? kb.kind };
+}
+
+function upsert(raw: KbInfo) {
+  const kb = withKind(raw);
   const kbs = useKb.getState().kbs;
   const i = kbs.findIndex((k) => k.slug === kb.slug);
   useKb.setState({ kbs: i === -1 ? [...kbs, kb] : kbs.map((k) => (k.slug === kb.slug ? kb : k)) });
@@ -77,7 +86,8 @@ function pushLog(slug: string, line: string) {
 }
 
 export async function refreshKbs() {
-  const [kbs, ug] = await Promise.all([kbList().catch(() => []), ugStatus()]);
+  const [raw, ug] = await Promise.all([kbList().catch(() => []), ugStatus()]);
+  const kbs = raw.map(withKind);
   const s = useKb.getState();
   const exists = (slug: string | null) => !!slug && kbs.some((k) => k.slug === slug);
   useKb.setState({
@@ -193,15 +203,19 @@ export async function deleteKb(slug: string) {
   }
 }
 
-/** Overrides what the KB is taken to hold (null: derive it from the sources); decides which agent tools apply. */
-export async function setKind(slug: string, kind: KbKind | null) {
-  try {
-    upsert(await kbSetKind(slug, kind));
-    logKb('kind', slug, { kind });
-  } catch (e) {
-    logKb('kind', slug, { kind, error: errText(e) });
-    toast({ tone: 'error', title: 'Could not change the knowledge base kind', body: errText(e) });
-  }
+/** Overrides what the KB is taken to hold (null: what Andai derives); decides which agent tools apply. */
+export function setKind(slug: string, kind: KbKind | null) {
+  const { [slug]: _, ...rest } = useKb.getState().kindOverrides;
+  useKb.setState({ kindOverrides: kind ? { ...rest, [slug]: kind } : rest });
+  const kb = useKb.getState().kbs.find((k) => k.slug === slug);
+  if (kb) upsert({ ...kb, kind: kb.kindOverride ? derivedKind(kb) : kb.kind });
+  logKb('kind', slug, { kind });
+}
+
+/** What the KB holds without the user's override: ug's kind is lost once overridden, so derive it from the files. */
+export function derivedKind(kb: Pick<KbInfo, 'sources'>): KbKind {
+  const code = kb.sources.filter((s) => s.kind === 'CODE').length;
+  return code === 0 ? 'document' : code === kb.sources.length ? 'code' : 'mixed';
 }
 
 /** Loads what the source dialog shows about one source; throws a message the dialog can show. */

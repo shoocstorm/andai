@@ -19,15 +19,17 @@ use tauri::{AppHandle, Manager, State};
 
 pub struct Sample {
     pub id: &'static str,
+    /// The knowledge base it becomes: `andai-<slug>`, with its files in `kb/<slug>/docs`.
+    pub slug: &'static str,
     pub name: &'static str,
     /// Folders under the bundled `samples/`, in order.
     pub folders: &'static [&'static str],
 }
 
 pub const SAMPLES: &[Sample] = &[
-    Sample { id: "tidewater-docs", name: "Tidewater Ferries · Documents", folders: &["docs", "large"] },
-    Sample { id: "tidewater-code", name: "Tidewater Ferries · Code", folders: &["code"] },
-    Sample { id: "tidewater-mixed", name: "Tidewater Ferries · Docs + code", folders: &["docs", "code"] },
+    Sample { id: "tidewater-docs", slug: "tidewater-ferries-documents", name: "Tidewater Ferries · Documents", folders: &["docs", "large"] },
+    Sample { id: "tidewater-code", slug: "tidewater-ferries-code", name: "Tidewater Ferries · Code", folders: &["code"] },
+    Sample { id: "tidewater-mixed", slug: "tidewater-ferries-docs-code", name: "Tidewater Ferries · Docs + code", folders: &["docs", "code"] },
 ];
 
 fn sample(id: &str) -> Result<&'static Sample, String> {
@@ -69,33 +71,22 @@ fn files(root: &std::path::Path, s: &Sample) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
-/// Adds sample `sample` as a knowledge base, or returns the one already added
-/// under its name. Its files are copied in and pending; call `kb_index` next.
+/// Adds sample `sample` as knowledge base `andai-<slug>`, or returns it if
+/// it's already there. Its files are copied in and pending; call `kb_index` next.
 #[tauri::command]
 pub fn kb_add_sample(app: AppHandle, sample: String, indexing: State<'_, Indexing>) -> Result<KbInfo, String> {
     let s = self::sample(&sample)?;
-    let root = ug::kb_root(&app)?;
-    let existing = fs::read_dir(&root)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .filter_map(|e| ug::read_meta(&e.path()).ok())
-        .find(|m| m.name == s.name);
-    if let Some(meta) = existing {
-        return ug::load_info(&app, &meta.slug, &indexing);
+    let project = format!("{}{}", ug::PROJECT_PREFIX, s.slug);
+    let docs = ug::kb_dir(&app, s.slug)?.join("docs");
+    let has_files = fs::read_dir(&docs).map(|mut d| d.next().is_some()).unwrap_or(false);
+    if !has_files {
+        let paths = files(&samples_root(&app)?, s)?;
+        ug::create_private_dir(&docs).map_err(|e| e.to_string())?;
+        for p in &paths {
+            ug::ingest_file(&docs, p)?;
+        }
     }
-    let paths = files(&samples_root(&app)?, s)?;
-    let kb = ug::create_kb(&app, s.name, &indexing)?;
-    let dir = ug::kb_dir(&app, &kb.meta.slug)?;
-    let docs = dir.join("docs");
-    let mut meta = ug::read_meta(&dir)?;
-    for p in &paths {
-        let mut source = ug::ingest_file(&docs, p)?;
-        // Not a path on the user's disk: say where it came from instead.
-        source.original = format!("Sample: {}", p.file_name().and_then(|n| n.to_str()).unwrap_or_default());
-        meta.sources.push(source);
-    }
-    ug::write_meta(&dir, &meta)?;
-    ug::load_info(&app, &kb.meta.slug, &indexing)
+    ug::load_info(&app, &project, &indexing)
 }
 
 #[cfg(test)]
@@ -114,7 +105,12 @@ mod tests {
         }
         let ids: std::collections::HashSet<_> = SAMPLES.iter().map(|s| s.id).collect();
         let names: std::collections::HashSet<_> = SAMPLES.iter().map(|s| s.name).collect();
-        assert_eq!((ids.len(), names.len()), (SAMPLES.len(), SAMPLES.len()));
+        let slugs: std::collections::HashSet<_> = SAMPLES.iter().map(|s| s.slug).collect();
+        assert_eq!((ids.len(), names.len(), slugs.len()), (SAMPLES.len(), SAMPLES.len(), SAMPLES.len()));
+        // A sample's slug is what slugify makes of its name, as for a knowledge base the user names.
+        for s in SAMPLES {
+            assert_eq!(ug::slugify(s.name), s.slug);
+        }
     }
 
     #[test]

@@ -169,14 +169,11 @@ function Overview({
       <section className="sd-block" aria-label="Details">
         <h4 className="label">Details</h4>
         <dl className="sd-meta">
-          <Meta k="Added from">
-            <span className="mono selectable sd-path">{s.original}</span>
-            <CopyButton text={s.original} label="Copy original path" />
+          <Meta k={kb.managed ? 'Stored copy' : 'File'}>
+            <span className="mono selectable sd-path">{view.path}</span>
+            <CopyButton text={view.path} label="Copy path" />
           </Meta>
-          <Meta k="Stored copy">
-            <span className="mono selectable sd-path">docs/{s.file}</span>
-          </Meta>
-          <Meta k="Added">
+          <Meta k={kb.managed ? 'Added' : 'Modified'}>
             {fmtDate(s.addedAt)} <span className="faint">· {fmtAgo(s.addedAt)}</span>
           </Meta>
           <Meta k="Last indexed">
@@ -188,7 +185,7 @@ function Overview({
             {structure.isTest && <span className="pill amber sd-inline-pill">test</span>}
           </Meta>
           <Meta k="Graph project">
-            <span className="mono selectable">andai-{kb.slug}</span>
+            <span className="mono selectable">{kb.slug}</span>
           </Meta>
           <Meta k="Node id">
             <span className="mono selectable">file:{s.file}</span>

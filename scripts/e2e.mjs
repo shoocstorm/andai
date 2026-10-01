@@ -57,6 +57,9 @@ const env = {
   VITE_SMOKE_MODEL: model,
   VITE_SMOKE_CANARY: canaryUrl,
   ANDAI_DATA_DIR: dataDir,
+  // ug's projects too: Andai lists every ug project, so the run gets its own
+  // and never sees or touches the user's (~/.ug). ug's embedder cache stays shared.
+  UG_HOME: join(dataDir, 'ug'),
   // Harness-only switches, read by Rust at startup (AGENTS.md §9): enable
   // dev_log/dev_exit, and grant the fixtures the way a drop would.
   ANDAI_SMOKE: '1',
@@ -80,6 +83,7 @@ function launch() {
       HOME: process.env.HOME,
       PATH: '/usr/bin:/bin',
       ANDAI_DATA_DIR: dataDir,
+      UG_HOME: env.UG_HOME,
       ANDAI_SMOKE: env.ANDAI_SMOKE,
       ANDAI_E2E_FILES: env.ANDAI_E2E_FILES,
     },

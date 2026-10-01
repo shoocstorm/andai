@@ -8,7 +8,8 @@ import type { KbKind } from './api';
 
 export type SampleDef = {
   id: string;
-  /** Exactly the name Rust gives the knowledge base; how an added sample is recognized. */
+  /** The ug project Rust makes it (samples.rs `slug`, prefixed); how an added sample is recognized. */
+  project: string;
   name: string;
   kind: KbKind;
   blurb: string;
@@ -18,6 +19,7 @@ export type SampleDef = {
 export const SAMPLES: SampleDef[] = [
   {
     id: 'tidewater-docs',
+    project: 'andai-tidewater-ferries-documents',
     name: 'Tidewater Ferries · Documents',
     kind: 'document',
     blurb: 'Seven documents: handbooks, a refund policy, a maintenance manual, a passenger guide, an incident log.',
@@ -29,6 +31,7 @@ export const SAMPLES: SampleDef[] = [
   },
   {
     id: 'tidewater-code',
+    project: 'andai-tidewater-ferries-code',
     name: 'Tidewater Ferries · Code',
     kind: 'code',
     blurb: 'The booking service in TypeScript: fares, bookings, refunds, retries.',
@@ -36,6 +39,7 @@ export const SAMPLES: SampleDef[] = [
   },
   {
     id: 'tidewater-mixed',
+    project: 'andai-tidewater-ferries-docs-code',
     name: 'Tidewater Ferries · Docs + code',
     kind: 'mixed',
     blurb: 'Both together: ask how the code implements the policy.',
@@ -47,4 +51,4 @@ export const SAMPLES: SampleDef[] = [
   },
 ];
 
-export const sampleByName = (name: string | undefined) => SAMPLES.find((s) => s.name === name);
+export const sampleByProject = (slug: string | null | undefined) => SAMPLES.find((s) => s.project === slug);

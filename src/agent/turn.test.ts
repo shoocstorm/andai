@@ -187,7 +187,9 @@ const kb = (over: Partial<KbInfo> = {}): KbInfo => ({
   lastError: null,
   kindOverride: null,
   kind: 'document',
-  dir: '/tmp/docs',
+  managed: true,
+  root: '/tmp/docs',
+  sourceCount: 0,
   status: 'ready',
   nodes: 12,
   edges: 11,
@@ -409,6 +411,16 @@ describe('runTurn (fixed pipeline)', () => {
     await runTurn('hi');
     expect(search.calls).toBe(0);
     expect(assistant().steps!.find((s) => s.kind === 'retrieve')!.detail).toMatch(/not indexed/);
+  });
+
+  it('answers without the knowledge base when ug is not installed, and says why', async () => {
+    useKb.setState({ kbs: [kb({ status: 'offline', nodes: 12 })] });
+    await runTurn('What does the handbook say?');
+    expect(search.calls).toBe(0);
+    const retrieve = assistant().steps!.find((s) => s.kind === 'retrieve')!;
+    expect(retrieve.status).toBe('skipped');
+    expect(retrieve.detail).toMatch(/UltraGraph \(ug\) isn't installed.*answering without it/);
+    expect(assistant().content).not.toBe('');
   });
 
   it('still answers when ug search fails, and marks retrieval failed', async () => {
