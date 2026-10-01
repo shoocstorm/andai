@@ -3,8 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { addMessage, clearChat, type AgentStep, type Message, type ToolCallRecord } from '../state/chat';
 import { requestApproval } from '../state/tools';
-import { useKb } from '../state/kb';
+import { readAnalysis } from '../kb/analysis';
+import { indexStamp, useKb } from '../state/kb';
 import { useLayout } from '../state/layout';
+import { useUi } from '../state/ui';
 import { CommandCenter, reasoningSummary } from './CommandCenter';
 
 beforeEach(() => {
@@ -31,6 +33,28 @@ describe('Command Center', () => {
     expect(screen.getByText(/Try asking Tidewater Ferries · Code/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Which functions call computeFare?' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /brief me/i })).toBeNull();
+  });
+
+  it('suggests questions from the analysis of the user’s own code knowledge base', () => {
+    const kb = { slug: 'repo', name: 'aldrickbot', kind: 'code', status: 'ready', sources: [], lastIndexedAt: 5, nodes: 9, edges: 8 };
+    const results = {
+      where_to_start: readAnalysis({ columns: ['id'], rows: [['function_declaration:src/p.ts:parseSkillMd']] }),
+      dependency_fanin: readAnalysis({ columns: ['id'], rows: [['function_declaration:src/r.ts:withRetry']] }),
+      biggest_files: readAnalysis({ columns: ['file'], rows: [['src/db.ts']] }),
+    };
+    useKb.setState({ kbs: [kb as never], grounding: 'repo', insights: { repo: { stamp: indexStamp(kb as never), results, errors: {}, loading: false } } });
+    render(<CommandCenter />);
+    expect(screen.getByText('Get to know aldrickbot')).toBeInTheDocument();
+    for (const q of ['How does parseSkillMd work?', 'Who calls withRetry?', 'What does src/db.ts do?', 'What would break if I changed src/db.ts?'])
+      expect(screen.getByRole('button', { name: q })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /brief me/i })).toBeNull();
+  });
+
+  it('takes a question handed over from another screen as its draft, once', async () => {
+    useUi.setState({ prefill: 'Who calls withRetry?' });
+    render(<CommandCenter />);
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('Who calls withRetry?'));
+    expect(useUi.getState().prefill).toBeNull();
   });
 
   it('pages the knowledge base menu, opening on the one grounding chat', async () => {

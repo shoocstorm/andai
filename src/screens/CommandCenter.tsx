@@ -35,12 +35,13 @@ import { runTurn, stopTurn } from '../agent/turn';
 import { Bar, CopyButton, Markdown, Pager, Stat, fmtTime, usePaged } from '../components/ui';
 import { NeuralCore } from '../components/NeuralCore';
 import { debugReport } from '../agent/debugReport';
-import { inTauri } from '../kb/api';
+import { ONBOARDING_PRESETS, onboardingQuestions } from '../kb/analysis';
+import { inTauri, type KbInfo } from '../kb/api';
 import { sampleByProject } from '../kb/samples';
 import { loadModel, useEngine } from '../llm/engine';
 import { layaById, modelById, recommendedModel } from '../llm/models';
 import { clearChat, splitThink, useChat, type Message, type TraceStep } from '../state/chat';
-import { addFiles, addSample, createKb, useKb } from '../state/kb';
+import { addFiles, addSample, createKb, indexStamp, loadInsights, useKb } from '../state/kb';
 import { useLayout } from '../state/layout';
 import { usePersona } from '../state/persona';
 import { useTools } from '../state/tools';
@@ -494,12 +495,32 @@ const SUGGESTIONS = [
   { icon: Sparkles, title: 'What can you do offline?', prompt: 'What can you help me with while running fully offline on this machine?' },
 ];
 
+/** Questions about an indexed code KB the user grounds the chat in, once its analysis is in; null until then. */
+function useOnboarding(kb: KbInfo | null): { name: string; questions: string[] } | null {
+  const code = kb && kb.kind !== 'document' && kb.status === 'ready' ? kb : null;
+  const stamp = code ? indexStamp(code) : null;
+  const entry = useKb((s) => (code ? s.insights[code.slug] : undefined));
+  useEffect(() => {
+    if (code) void loadInsights(code.slug, ONBOARDING_PRESETS);
+  }, [code?.slug, stamp]);
+  if (!code || entry?.stamp !== stamp) return null;
+  const questions = onboardingQuestions(entry.results);
+  return questions.length ? { name: code.name, questions } : null;
+}
+
 function EmptyHub() {
   const { loadedId, status, cached, progress, loadingId, native } = useEngine();
   const kbs = useKb((s) => s.kbs);
   const grounding = useKb((s) => s.grounding);
   // Grounded in a bundled sample: suggest questions it can answer.
   const sample = sampleByProject(grounding);
+  // Grounded in the user's own code: suggest questions from what ug's analysis shows (kb/analysis.ts).
+  const onboarding = useOnboarding(sample ? null : (kbs.find((k) => k.slug === grounding) ?? null));
+  const asked = sample
+    ? { title: `Try asking ${sample.name}`, questions: sample.questions }
+    : onboarding
+      ? { title: `Get to know ${onboarding.name}`, questions: onboarding.questions }
+      : null;
   const [addingSample, setAddingSample] = useState(false);
   const go = useUi((s) => s.go);
   const name = usePersona((s) => s.agentName);
@@ -577,13 +598,13 @@ function EmptyHub() {
         </div>
       ) : null}
 
-      {sample && (
+      {asked && (
         <div className="label" style={{ marginTop: 6 }}>
-          Try asking {sample.name}
+          {asked.title}
         </div>
       )}
       <div className="cc-suggest">
-        {(sample ? sample.questions.map((q) => ({ icon: MessageSquareText, title: q, prompt: q })) : SUGGESTIONS).map((s) => (
+        {(asked ? asked.questions.map((q) => ({ icon: MessageSquareText, title: q, prompt: q })) : SUGGESTIONS).map((s) => (
           <button
             key={s.title}
             className="cc-suggest-card"

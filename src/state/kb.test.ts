@@ -179,6 +179,13 @@ describe('code insights', () => {
     expect(Object.keys(useKb.getState().insights.repo.results)).toEqual(['biggest_files']);
   });
 
+  it('a second load while one runs fetches only what the first doesn’t', async () => {
+    useKb.setState({ kbs: [code()] });
+    await Promise.all([loadInsights('repo', ['biggest_files']), loadInsights('repo', ['biggest_files', 'dead_code'])]);
+    expect(bridge.analyze.map((c) => c.preset).sort()).toEqual(['biggest_files', 'dead_code']);
+    expect(useKb.getState().insights.repo.loading).toBe(false);
+  });
+
   it('skips a KB that isn’t indexed, and keeps each preset’s error, an old ug’s as an update hint', async () => {
     useKb.setState({ kbs: [code({ status: 'pending' })] });
     await loadInsights('repo', ['biggest_files']);

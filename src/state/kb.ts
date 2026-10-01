@@ -248,6 +248,9 @@ export const indexStamp = (kb: Pick<KbInfo, 'lastIndexedAt' | 'nodes' | 'edges'>
 /** At most this many `ug analyze` runs at once: each is its own process, up to about a second on a large repo. */
 const ANALYZE_CONCURRENCY = 4;
 
+/** `slug · stamp · preset` runs in flight, so overlapping loads don't run a preset twice. */
+const inflight = new Set<string>();
+
 async function pool<T>(items: T[], n: number, run: (item: T) => Promise<void>) {
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
@@ -271,19 +274,28 @@ export async function loadInsights(slug: string, presets: AnalyzePreset[] = INSI
   if (!kb || kb.status !== 'ready') return;
   const stamp = indexStamp(kb);
   const have = useKb.getState().insights[slug];
-  const todo = presets.filter((p) => have?.stamp !== stamp || !(p in have.results || p in have.errors));
-  if (!todo.length || (have?.stamp === stamp && have.loading)) return;
+  const key = (p: AnalyzePreset) => `${slug}\u0000${stamp}\u0000${p}`;
+  // Skip what this index already has, or what another call is fetching now.
+  const todo = presets.filter((p) => !inflight.has(key(p)) && (have?.stamp !== stamp || !(p in have.results || p in have.errors)));
+  if (!todo.length) return;
+  for (const p of todo) inflight.add(key(p));
   patchInsights(slug, (e) => ({ ...e, loading: true }), stamp);
-  await pool(todo, ANALYZE_CONCURRENCY, async (preset) => {
-    try {
-      const out = await kbAnalyze(slug, preset, null, 25);
-      const a = readAnalysis(out.output);
-      patchInsights(slug, (e) => ({ ...e, results: { ...e.results, [preset]: a } }), stamp);
-    } catch (e) {
-      patchInsights(slug, (cur) => ({ ...cur, errors: { ...cur.errors, [preset]: analysisError(e) } }), stamp);
-    }
-  });
-  patchInsights(slug, (e) => ({ ...e, loading: false }), stamp);
+  try {
+    await pool(todo, ANALYZE_CONCURRENCY, async (preset) => {
+      try {
+        const out = await kbAnalyze(slug, preset, null, 25);
+        const a = readAnalysis(out.output);
+        patchInsights(slug, (e) => ({ ...e, results: { ...e.results, [preset]: a } }), stamp);
+      } catch (e) {
+        patchInsights(slug, (cur) => ({ ...cur, errors: { ...cur.errors, [preset]: analysisError(e) } }), stamp);
+      } finally {
+        inflight.delete(key(preset));
+      }
+    });
+  } finally {
+    const busy = [...inflight].some((k) => k.startsWith(`${slug}\u0000${stamp}\u0000`));
+    patchInsights(slug, (e) => ({ ...e, loading: busy }), stamp);
+  }
 }
 
 /** A file's blast radius for the source dialog: who reaches it, which tests, which external surfaces. */

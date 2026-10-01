@@ -104,7 +104,7 @@ describe('registry', () => {
   });
   it('lets Laya pick the analysis among presets Rust allows', () => {
     const t = tool('kb_analyze');
-    expect(t.choices?.[0].options.map((o) => o.id)).toEqual(t.schema!.properties.question.enum);
+    expect(t.choices?.[0].options.map((o) => o.id)).toEqual((t.schema!.properties.question as { enum: string[] }).enum);
     for (const o of t.choices![0].options) expect(o.text.length).toBeLessThan(80);
   });
 });

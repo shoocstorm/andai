@@ -126,6 +126,9 @@ export const INSIGHT_PRESETS: AnalyzePreset[] = [
   'dead_code',
 ];
 
+/** What `onboardingQuestions` reads: a cheap subset, loaded when the chat is grounded in a code KB. */
+export const ONBOARDING_PRESETS: AnalyzePreset[] = ['where_to_start', 'dependency_fanin', 'biggest_files'];
+
 export type Insights = Partial<Record<AnalyzePreset, Analysis>>;
 
 const CALLABLE = new Set(['Function', 'Method']);
