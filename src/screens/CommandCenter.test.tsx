@@ -33,6 +33,24 @@ describe('Command Center', () => {
     expect(screen.queryByRole('button', { name: /brief me/i })).toBeNull();
   });
 
+  it('pages the knowledge base menu, opening on the one grounding chat', async () => {
+    const user = userEvent.setup();
+    const kbs = Array.from({ length: 8 }, (_, i) => ({ slug: `p${i}`, name: `project-${i}`, managed: false, kind: 'code', status: 'ready', sources: [], sourceCount: 0, nodes: 0 }));
+    useKb.setState({ kbs: kbs as never, grounding: 'p7' });
+    render(<CommandCenter />);
+    await user.click(screen.getByTitle('Knowledge base used to ground answers'));
+    const nav = screen.getByRole('navigation', { name: 'Knowledge bases' });
+    const pager = within(nav);
+    const menu = within(nav.closest('.menu') as HTMLElement);
+    expect(pager.getByText('7–8 of 8')).toBeInTheDocument();
+    expect(menu.getByRole('button', { name: /project-7/ })).toHaveAttribute('aria-selected', 'true');
+    await user.click(pager.getByRole('button', { name: 'Previous page' }));
+    expect(menu.getByRole('button', { name: /project-0/ })).toBeInTheDocument();
+    expect(menu.queryByRole('button', { name: /project-7/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Knowledge bases' })).toBeInTheDocument(); // the menu stays open
+    expect(menu.getByRole('button', { name: /No knowledge base/ })).toBeInTheDocument();
+  });
+
   it('only enables send once there is text', async () => {
     const user = userEvent.setup();
     render(<CommandCenter />);

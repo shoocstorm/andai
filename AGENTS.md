@@ -666,17 +666,25 @@ level defaults to *Ask*.
   neighbours last). Its absolute value means little, so the UI shows it
   relative to the best match in the same list (`kb/match.ts`).
 - **A knowledge base is a ug project** (2026-10-01, a product decision: no
-  `kb.json`). `ug list --json` (ug 0.1.22) reports `name`, `repoRoot`,
-  `dataDir`, node/edge counts, `sizeBytes`, `createdAt`/`updatedAt`
+  `kb.json`). **Andai talks to ug only through its command line**, never by
+  reading ug's data folder (`tests/unit/ug-interface.test.ts` holds it): ug's
+  file layout is ug's to change. `ug list --json` (ug 0.1.22) reports `name`,
+  `repoRoot`, node/edge counts, `sizeBytes`, `createdAt`/`updatedAt`
   (seconds), `isStale`, `hasDb`, `repoMissing` and `kbKind`
   (`docs`/`code`/`mixed`; an empty project says `code`); the full list (with
-  the staleness scan) took a few ms. It doesn't name the files: those are
-  `files` in `<dataDir>/project.json`. With **no projects at all it exits 1
-  and prints a sentence, not JSON**, read as an empty list. `ug gen` on an
-  empty folder registers a 0-file project, so Andai's new KBs show in ug at
-  once. `updatedAt` lands after the copied files' mtimes (measured), which is
-  how a copy reads as indexed (in `project.json`, mtime ≤ `updatedAt`) or
-  pending. `UG_HOME` relocates every project (the embedder cache stays in
+  the staleness scan) took a few ms. With **no projects at all it exits 1 and
+  prints a sentence, not JSON**, read as an empty list. A project's files come
+  from **`ug files -n <project> --json -k 5000`** (added to ug on 2026-10-01
+  for this; in the release after 0.1.22): per file `path`, `ext`,
+  `language`, `kind`, `bytes`, `modified` and `status` (`fresh` · `changed` ·
+  `missing`, the same per-file check `ug list` counts with), plus `total`
+  and `counts` over every match. A copy reads as indexed when ug lists it
+  `fresh`, otherwise pending. **ug 0.1.22 has no `ug files`**: it ends stderr
+  with `error: unknown command: files`, and Andai shows "update ug"
+  (`UG_TOO_OLD`) on each project instead of its files. `kb_list` runs one
+  `ug files` per project, in parallel. `ug gen` on an empty folder registers
+  a 0-file project, so Andai's new KBs show in ug at once. `UG_HOME`
+  relocates every project (the embedder cache stays in
   `~/Library/Caches/ug/models`), so the e2e, eval and bench runners set it
   and never see the user's projects. `ug uninstall` deletes **all**
   projects; Andai's copies in app data survive and list as never indexed.
@@ -1110,7 +1118,7 @@ access (rely on FileVault). Encryption at rest is planned (below).
 | Laya decisions: state ≤ 64 KB, question ≤ 2 KB, 2–16 options with `[a-z0-9_]` ids, text ≤ 1 KB; mask tokens stripped from all input | `laya/mod.rs` `validate`, `laya/prompt.rs` | Rust unit tests |
 | Laya relevance and claim checks: a fixed statement in Rust (`RELEVANT`, `SUPPORTS`), never text from the webview; 1–24 passages or claims, request ≤ 4 KB, statement ≤ 2 KB, passage ≤ 16 KB, source ≤ 512 bytes | `laya/mod.rs` `validate_passages`, `validate_claims` | Rust unit tests |
 | MLX chat models: closed catalog in Rust (commit, sizes, sha256), the same verified store as Laya; generation bounded (1–512 messages ≤ 512 KB, no NUL, max_tokens ≤ 8192, sampling ranges, grammar ≤ 8 KB, context 512–32768); roles are system/user/assistant only | `llm/catalog.rs`, `laya/store.rs`, `llm/mod.rs` `validate` | Rust unit tests; `test:llm` |
-| Source dialog (`kb_source`): the file must be one the KB lists (Andai's `docs/` copies, or the repo-relative paths in the ug project's `project.json`; normal components only, exact match), read from the KB's root (app data, or the `repoRoot` ug recorded), never through a symlink nor resolving outside the root, at most 512 KB; its outline comes from `ug file_context file:<name>` (a node id, so a name can't parse as a flag) under `tools::run` (scrubbed env, 20 s, 1 MB cap). Text is shown through `<Markdown>` or as plain text | `ug.rs` `kb_source`, `screens/SourceDialog.tsx` | Rust unit tests; `test:ug` checks the outline against real ug; `SourceDialog.test.tsx` |
+| Source dialog (`kb_source`): the file must be one the KB lists (Andai's `docs/` copies, or the repo-relative paths `ug files` reports; normal components only, exact match), read from the KB's root (app data, or the `repoRoot` ug recorded), never through a symlink nor resolving outside the root, at most 512 KB; its outline comes from `ug file_context file:<name>` (a node id, so a name can't parse as a flag) under `tools::run` (scrubbed env, 20 s, 1 MB cap). Text is shown through `<Markdown>` or as plain text | `ug.rs` `kb_source`, `screens/SourceDialog.tsx` | Rust unit tests; `test:ug` checks the outline against real ug; `SourceDialog.test.tsx` |
 | Sample knowledge bases: a closed list of ids; files only from the app's resource folder, copied like a user's | `samples.rs` | Rust unit tests |
 | Models added from Hugging Face: only public, ungated repos; pinned to the commit seen when picked; GGUF by its LFS sha256 (the webview's integrity gate); MLX through Rust: repo/commit syntax, a closed set of file names (config, tokenizer, template, safetensors; no pickle, no code), sizes and caps (32 GB a file, 64 GB a model, 16 MB inline, 32 models), config and template checked before any download, manifest written and re-validated by Rust, inline files re-hashed on every load. Search results and model data are shown as text, never Markdown or HTML; no model card is rendered | `llm/hub.ts`, `llm/custom.ts`, `src-tauri/src/llm/custom.rs`, `config.rs` | `hub.test.ts`, `custom.test.ts`, Rust unit tests, `security.test.ts`; e2e (search, inspect, add, remove) |
 | Only `llm/laya.ts` may `fetch`, and only `pinnedFileUrl(...)` (pinned HF commits); tokenizers built without its `http` feature | `llm/laya.ts`, `llm/models.ts`, `Cargo.toml` | `security.test.ts`, `models.test.ts` |

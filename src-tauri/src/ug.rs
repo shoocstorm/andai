@@ -310,7 +310,6 @@ pub(crate) fn safe_rel_path(p: &str) -> bool {
 pub(crate) struct UgProject {
     pub name: String,
     pub repo_root: PathBuf,
-    data_dir: PathBuf,
     nodes: u64,
     edges: u64,
     size_bytes: u64,
@@ -337,7 +336,6 @@ fn parse_projects(list: &Value) -> Vec<UgProject> {
             }
             Some(UgProject {
                 repo_root: path(p, "repoRoot")?,
-                data_dir: path(p, "dataDir")?,
                 nodes: num(p, "nodes"),
                 edges: num(p, "edges"),
                 size_bytes: num(p, "sizeBytes"),
@@ -361,25 +359,84 @@ pub(crate) fn ug_projects() -> Option<Vec<UgProject>> {
     Some(serde_json::from_slice::<Value>(&out.stdout).map(|v| parse_projects(&v)).unwrap_or_default())
 }
 
-/// The files ug indexed, repo-relative and sorted. `ug list` only counts
-/// them; the names are in the project's `project.json` (`files`, ug 0.1.22).
-fn indexed_files(p: &UgProject) -> Vec<String> {
-    let Ok(f) = fs::File::open(p.data_dir.join("project.json")) else { return vec![] };
-    let mut raw = Vec::new();
-    if f.take(64 * 1024 * 1024).read_to_end(&mut raw).is_err() {
-        return vec![];
-    }
-    let mut files: Vec<String> = serde_json::from_slice::<Value>(&raw)
-        .ok()
-        .and_then(|v| v.get("files").and_then(Value::as_array).cloned())
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|f| f.as_str().map(String::from))
-        .filter(|f| safe_rel_path(f))
-        .collect();
-    files.sort();
-    files
+/// One file from `ug files --json`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct UgFile {
+    pub path: String,
+    language: String,
+    bytes: u64,
+    modified: u64,
+    /// fresh | changed | missing, against the index.
+    status: String,
 }
+
+/// What `ug files --json` reports for a project: its indexed files (the first
+/// `MAX_LISTED_SOURCES`), how many there are, and how many drifted since.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct UgFiles {
+    pub files: Vec<UgFile>,
+    total: usize,
+    drifted: usize,
+}
+
+/// Reads `ug files --json`, keeping only paths that stay inside the project.
+fn parse_files(v: &Value) -> UgFiles {
+    let num = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+    let files: Vec<UgFile> = v
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|fs| {
+            fs.iter()
+                .filter_map(|f| {
+                    let path = f.get("path")?.as_str()?.to_string();
+                    safe_rel_path(&path).then(|| UgFile {
+                        path,
+                        language: f.get("language").and_then(Value::as_str).unwrap_or("").to_string(),
+                        bytes: num(f, "bytes"),
+                        modified: num(f, "modified"),
+                        status: f.get("status").and_then(Value::as_str).unwrap_or("").to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let counts = v.get("counts").cloned().unwrap_or(Value::Null);
+    UgFiles {
+        total: v.get("total").and_then(Value::as_u64).map(|t| t as usize).unwrap_or(files.len()),
+        drifted: (num(&counts, "changed") + num(&counts, "missing")) as usize,
+        files,
+    }
+}
+
+/// A project's indexed files, through `ug files` (ug's interface; Andai never
+/// reads ug's data folder). An older ug without the command says so.
+pub(crate) fn ug_files(project: &str) -> Result<UgFiles, String> {
+    let mut cmd = ug()?;
+    cmd.args(["files", "-n", project, "--json", "-k", &MAX_LISTED_SOURCES.to_string(), "--no-banner"]);
+    let out = cmd.output().map_err(|e| format!("failed to run ug: {e}"))?;
+    match serde_json::from_slice::<Value>(&out.stdout) {
+        Ok(v) if out.status.success() => Ok(parse_files(&v)),
+        _ => Err(files_error(&String::from_utf8_lossy(&out.stderr))),
+    }
+}
+
+/// What to tell the user when `ug files` fails. A ug from before the command
+/// (0.1.22 and older) prints its whole help and ends stderr with
+/// `error: unknown command: files`.
+fn files_error(stderr: &str) -> String {
+    let err = strip_ansi(stderr);
+    let last = err.trim().lines().last().unwrap_or("").trim();
+    if last.to_ascii_lowercase().contains("unknown command: files") {
+        UG_TOO_OLD.into()
+    } else if last.is_empty() {
+        "ug files failed".into()
+    } else {
+        last.trim_start_matches("error:").trim().to_string()
+    }
+}
+
+pub(crate) const UG_TOO_OLD: &str =
+    "This version of ug can't list a project's files (`ug files`). Update it with `ug upgrade`, then refresh.";
 
 /// Display type from a file. Andai stores TXT and CSV as Markdown it writes
 /// (`ingest_file`), headed by the original name, which tells them apart.
@@ -412,8 +469,9 @@ fn mtime(meta: &fs::Metadata) -> u64 {
     meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-fn source_at(root: &Path, file: &str, status: &str) -> Source {
-    let path = root.join(file);
+/// One of Andai's own copies in `docs/` (Andai's data, read directly).
+fn copy_at(docs: &Path, file: &str, status: &str) -> Source {
+    let path = docs.join(file);
     let meta = fs::metadata(&path).ok();
     let bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
     let kind = kind_of(&path);
@@ -427,9 +485,26 @@ fn source_at(root: &Path, file: &str, status: &str) -> Source {
     }
 }
 
-/// Andai's copies in `docs/`: indexed when ug lists the file and it hasn't
-/// changed since the last index, else pending (failed after a failed run).
-fn managed_sources(docs: &Path, indexed: &HashSet<String>, indexed_at: Option<u64>, failed: bool) -> Vec<Source> {
+/// A file of another ug project, as `ug files` reports it.
+fn project_source(f: &UgFile) -> Source {
+    let kind = match f.language.as_str() {
+        "markdown" => "MD",
+        "pdf" => "PDF",
+        _ => "CODE",
+    };
+    Source {
+        file: f.path.clone(),
+        kind: kind.into(),
+        bytes: f.bytes,
+        approx_tokens: if kind == "PDF" { None } else { Some(f.bytes / 4) },
+        added_at: f.modified,
+        status: if f.status == "fresh" { "indexed" } else { "pending" }.into(),
+    }
+}
+
+/// Andai's copies in `docs/`: indexed when ug lists the file as fresh, else
+/// pending (failed after a failed run).
+fn managed_sources(docs: &Path, ug: &HashMap<&str, &str>, failed: bool) -> Vec<Source> {
     let mut names: Vec<String> = fs::read_dir(docs)
         .map(|d| {
             d.flatten()
@@ -443,13 +518,12 @@ fn managed_sources(docs: &Path, indexed: &HashSet<String>, indexed_at: Option<u6
     names
         .iter()
         .map(|n| {
-            let mut s = source_at(docs, n, "pending");
-            if indexed.contains(n) && indexed_at.is_some_and(|at| s.added_at <= at) {
-                s.status = "indexed".into();
-            } else if failed {
-                s.status = "failed".into();
-            }
-            s
+            let status = match ug.get(n.as_str()) {
+                Some(&"fresh") => "indexed",
+                _ if failed => "failed",
+                _ => "pending",
+            };
+            copy_at(docs, n, status)
         })
         .collect()
 }
@@ -488,24 +562,43 @@ fn managed_docs(app: &AppHandle, project: &str) -> Result<Option<PathBuf>, Strin
 }
 
 /// Everything the UI shows about one knowledge base. `docs` is Andai's folder
-/// for it, `p` ug's project (none before the first index or without ug).
-fn build_info(project: &str, docs: Option<&Path>, p: Option<&UgProject>, engine: bool, state: &Indexing) -> KbInfo {
+/// for it, `p` ug's project and `files` what `ug files` said about it (none
+/// before the first index or without ug).
+fn build_info(
+    project: &str,
+    docs: Option<&Path>,
+    p: Option<&UgProject>,
+    files: Option<&Result<UgFiles, String>>,
+    engine: bool,
+    state: &Indexing,
+) -> KbInfo {
     let indexing = state.busy.lock().unwrap().contains(project);
-    let last_error = state.errors.lock().unwrap().get(project).cloned();
-    let files = p.map(indexed_files).unwrap_or_default();
-    let indexed_at = p.filter(|p| p.nodes > 0).map(|p| p.updated_at);
-    let (mut sources, root) = match docs {
+    let mut last_error = state.errors.lock().unwrap().get(project).cloned();
+    let listed = match files {
+        Some(Ok(f)) => Some(f),
+        Some(Err(e)) => {
+            last_error.get_or_insert_with(|| e.clone());
+            None
+        }
+        None => None,
+    };
+    let (sources, source_count, root) = match docs {
         Some(docs) => {
-            let set: HashSet<String> = files.into_iter().collect();
-            (managed_sources(docs, &set, indexed_at, last_error.is_some()), docs.to_path_buf())
+            let ug: HashMap<&str, &str> =
+                listed.map(|f| f.files.iter().map(|x| (x.path.as_str(), x.status.as_str())).collect()).unwrap_or_default();
+            let sources = managed_sources(docs, &ug, last_error.is_some());
+            let n = sources.len();
+            (sources, n, docs.to_path_buf())
         }
         None => {
             let root = p.map(|p| p.repo_root.clone()).unwrap_or_default();
-            (files.iter().map(|f| source_at(&root, f, "indexed")).collect(), root)
+            let sources: Vec<Source> = listed.map(|f| f.files.iter().map(project_source).collect()).unwrap_or_default();
+            let n = listed.map(|f| f.total).unwrap_or(sources.len());
+            (sources, n, root)
         }
     };
-    let source_count = sources.len();
-    let pending = sources.iter().any(|s| s.status != "indexed") || (docs.is_none() && p.is_some_and(|p| p.stale));
+    let pending = sources.iter().any(|s| s.status != "indexed")
+        || (docs.is_none() && (p.is_some_and(|p| p.stale) || listed.is_some_and(|f| f.drifted > 0)));
     let last_error = last_error.or_else(|| {
         p.filter(|p| p.repo_missing).map(|p| format!("The indexed folder {} is gone.", p.repo_root.display()))
     });
@@ -514,7 +607,6 @@ fn build_info(project: &str, docs: Option<&Path>, p: Option<&UgProject>, engine:
         Some(_) => derive_kind(&sources),
         None => kind_from_ug(p.and_then(|p| p.kb_kind.as_deref())).unwrap_or_else(|| derive_kind(&sources)),
     };
-    sources.truncate(MAX_LISTED_SOURCES);
     let folder_created = docs.and_then(|d| fs::metadata(d).ok()).map(|m| {
         m.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or_else(|| mtime(&m))
     });
@@ -524,7 +616,7 @@ fn build_info(project: &str, docs: Option<&Path>, p: Option<&UgProject>, engine:
         managed: docs.is_some(),
         root: root.to_string_lossy().into(),
         created_at: p.map(|p| p.created_at).filter(|t| *t > 0).or(folder_created).unwrap_or(0),
-        last_indexed_at: indexed_at,
+        last_indexed_at: p.filter(|p| p.nodes > 0).map(|p| p.updated_at),
         last_error,
         sources,
         source_count,
@@ -563,7 +655,8 @@ pub(crate) fn load_info(app: &AppHandle, project: &str, state: &Indexing) -> Res
     let kb = resolve(app, project)?;
     let projects = ug_projects();
     let p = projects.as_ref().and_then(|ps| ps.iter().find(|p| p.name == kb.project));
-    Ok(build_info(&kb.project, kb.managed.then_some(kb.root.as_path()), p, projects.is_some(), state))
+    let files = p.map(|p| ug_files(&p.name));
+    Ok(build_info(&kb.project, kb.managed.then_some(kb.root.as_path()), p, files.as_ref(), projects.is_some(), state))
 }
 
 /// A source is addressed by its bare file name inside `docs/`.
@@ -695,19 +788,31 @@ pub(crate) fn open_in_system(target: &std::ffi::OsStr) -> Result<(), String> {
 #[tauri::command]
 pub async fn kb_list(app: AppHandle, indexing: State<'_, Indexing>) -> Result<Vec<KbInfo>, String> {
     let root = kb_root(&app)?;
-    let projects = tauri::async_runtime::spawn_blocking(ug_projects).await.map_err(|e| e.to_string())?;
+    // One `ug list`, then one `ug files` per project, side by side: each is a
+    // short process, and in sequence a long list of projects would add up.
+    let (projects, files) = tauri::async_runtime::spawn_blocking(|| {
+        let projects = ug_projects();
+        let files: Vec<Result<UgFiles, String>> = std::thread::scope(|s| {
+            let handles: Vec<_> = projects.iter().flatten().map(|p| s.spawn(|| ug_files(&p.name))).collect();
+            handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("ug files failed".into()))).collect()
+        });
+        (projects, files)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     let engine = projects.is_some();
     let projects = projects.unwrap_or_default();
     let mut out: Vec<KbInfo> = projects
         .iter()
-        .map(|p| Ok(build_info(&p.name, managed_docs(&app, &p.name)?.as_deref(), Some(p), engine, &indexing)))
+        .zip(&files)
+        .map(|(p, f)| Ok(build_info(&p.name, managed_docs(&app, &p.name)?.as_deref(), Some(p), Some(f), engine, &indexing)))
         .collect::<Result<_, String>>()?;
     for entry in fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
         let Some(slug) = entry.file_name().to_str().map(String::from).filter(|s| valid_slug(s)) else { continue };
         let project = format!("{PROJECT_PREFIX}{slug}");
         let docs = entry.path().join("docs");
         if docs.is_dir() && !projects.iter().any(|p| p.name == project) {
-            out.push(build_info(&project, Some(&docs), None, engine, &indexing));
+            out.push(build_info(&project, Some(&docs), None, None, engine, &indexing));
         }
     }
     out.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.slug.cmp(&b.slug)));
@@ -1317,9 +1422,9 @@ mod tests {
         }
     }
 
-    fn project(name: &str, root: &Path, data: &Path) -> Value {
+    fn project(name: &str, root: &Path) -> Value {
         json!({
-            "name": name, "repoRoot": root, "dataDir": data, "nodes": 9, "edges": 8, "sizeBytes": 1234,
+            "name": name, "repoRoot": root, "nodes": 9, "edges": 8, "sizeBytes": 1234,
             "createdAt": 100, "updatedAt": 4_000_000_000u64, "isStale": false, "hasDb": true,
             "repoMissing": false, "kbKind": "code",
         })
@@ -1328,10 +1433,10 @@ mod tests {
     #[test]
     fn reads_ug_list_and_skips_projects_that_dont_look_real() {
         let list = json!({ "projects": [
-            project("andai-docs", Path::new("/r"), Path::new("/d")),
-            project("--evil", Path::new("/r"), Path::new("/d")),
-            { "name": "relative", "repoRoot": "r", "dataDir": "/d" },
-            { "name": "no-root", "dataDir": "/d" },
+            project("andai-docs", Path::new("/r")),
+            project("--evil", Path::new("/r")),
+            { "name": "relative", "repoRoot": "r" },
+            { "name": "no-root" },
         ]});
         let ps = parse_projects(&list);
         assert_eq!(ps.len(), 1);
@@ -1339,17 +1444,34 @@ mod tests {
         assert_eq!(ps[0].kb_kind.as_deref(), Some("code"));
         // ug 0.1.22 prints a sentence, not JSON, when there are no projects.
         assert!(parse_projects(&json!({})).is_empty());
-        let mut never_ingested = project("p", Path::new("/r"), Path::new("/d"));
+        let mut never_ingested = project("p", Path::new("/r"));
         never_ingested["hasDb"] = json!(false);
         assert!(parse_projects(&json!({ "projects": [never_ingested] }))[0].stale);
     }
 
-    /// A ug project's data dir with `project.json` listing `files`.
-    fn ug_project(name: &str, root: &Path, files: &[&str]) -> (tempfile::TempDir, UgProject) {
-        let data = tempfile::tempdir().unwrap();
-        fs::write(data.path().join("project.json"), json!({ "name": name, "files": files }).to_string()).unwrap();
-        let p = parse_projects(&json!({ "projects": [project(name, root, data.path())] })).remove(0);
-        (data, p)
+    fn ug_project(name: &str, root: &Path) -> UgProject {
+        parse_projects(&json!({ "projects": [project(name, root)] })).remove(0)
+    }
+
+    /// What `ug files --json` prints: `(path, language, bytes, status)` per file.
+    fn listed(files: &[(&str, &str, u64, &str)]) -> Result<UgFiles, String> {
+        let changed = files.iter().filter(|f| f.3 != "fresh").count();
+        Ok(parse_files(&json!({
+            "total": files.len(),
+            "counts": { "fresh": files.len() - changed, "changed": changed, "missing": 0 },
+            "files": files.iter().map(|(path, language, bytes, status)| json!({
+                "path": path, "ext": "", "language": language, "kind": "", "bytes": bytes, "modified": 7, "status": status,
+            })).collect::<Vec<_>>(),
+        })))
+    }
+
+    #[test]
+    fn reads_ug_files_and_drops_paths_that_leave_the_project() {
+        let f = listed(&[("src/fare.ts", "typescript", 19, "fresh"), ("../escape.md", "markdown", 1, "fresh"), ("/abs.md", "markdown", 1, "fresh")]).unwrap();
+        assert_eq!(f.files.iter().map(|x| x.path.as_str()).collect::<Vec<_>>(), ["src/fare.ts"]);
+        assert_eq!((f.total, f.drifted), (3, 0));
+        let drift = parse_files(&json!({ "total": 40, "counts": { "changed": 2, "missing": 1 }, "files": [] }));
+        assert_eq!((drift.total, drift.drifted), (40, 3), "counts cover every match, not just the listed window");
     }
 
     #[test]
@@ -1357,57 +1479,79 @@ mod tests {
         let docs = tempfile::tempdir().unwrap();
         fs::write(docs.path().join("a.md"), "# A").unwrap();
         fs::write(docs.path().join("b.md"), "# B").unwrap();
+        fs::write(docs.path().join("c.md"), "# C").unwrap();
         fs::write(docs.path().join("log.md"), "# log.txt\n\nline").unwrap();
         fs::write(docs.path().join(".DS_Store"), "").unwrap();
-        let (_data, p) = ug_project("andai-docs", docs.path(), &["a.md", "log.md", "../escape.md"]);
+        let p = ug_project("andai-docs", docs.path());
+        let files = listed(&[("a.md", "markdown", 3, "fresh"), ("c.md", "markdown", 3, "changed"), ("log.md", "markdown", 14, "fresh")]);
         let state = Indexing::default();
 
-        let kb = build_info("andai-docs", Some(docs.path()), Some(&p), true, &state);
+        let kb = build_info("andai-docs", Some(docs.path()), Some(&p), Some(&files), true, &state);
         assert_eq!((kb.name.as_str(), kb.managed, kb.nodes, kb.size_bytes), ("docs", true, 9, 1234));
-        let files: Vec<_> = kb.sources.iter().map(|s| (s.file.as_str(), s.kind.as_str(), s.status.as_str())).collect();
-        assert_eq!(files, [("a.md", "MD", "indexed"), ("b.md", "MD", "pending"), ("log.md", "TXT", "indexed")]);
-        assert_eq!((kb.status.as_str(), kb.kind), ("pending", KbKind::Document), "a new file waits for the next index");
+        let got: Vec<_> = kb.sources.iter().map(|s| (s.file.as_str(), s.kind.as_str(), s.status.as_str())).collect();
+        assert_eq!(got, [("a.md", "MD", "indexed"), ("b.md", "MD", "pending"), ("c.md", "MD", "pending"), ("log.md", "TXT", "indexed")]);
+        assert_eq!((kb.status.as_str(), kb.kind), ("pending", KbKind::Document), "new and edited files wait for the next index");
 
         state.errors.lock().unwrap().insert("andai-docs".into(), "ug gen failed: boom".into());
-        let failed = build_info("andai-docs", Some(docs.path()), Some(&p), true, &state);
+        let failed = build_info("andai-docs", Some(docs.path()), Some(&p), Some(&files), true, &state);
         assert_eq!((failed.status.as_str(), failed.sources[1].status.as_str()), ("failed", "failed"));
         assert_eq!(failed.last_error.as_deref(), Some("ug gen failed: boom"));
 
         state.busy.lock().unwrap().insert("andai-docs".into());
-        assert_eq!(build_info("andai-docs", Some(docs.path()), Some(&p), true, &state).status, "indexing");
+        assert_eq!(build_info("andai-docs", Some(docs.path()), Some(&p), Some(&files), true, &state).status, "indexing");
 
         // ug gone: the folder is still listed, every knowledge base offline.
-        let offline = build_info("andai-docs", Some(docs.path()), None, false, &Indexing::default());
-        assert_eq!((offline.status.as_str(), offline.sources.len(), offline.nodes), ("offline", 3, 0));
+        let offline = build_info("andai-docs", Some(docs.path()), None, None, false, &Indexing::default());
+        assert_eq!((offline.status.as_str(), offline.sources.len(), offline.nodes), ("offline", 4, 0));
     }
 
     #[test]
-    fn other_ug_projects_list_the_files_ug_indexed_in_their_repo() {
+    fn other_ug_projects_list_the_files_ug_reports() {
         let repo = tempfile::tempdir().unwrap();
-        fs::create_dir(repo.path().join("src")).unwrap();
-        fs::write(repo.path().join("src/fare.ts"), "export const x = 1;").unwrap();
-        fs::write(repo.path().join("README.md"), "# R").unwrap();
-        let (_data, mut p) = ug_project("tidewater", repo.path(), &["src/fare.ts", "README.md"]);
-        let kb = build_info("tidewater", None, Some(&p), true, &Indexing::default());
+        let mut p = ug_project("tidewater", repo.path());
+        let files = listed(&[("README.md", "markdown", 3, "fresh"), ("docs/guide.pdf", "pdf", 900, "fresh"), ("src/fare.ts", "typescript", 19, "fresh")]);
+        let kb = build_info("tidewater", None, Some(&p), Some(&files), true, &Indexing::default());
         assert_eq!((kb.name.as_str(), kb.managed, kb.status.as_str()), ("tidewater", false, "ready"));
         assert_eq!(kb.root, repo.path().to_string_lossy());
-        let files: Vec<_> = kb.sources.iter().map(|s| (s.file.as_str(), s.kind.as_str(), s.bytes)).collect();
-        assert_eq!(files, [("README.md", "MD", 3), ("src/fare.ts", "CODE", 19)]);
+        let got: Vec<_> = kb.sources.iter().map(|s| (s.file.as_str(), s.kind.as_str(), s.bytes, s.added_at)).collect();
+        assert_eq!(got, [("README.md", "MD", 3, 7), ("docs/guide.pdf", "PDF", 900, 7), ("src/fare.ts", "CODE", 19, 7)]);
+        assert_eq!(kb.sources[1].approx_tokens, None);
         assert_eq!(kb.kind, KbKind::Code, "ug's own kind");
 
+        let edited = listed(&[("src/fare.ts", "typescript", 19, "changed")]);
+        let pending = build_info("tidewater", None, Some(&p), Some(&edited), true, &Indexing::default());
+        assert_eq!((pending.status.as_str(), pending.sources[0].status.as_str()), ("pending", "pending"));
         p.stale = true;
-        assert_eq!(build_info("tidewater", None, Some(&p), true, &Indexing::default()).status, "pending");
+        assert_eq!(build_info("tidewater", None, Some(&p), Some(&files), true, &Indexing::default()).status, "pending");
         p.repo_missing = true;
-        let gone = build_info("tidewater", None, Some(&p), true, &Indexing::default());
+        let gone = build_info("tidewater", None, Some(&p), Some(&files), true, &Indexing::default());
         assert_eq!(gone.status, "failed");
         assert!(gone.last_error.unwrap().contains("is gone"));
+    }
+
+    #[test]
+    fn an_old_ug_is_told_apart_from_other_failures() {
+        // ug 0.1.22's stderr, colours and all.
+        assert_eq!(files_error("\u{1b}[31merror:\u{1b}[0m unknown command: files\n"), UG_TOO_OLD);
+        assert_eq!(files_error("error: No project named \"x\"\n"), "No project named \"x\"");
+        assert_eq!(files_error(""), "ug files failed");
+    }
+
+    #[test]
+    fn a_ug_that_cannot_list_files_says_how_to_fix_it() {
+        let repo = tempfile::tempdir().unwrap();
+        let p = ug_project("tidewater", repo.path());
+        let old: Result<UgFiles, String> = Err(UG_TOO_OLD.into());
+        let kb = build_info("tidewater", None, Some(&p), Some(&old), true, &Indexing::default());
+        assert_eq!((kb.status.as_str(), kb.sources.len()), ("empty", 0));
+        assert_eq!(kb.last_error.as_deref(), Some(UG_TOO_OLD));
     }
 
     #[test]
     fn kb_info_serializes_camel_case_for_the_frontend() {
         let docs = tempfile::tempdir().unwrap();
         fs::write(docs.path().join("a.md"), "# A").unwrap();
-        let kb = build_info("andai-a", Some(docs.path()), None, true, &Indexing::default());
+        let kb = build_info("andai-a", Some(docs.path()), None, None, true, &Indexing::default());
         let v = serde_json::to_value(&kb).unwrap();
         for key in ["slug", "name", "managed", "root", "createdAt", "sources", "sourceCount", "lastIndexedAt", "lastError", "status", "kind", "nodes", "sizeBytes"] {
             assert!(v.get(key).is_some(), "missing {key} in {v}");
@@ -1446,7 +1590,7 @@ mod tests {
             .arg(docs.path());
         let result = run_json(search);
         let listed = ug_projects().unwrap_or_default().into_iter().find(|p| p.name == project);
-        let files = listed.as_ref().map(indexed_files).unwrap_or_default();
+        let files = ug_files(&project);
         let structure = crate::tools::run(
             &ug_path().unwrap(),
             &structure_args(&project, "notes.md"),
@@ -1464,7 +1608,9 @@ mod tests {
         let items = result.expect("search JSON")["items"].as_array().cloned().unwrap_or_default();
         let listed = listed.expect("project should appear in `ug list --json`");
         assert_eq!(listed.repo_root.canonicalize().unwrap(), docs.path().canonicalize().unwrap());
-        assert_eq!(files, ["notes.md"], "project.json lists the indexed files");
+        let files = files.expect("ug files --json");
+        assert_eq!(files.files.iter().map(|f| (f.path.as_str(), f.status.as_str())).collect::<Vec<_>>(), [("notes.md", "fresh")]);
+        assert_eq!(files.total, 1);
         assert!(!items.is_empty(), "search returned no items");
         let text = serde_json::to_string(&items).unwrap();
         assert!(text.contains("Cross-Origin-Embedder-Policy"), "snippet should carry the passage: {text}");

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Bar, Modal, Segmented, Slider, fmtAgo, fmtBytes } from '../components/ui';
+import { Bar, Modal, Pager, Segmented, Slider, fmtAgo, fmtBytes, usePaged } from '../components/ui';
 import { inTauri, kbPickFiles, type KbInfo, type KbKind, type Source } from '../kb/api';
 import { SAMPLES, type SampleDef } from '../kb/samples';
 import { SourceDialog } from './SourceDialog';
@@ -62,7 +62,7 @@ export function Knowledge() {
           <Ingest kb={kb} onNeedKb={() => setCreating(true)} />
 
           {kb ? (
-            <Sources kb={kb} onDelete={() => setConfirmDelete(true)} />
+            <Sources key={kb.slug} kb={kb} onDelete={() => setConfirmDelete(true)} />
           ) : (
             loaded && (
               <div className="panel pad empty" style={{ minHeight: 220 }}>
@@ -133,10 +133,11 @@ function Notice({ title, body, action }: { title: string; body: string; action?:
 }
 
 function KbTabs({ kbs, selected, onNew }: { kbs: KbInfo[]; selected: string | null; onNew: () => void }) {
+  const paged = usePaged(kbs, KBS_PER_PAGE, (k) => k.slug === selected);
   const grounding = useKb((s) => s.grounding);
   return (
     <div className="kn-tabs">
-      {kbs.map((k) => (
+      {paged.items.map((k) => (
         <button
           key={k.slug}
           className="kn-tab"
@@ -157,6 +158,7 @@ function KbTabs({ kbs, selected, onNew }: { kbs: KbInfo[]; selected: string | nu
       <button className="kn-tab new" onClick={onNew} disabled={!inTauri}>
         <Plus size={14} /> New
       </button>
+      <Pager paged={paged} label="Knowledge bases" className="kn-tabs-pager" />
     </div>
   );
 }
@@ -210,12 +212,17 @@ const KIND_ICON: Record<Source['kind'], typeof FileText> = {
   CODE: Code2,
 };
 
+/** ug can hold many projects, and a repo thousands of files: both lists page. */
+const KBS_PER_PAGE = 8;
+const SOURCES_PER_PAGE = 50;
+
 export function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) {
   const grounding = useKb((s) => s.grounding);
   const [viewing, setViewing] = useState<string | null>(null);
   const healthy = kb.sources.filter((s) => s.status === 'indexed').length;
   const indexing = kb.status === 'indexing';
   const offline = kb.status === 'offline';
+  const sourcePage = usePaged(kb.sources, SOURCES_PER_PAGE);
   return (
     <div className="panel kn-table">
       <div className="kn-table-head">
@@ -257,7 +264,7 @@ export function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) 
           </tr>
         </thead>
         <tbody>
-          {kb.sources.map((s) => {
+          {sourcePage.items.map((s) => {
             const Icon = KIND_ICON[s.kind];
             const status = indexing && s.status !== 'indexed' ? 'updating' : s.status === 'pending' && indexing ? 'updating' : s.status;
             return (
@@ -305,6 +312,9 @@ export function Sources({ kb, onDelete }: { kb: KbInfo; onDelete: () => void }) 
           <div>{kb.managed ? 'No sources yet — drop files anywhere on this screen.' : 'ug indexed no files in this project.'}</div>
         </div>
       )}
+      <div className="kn-table-foot">
+        <Pager paged={sourcePage} label="Sources" />
+      </div>
       {kb.sourceCount > kb.sources.length && (
         <div className="muted" style={{ padding: '10px 16px', fontSize: 12.5 }}>
           Showing the first {kb.sources.length.toLocaleString()} of {kb.sourceCount.toLocaleString()} files.

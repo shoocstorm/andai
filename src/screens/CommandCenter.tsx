@@ -32,7 +32,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { available, policyOf } from '../agent/tools/registry';
 import { runTurn, stopTurn } from '../agent/turn';
-import { Bar, CopyButton, Markdown, Stat, fmtTime } from '../components/ui';
+import { Bar, CopyButton, Markdown, Pager, Stat, fmtTime, usePaged } from '../components/ui';
 import { NeuralCore } from '../components/NeuralCore';
 import { debugReport } from '../agent/debugReport';
 import { inTauri } from '../kb/api';
@@ -609,6 +609,7 @@ function Composer() {
   const name = usePersona((s) => s.agentName);
   const { kbs, grounding, ug } = useKb();
   const kb = kbs.find((k) => k.slug === grounding);
+  const kbPage = usePaged(kbs, 6, (k) => k.slug === grounding);
   const policies = useTools((s) => s.policies);
   const agentMode = useTools((s) => s.agentMode);
   const go = useUi((s) => s.go);
@@ -739,7 +740,7 @@ function Composer() {
                 <div style={{ flex: 1 }}>No knowledge base</div>
                 {!grounding && <Check size={14} color="var(--blue)" />}
               </button>
-              {kbs.map((k) => (
+              {kbPage.items.map((k) => (
                 <button
                   key={k.slug}
                   className="menu-item"
@@ -761,6 +762,7 @@ function Composer() {
                 </button>
               ))}
               {!kbs.length && <div className="menu-item sub">No knowledge bases yet — create one in Knowledge.</div>}
+              <Pager paged={kbPage} label="Knowledge bases" className="menu-pager" />
             </Menu>
           )}
         </div>

@@ -2,10 +2,70 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Component, type CSSProperties, type ErrorInfo, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, Copy } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../state/ui';
+
+/** One page of a list, as `usePaged` returns it. */
+export type Paged<T> = {
+  items: T[];
+  page: number;
+  pages: number;
+  /** 1-based positions of the first and last item shown, and how many there are. */
+  from: number;
+  to: number;
+  total: number;
+  setPage: (page: number) => void;
+};
+
+/**
+ * Pages through `items`, `size` at a time. With `focus`, it opens on the page
+ * holding that item (the selected knowledge base, say) and moves there when
+ * the focus changes; otherwise the page stays where the user put it.
+ */
+export function usePaged<T>(items: T[], size: number, focus?: (item: T) => boolean): Paged<T> {
+  const pages = Math.max(1, Math.ceil(items.length / size));
+  const at = focus ? items.findIndex(focus) : -1;
+  const focusPage = at >= 0 ? Math.floor(at / size) : null;
+  const [page, setPage] = useState(focusPage ?? 0);
+  useEffect(() => {
+    if (focusPage != null) setPage(focusPage);
+  }, [focusPage]);
+  const current = Math.min(page, pages - 1);
+  const start = current * size;
+  return {
+    items: items.slice(start, start + size),
+    page: current,
+    pages,
+    from: items.length ? start + 1 : 0,
+    to: Math.min(items.length, start + size),
+    total: items.length,
+    setPage: (p) => setPage(Math.max(0, Math.min(pages - 1, p))),
+  };
+}
+
+/** Previous / next for a `usePaged` list, with where you are. Renders nothing for a single page. */
+export function Pager({ paged, label, className }: { paged: Paged<unknown>; label: string; className?: string }) {
+  if (paged.pages <= 1) return null;
+  const { page, pages, from, to, total, setPage } = paged;
+  return (
+    <nav className={`pager${className ? ` ${className}` : ''}`} aria-label={label}>
+      <span className="pager-range">
+        {from}–{to} of {total}
+      </span>
+      <button type="button" className="pager-btn" aria-label="Previous page" disabled={page === 0} onClick={() => setPage(page - 1)}>
+        <ChevronLeft size={14} />
+      </button>
+      <span className="pager-pos mono" aria-live="polite">
+        {page + 1} / {pages}
+      </span>
+      <button type="button" className="pager-btn" aria-label="Next page" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>
+        <ChevronRight size={14} />
+      </button>
+    </nav>
+  );
+}
 
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (

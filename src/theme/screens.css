@@ -4810,3 +4810,21 @@ button.cc-chip:focus-visible {
 .ugs-dialog .ugs-done .ugs-actions {
   align-items: center;
 }
+.kn-tabs-pager {
+  margin-left: auto;
+}
+.kn-table-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+.kn-table-foot:has(.pager) {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+.menu-pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 10px 4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}

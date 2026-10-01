@@ -83,3 +83,57 @@ describe('knowledge bases from ug', () => {
     expect(screen.getByRole('button', { name: /Re-index/ })).toBeDisabled();
   });
 });
+
+describe('long lists page', () => {
+  const kbOf = (i: number): KbInfo => ({
+    slug: `p${i}`,
+    name: `project-${i}`,
+    managed: false,
+    root: `/r/${i}`,
+    createdAt: i,
+    sources: [],
+    sourceCount: 0,
+    lastIndexedAt: null,
+    lastError: null,
+    kindOverride: null,
+    status: 'empty',
+    kind: 'document',
+    nodes: 0,
+    edges: 0,
+    sizeBytes: 0,
+  });
+
+  it('pages the knowledge base tabs, opening on the selected one', async () => {
+    const user = userEvent.setup();
+    useKb.setState({ kbs: Array.from({ length: 11 }, (_, i) => kbOf(i)), selected: 'p9' });
+    render(<Knowledge />);
+    const tabs = within(screen.getByRole('navigation', { name: 'Knowledge bases' }));
+    expect(tabs.getByText('9–11 of 11')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /project-9/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: /project-0/ })).not.toBeInTheDocument();
+    await user.click(tabs.getByRole('button', { name: 'Previous page' }));
+    expect(screen.getByRole('button', { name: /project-0/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /project-9/ })).not.toBeInTheDocument();
+  });
+
+  it('pages a large source list, 50 files at a time', async () => {
+    const user = userEvent.setup();
+    const sources = Array.from({ length: 120 }, (_, i) => ({
+      file: `src/f${String(i).padStart(3, '0')}.ts`,
+      kind: 'CODE' as const,
+      bytes: 1,
+      approxTokens: 1,
+      addedAt: 1,
+      status: 'indexed' as const,
+    }));
+    useKb.setState({ kbs: [{ ...kbOf(0), sources, sourceCount: 120, status: 'ready' }], selected: 'p0' });
+    render(<Knowledge />);
+    const pager = within(screen.getByRole('navigation', { name: 'Sources' }));
+    expect(pager.getByText('1–50 of 120')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View src/f049.ts' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View src/f050.ts' })).not.toBeInTheDocument();
+    await user.click(pager.getByRole('button', { name: 'Next page' }));
+    expect(screen.getByRole('button', { name: 'View src/f050.ts' })).toBeInTheDocument();
+    expect(pager.getByText('51–100 of 120')).toBeInTheDocument();
+  });
+});

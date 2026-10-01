@@ -233,6 +233,9 @@ pasting in whatever one search returns:
   read-only in Andai: it searches the folder ug recorded, and you can
   re-index it or delete its graph (the folder itself is never touched), but
   files are only added to and removed from knowledge bases Andai created.
+- **Long lists page**: the knowledge base tabs (8 a page), the composer's
+  knowledge menu (6) and a knowledge base's files (50) page through, each
+  opening on the page with the one you have selected.
 - **Without ug**, your knowledge bases stay listed, marked *Needs ug*, and
   chat answers without them and says why, until UltraGraph is installed.
 - **Sample knowledge bases** to try the agent before adding your own files:
@@ -421,7 +424,9 @@ executed**; every action says it's simulated.
   test suite runs on Windows in CI. It hasn't been tested on a Windows PC yet.
   Needs the Microsoft Edge WebView2 runtime (preinstalled on Windows 11); the
   installer doesn't download it for you.
-- Knowledge bases need the **ug** CLI installed (on your PATH, or in
+- Knowledge bases need the **ug** CLI, in a release with `ug files` (after
+  0.1.22); with an older ug, Andai asks you to update it (`ug upgrade`).
+  It must be installed (on your PATH, or in
   `.local/bin`, `.cargo/bin` or `.ug/bin` in your home folder). On macOS,
   Andai can install it for you (Knowledge → **Install UltraGraph**).
 - Builds are currently **unsigned**: on first launch on macOS, right-click

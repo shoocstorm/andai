@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { linkCitations, Markdown, ScreenBoundary } from './ui';
+import { linkCitations, Markdown, Pager, ScreenBoundary, usePaged } from './ui';
 
 // Model output can be steered by a poisoned document (prompt injection), so
 // rendering it must never make a network request or navigate (AGENTS.md §9).
@@ -84,5 +84,51 @@ describe('citations', () => {
   it('keeps model-written #cite links inert without onCite', () => {
     render(<Markdown text="[click](#cite-1)" />);
     expect(screen.queryByRole('button', { name: 'Source 1' })).toBeNull();
+  });
+});
+
+describe('pagination', () => {
+  function List({ items, focus }: { items: string[]; focus?: string }) {
+    const paged = usePaged(items, 3, focus ? (x) => x === focus : undefined);
+    return (
+      <>
+        <ul>
+          {paged.items.map((x) => (
+            <li key={x}>{x}</li>
+          ))}
+        </ul>
+        <Pager paged={paged} label="Things" />
+      </>
+    );
+  }
+  const shown = () => screen.queryAllByRole('listitem').map((li) => li.textContent);
+  const letters = 'abcdefgh'.split('');
+
+  it('shows one page at a time and steps through them', async () => {
+    const user = userEvent.setup();
+    render(<List items={letters} />);
+    expect(shown()).toEqual(['a', 'b', 'c']);
+    const nav = screen.getByRole('navigation', { name: 'Things' });
+    expect(nav).toHaveTextContent('1–3 of 8');
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(shown()).toEqual(['g', 'h']);
+    expect(nav).toHaveTextContent('7–8 of 8');
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled();
+  });
+
+  it('opens on the page of the focused item and follows it', () => {
+    const { rerender } = render(<List items={letters} focus="e" />);
+    expect(shown()).toEqual(['d', 'e', 'f']);
+    rerender(<List items={letters} focus="h" />);
+    expect(shown()).toEqual(['g', 'h']);
+  });
+
+  it('stays on a page that still exists when the list shrinks, and hides for one page', () => {
+    const { rerender } = render(<List items={letters} focus="h" />);
+    rerender(<List items={['a', 'b']} />);
+    expect(shown()).toEqual(['a', 'b']);
+    expect(screen.queryByRole('navigation', { name: 'Things' })).not.toBeInTheDocument();
   });
 });
