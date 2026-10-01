@@ -1108,6 +1108,22 @@ describe('runTurn (agent mode)', () => {
     expect(statusesOf(assistant()).generate).toBe('done');
   });
 
+  it('runs a whole-codebase analysis and grounds the answer in its table, caveats included', async () => {
+    useKb.setState({ kbs: [kb({ kind: 'code' })] });
+    agent.fills.kb_analyze = { question: 'untested_symbols' };
+    agent.fills.kb_impact = { file: 'fares.ts' };
+    agent.output.kb_analyze = {
+      title: 'untested_symbols',
+      columns: ['id', 'depended_on_by', 'loc'],
+      rows: [['function_declaration:retry.ts:withRetry', 3, 12]],
+      rowsTotal: 1,
+    };
+    agent.decisions = [{ chosen: 'kb_analyze' }, { chosen: 'answer_now' }];
+    await runTurn('which functions have no tests?');
+    expect(agent.tool[0].call).toEqual({ tool: 'kb_analyze', preset: 'untested_symbols', target: null, limit: 20 });
+    expect(engine.seen[0].messages[0].content).toContain('withRetry (Function, retry.ts) · depended on by 3 · loc 12');
+  });
+
   it('asks a clarifying question when that is the decision', async () => {
     agent.decisions = [{ chosen: 'ask_clarification' }];
     await runTurn('do the thing');

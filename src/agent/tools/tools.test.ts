@@ -99,6 +99,13 @@ describe('registry', () => {
     });
     expect(tool('kb_read_lines').toCall({ range: 'notes/a:b.md:3-9' }, ctx)).toEqual({ tool: 'kb_get_code', symbol: null, file: 'notes/a:b.md', start: 3, end: 9 });
     expect(() => tool('kb_read_lines').toCall({ range: 'a.md lines 3 to 9' }, ctx)).toThrow(/file:start-end/);
+    expect(tool('kb_analyze').toCall({ question: 'untested_symbols' }, ctx)).toEqual({ tool: 'kb_analyze', preset: 'untested_symbols', target: null, limit: 20 });
+    expect(tool('kb_impact').toCall({ file: 'src/fares.ts' }, ctx)).toEqual({ tool: 'kb_analyze', preset: 'impact', target: 'src/fares.ts', limit: 20 });
+  });
+  it('lets Laya pick the analysis among presets Rust allows', () => {
+    const t = tool('kb_analyze');
+    expect(t.choices?.[0].options.map((o) => o.id)).toEqual(t.schema!.properties.question.enum);
+    for (const o of t.choices![0].options) expect(o.text.length).toBeLessThan(80);
   });
 });
 
@@ -294,6 +301,24 @@ describe('ug output readers', () => {
     const ov = tool('kb_overview').observe({ kb_type: 'mixed', index: { files: 4, symbols: 29, lines: 211 }, languages: [{ name: 'typescript', count: 2 }] });
     expect(ov.hits[0].snippet).toContain('Kind: mixed; 4 files, 29 symbols, 211 lines.');
     expect(ov.summary).toContain('typescript (2)');
+  });
+
+  it('analysis: one passage with the table, the caveats leading the summary', () => {
+    const ev = tool('kb_analyze').observe({
+      title: 'untested_symbols',
+      description: 'Source functions no test reaches within 2 hops.',
+      columns: ['id', 'depended_on_by', 'loc'],
+      rows: [['function_declaration:retry.ts:withRetry', 3, 12]],
+      rowsTotal: 6,
+    });
+    expect(ev.hits).toHaveLength(1);
+    expect(ev.hits[0]).toMatchObject({ node_type: 'Analysis', file: '(analysis)', name: 'Analysis: untested symbols' });
+    expect(ev.hits[0].snippet).toMatch(/1\. withRetry \(Function, retry\.ts\) · depended on by 3 · loc 12\nShowing 1 of 6 rows\./);
+    expect(ev.summary).toBe('untested_symbols: 6 row(s): withRetry (Function, retry.ts) · depended on by 3 · loc 12; …');
+
+    const missing = tool('kb_impact').observe({ title: 'impact', columns: ['file', 'dependents', 'tests'], rows: [], targetNotIndexed: ['src/x.ts'] });
+    expect(missing.summary).toMatch(/^src\/x\.ts isn't in the index, so an empty result doesn't mean nothing depends on it\. impact: no rows matched\.$/);
+    expect(missing.hits[0].snippet).toMatch(/Note: src\/x\.ts isn't in the index/);
   });
 
   it('tolerates any output shape without throwing', () => {

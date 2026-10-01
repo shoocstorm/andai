@@ -2,7 +2,8 @@
 // Output shapes were probed against ug 0.1.21 (AGENTS.md §2); every reader
 // here treats the output as untrusted and tolerates missing fields.
 
-import { dedupeHits, type KbKind, type SearchHit } from '../../kb/api';
+import { analysisText, readAnalysis, rowText } from '../../kb/analysis';
+import { dedupeHits, type AnalyzePreset, type KbKind, type SearchHit } from '../../kb/api';
 import type { Evidence, ToolDef } from './types';
 
 const NODE_TYPES = ['any', 'Function', 'Method', 'Class', 'Interface', 'Struct', 'Enum', 'Trait', 'Type', 'Constant', 'Variable', 'Module', 'File'];
@@ -95,6 +96,32 @@ export function parseRange(range: string): { file: string; start: number; end: n
   if (!m) throw new Error(`Expected a line range as file:start-end, got “${range.slice(0, 80)}”.`);
   return { file: m[1], start: Number(m[2]), end: Number(m[3]) };
 }
+
+/**
+ * A `ug analyze` table as one passage (file `(analysis)`, so no line range is
+ * read from it). Its caveats lead the summary: an empty table on a target the
+ * index lacks must never read as "nothing depends on it" (AGENTS.md §1.7).
+ */
+function observeAnalysis(out: unknown, key: string): Evidence {
+  const a = readAnalysis(out);
+  const title = a.title || 'analysis';
+  const h = hit({ id: `analysis:${key}`, name: `Analysis: ${title.replace(/_/g, ' ')}`, node_type: 'Analysis', file: '(analysis)' }, analysisText(a), 'analysis');
+  const rows = a.rows.slice(0, 3).map((r) => rowText(a, r));
+  const head = a.rows.length ? `${title}: ${a.total} row(s): ${rows.join('; ')}${a.total > rows.length ? '; …' : ''}` : `${title}: no rows matched.`;
+  return { hits: [h], summary: [...a.caveats, head].join(' ') };
+}
+
+/** What `kb_analyze` may ask: a subset of the presets Rust allows, each worded for the decision model. */
+const ANALYSES: { id: AnalyzePreset; text: string }[] = [
+  { id: 'biggest_files', text: 'The largest files: most symbols and lines of code' },
+  { id: 'language_breakdown', text: 'The programming languages the code is written in' },
+  { id: 'dependency_fanin', text: 'The most used, most depended-upon functions or classes' },
+  { id: 'untested_symbols', text: 'Functions that no test covers' },
+  { id: 'where_to_start', text: 'Where to start reading: the key documented entry points' },
+  { id: 'long_functions', text: 'The longest functions' },
+  { id: 'coupling_matrix', text: 'Which folders or modules depend on which' },
+  { id: 'risky_symbols', text: 'Risky code: large, undocumented and heavily used' },
+];
 
 export const UG_TOOLS: ToolDef[] = [
   {
@@ -340,5 +367,44 @@ export const UG_TOOLS: ToolDef[] = [
       });
       return evidence(hits, 'usage(s)', nodes.map((n) => str(n.error)).filter(Boolean));
     },
+  },
+  {
+    id: 'kb_analyze',
+    title: 'Analyze codebase',
+    option: 'Compute facts about the whole codebase: largest files, most-used or untested functions, languages, where to start reading',
+    description:
+      'Whole-repo statistics from the code graph (ug analyze): biggest files, languages, most depended-upon symbols, untested functions, a reading order, long functions, folder coupling, risky symbols.',
+    kinds: ['code', 'mixed'],
+    risk: 'read',
+    command: 'ug analyze <preset> -k 20 --json',
+    schema: {
+      type: 'object',
+      properties: { question: { type: 'string', enum: ANALYSES.map((x) => x.id), description: 'which whole-codebase fact to compute' } },
+      required: ['question'],
+      additionalProperties: false,
+    },
+    // A closed choice, like kb_search's scope: Laya picks it when it decides.
+    choices: [{ arg: 'question', question: 'Which fact about the whole codebase does the request need?', options: ANALYSES }],
+    guide: () => 'Pick the `question` that matches what the request asks about the codebase as a whole.',
+    toCall: (a) => ({ tool: 'kb_analyze', preset: String(a.question) as AnalyzePreset, target: null, limit: 20 }),
+    observe: (out) => observeAnalysis(out, str(obj(out).title) || 'repo'),
+  },
+  {
+    id: 'kb_impact',
+    title: 'File impact',
+    option: 'Find what depends on a file: the files and tests affected if it changes',
+    description: 'The blast radius of changing one file (ug analyze impact): files whose symbols reach it within three hops, with how many are tests.',
+    kinds: ['code', 'mixed'],
+    risk: 'read',
+    command: 'ug analyze impact --arg target=<file> -k 20 --json',
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', minLength: 1, maxLength: 256, description: 'file path in the knowledge base' } },
+      required: ['file'],
+      additionalProperties: false,
+    },
+    guide: () => 'Give the file the user named, or one from the results so far.',
+    toCall: (a) => ({ tool: 'kb_analyze', preset: 'impact', target: String(a.file), limit: 20 }),
+    observe: (out) => observeAnalysis(out, `impact:${arr(obj(out).targetNotIndexed).map(str).join(',')}`),
   },
 ];
