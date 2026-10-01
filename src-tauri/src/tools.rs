@@ -26,6 +26,31 @@ const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 const MAX_NAME_BYTES: usize = 256;
 const MAX_SYMBOLS: usize = 5;
 const MAX_CODE_LINES: u32 = 400;
+/// Rows one `ug analyze` returns at most (its default is 50).
+const MAX_ANALYZE_ROWS: u32 = 50;
+
+/// The `ug analyze` presets Andai runs (ug 0.1.22), and whether each takes a
+/// `target` file. A closed list: no raw GQL (`--gql`), no other graph
+/// (`--db`) and no preset argument but `target` ever comes from the webview.
+pub const ANALYZE_PRESETS: &[(&str, bool)] = &[
+    ("language_breakdown", false),
+    ("file_kinds", false),
+    ("biggest_files", false),
+    ("size_histogram", false),
+    ("where_to_start", false),
+    ("dependency_fanin", false),
+    ("risky_symbols", false),
+    ("untested_symbols", false),
+    ("undocumented_hotspots", false),
+    ("long_functions", false),
+    ("coupling_matrix", false),
+    ("dead_code", false),
+    ("test_ratio", false),
+    ("impact", true),
+    ("impact_summary", true),
+    ("retest_scope", true),
+    ("boundary_impact", true),
+];
 
 /// ug node types a lookup may be restricted to (`ug graph_schema`, ug 0.1.21).
 pub const NODE_TYPES: &[&str] =
@@ -49,6 +74,9 @@ pub enum ToolCall {
     FileContext { file: String, max_chars: u32 },
     #[serde(rename = "kb_overview")]
     Overview {},
+    /// Whole-repo statistics (`ug analyze`); `target` is a file, for the presets that take one.
+    #[serde(rename = "kb_analyze")]
+    Analyze { preset: String, target: Option<String>, limit: Option<u32> },
 }
 
 #[derive(Serialize, Debug)]
@@ -166,6 +194,20 @@ pub fn plan(call: &ToolCall, project: &str, docs: &Path) -> Result<Vec<String>, 
             a.extend(["-k".into(), "5".into()]);
         }
         ToolCall::Overview {} => a.push("project_overview".into()),
+        ToolCall::Analyze { preset, target, limit } => {
+            let Some(&(name, takes_target)) = ANALYZE_PRESETS.iter().find(|(p, _)| p == preset) else {
+                return Err(format!("Unknown analysis {:?}.", preset.chars().take(64).collect::<String>()));
+            };
+            a.extend(["analyze".into(), name.into()]);
+            match (takes_target, target) {
+                // One argv `target=<path>`: ug splits it at the first `=`, and it can't parse as a flag.
+                (true, Some(t)) => a.extend(["--arg".into(), format!("target={}", rel_path(t, docs)?)]),
+                (true, None) => return Err(format!("{name} needs a file.")),
+                (false, Some(_)) => return Err(format!("{name} takes no file.")),
+                (false, None) => {}
+            }
+            a.extend(["-k".into(), limit.unwrap_or(MAX_ANALYZE_ROWS).clamp(1, MAX_ANALYZE_ROWS).to_string()]);
+        }
     }
     a.extend(["-n".into(), project.into(), "--json".into()]);
     Ok(a)
@@ -311,6 +353,36 @@ mod tests {
         assert!(parse(json!({ "tool": "kb_overview", "base_url": "http://evil" })).is_err());
         assert!(parse(json!({ "tool": "kb_find_usages", "symbol": "x", "extra": 1 })).is_err());
         assert_eq!(parse(json!({ "tool": "kb_overview" })).unwrap(), ToolCall::Overview {});
+    }
+
+    #[test]
+    fn analyze_runs_only_listed_presets_with_a_file_inside_the_kb() {
+        let d = docs();
+        let call = |preset: &str, target: Option<&str>, limit: Option<u32>| ToolCall::Analyze {
+            preset: preset.into(),
+            target: target.map(Into::into),
+            limit,
+        };
+        let a = plan(&call("biggest_files", None, None), "andai-kb", d.path()).unwrap();
+        assert_eq!(a, ["analyze", "biggest_files", "-k", "50", "-n", "andai-kb", "--json"]);
+        let a = plan(&call("impact", Some("a.ts"), Some(999)), "andai-kb", d.path()).unwrap();
+        assert_eq!(a[..6], ["analyze", "impact", "--arg", "target=a.ts", "-k", "50"]);
+        assert!(plan(&call("dependency_fanin", None, Some(0)), "p", d.path()).unwrap().windows(2).any(|w| w == ["-k", "1"]));
+        // Not a listed preset: raw GQL, a flag, or a preset Andai doesn't run.
+        for bad in ["--gql", "nope", "layering_violations", "", "biggest_files --db /x"] {
+            assert!(plan(&call(bad, None, None), "p", d.path()).is_err(), "{bad:?}");
+        }
+        // A target only where the preset takes one, and always inside the KB.
+        assert!(plan(&call("impact", None, None), "p", d.path()).is_err());
+        assert!(plan(&call("biggest_files", Some("a.ts"), None), "p", d.path()).is_err());
+        for bad in ["-x", "../a.ts", "/etc/passwd", "a\\b.ts"] {
+            assert!(plan(&call("impact", Some(bad), None), "p", d.path()).is_err(), "{bad:?}");
+        }
+        assert!(parse(json!({ "tool": "kb_analyze", "preset": "impact", "gql": "MATCH (n) RETURN n" })).is_err());
+        assert_eq!(
+            parse(json!({ "tool": "kb_analyze", "preset": "biggest_files" })).unwrap(),
+            ToolCall::Analyze { preset: "biggest_files".into(), target: None, limit: None }
+        );
     }
 
     #[test]
@@ -475,6 +547,8 @@ mod tests {
             (ToolCall::FindUsages { symbol: "add".into() }, "nodes"),
             (ToolCall::FileContext { file: "math.ts".into(), max_chars: 2000 }, "files"),
             (ToolCall::Overview {}, "node_count"),
+            (ToolCall::Analyze { preset: "biggest_files".into(), target: None, limit: Some(5) }, "rows"),
+            (ToolCall::Analyze { preset: "impact".into(), target: Some("math.ts".into()), limit: None }, "rows"),
         ];
         let mut failures = vec![];
         for (call, key) in calls {

@@ -117,7 +117,28 @@ export type KbToolCall =
   | { tool: 'kb_get_code'; symbol: string | null; file: string | null; start: number | null; end: number | null }
   | { tool: 'kb_find_usages'; symbol: string }
   | { tool: 'kb_file_context'; file: string; max_chars: number }
-  | { tool: 'kb_overview' };
+  | { tool: 'kb_overview' }
+  | { tool: 'kb_analyze'; preset: AnalyzePreset; target: string | null; limit: number | null };
+
+/** The `ug analyze` presets Rust allows (`ANALYZE_PRESETS` in tools.rs); the last four take a `target` file. */
+export type AnalyzePreset =
+  | 'language_breakdown'
+  | 'file_kinds'
+  | 'biggest_files'
+  | 'size_histogram'
+  | 'where_to_start'
+  | 'dependency_fanin'
+  | 'risky_symbols'
+  | 'untested_symbols'
+  | 'undocumented_hotspots'
+  | 'long_functions'
+  | 'coupling_matrix'
+  | 'dead_code'
+  | 'test_ratio'
+  | 'impact'
+  | 'impact_summary'
+  | 'retest_scope'
+  | 'boundary_impact';
 
 export type KbToolOutput = {
   /** ug's JSON, or its clipped text when the output was cut at the cap. */
@@ -131,6 +152,10 @@ export type KbToolOutput = {
 
 export const kbTool = (slug: string, toolCall: KbToolCall) =>
   call<KbToolOutput>('kb_tool', { slug, call: toolCall });
+
+/** One `ug analyze` preset over a knowledge base, through the same validated `kb_tool` (kb/analysis.ts reads it). */
+export const kbAnalyze = (slug: string, preset: AnalyzePreset, target: string | null = null, limit: number | null = null) =>
+  kbTool(slug, { tool: 'kb_analyze', preset, target, limit });
 
 export async function kbSearch(slug: string, query: string, k: number, maxChars: number): Promise<SearchHit[]> {
   const res = await call<{ items?: SearchHit[] }>('kb_search', { slug, query, k, maxChars });
