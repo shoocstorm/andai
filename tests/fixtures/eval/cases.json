@@ -143,6 +143,12 @@
     { "id": "code-gateway", "kb": "code", "prompt": "Which methods does the Gateway type have?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["chargeCard", "refundCard"] },
     { "id": "code-callers-retry", "kb": "code", "prompt": "Which functions call withRetry?", "first": ["kb_find_usages", "kb_search", "kb_find_symbols", "kb_symbol_context"], "facts": ["createBooking", "cancelBooking"] },
     { "id": "code-unanswerable", "kb": "code", "prompt": "Which web framework does the booking service use?", "first": ["kb_search", "kb_find_symbols", "kb_get_code", "kb_symbol_context"], "facts": ["$notFound"] },
+    { "id": "code-repo-most-symbols", "kb": "code", "prompt": "Which file in this codebase defines the most symbols?", "first": ["kb_analyze", "kb_search", "kb_overview", "kb_find_symbols"], "facts": ["fares\\.ts"] },
+    { "id": "code-repo-untested", "kb": "code", "prompt": "Which functions have no tests?", "first": ["kb_analyze", "kb_search", "kb_find_symbols"], "facts": ["withRetry", "refundFraction"] },
+    { "id": "code-repo-impact", "kb": "code", "prompt": "What would be affected if I changed fares.ts?", "first": ["kb_impact", "kb_search", "kb_find_usages", "kb_file_context"], "facts": ["booking\\.ts"] },
+    { "id": "code-repo-retest", "kb": "code", "prompt": "Which tests should I re-run after changing fares.ts?", "first": ["kb_impact", "kb_search", "kb_find_usages", "kb_file_context"], "facts": ["fares\\.test\\.ts"] },
+    { "id": "code-repo-depends-retry", "kb": "code", "prompt": "Which files depend on retry.ts?", "first": ["kb_impact", "kb_search", "kb_find_usages", "kb_file_context"], "facts": ["booking\\.ts"] },
+    { "id": "mixed-repo-language", "kb": "mixed", "prompt": "What programming language is the booking code written in?", "first": ["kb_analyze", "kb_search", "kb_overview"], "facts": ["typescript"] },
     {
       "id": "code-followup-delay",
       "kb": "code",
