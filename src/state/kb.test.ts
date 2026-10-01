@@ -8,6 +8,8 @@ const bridge = vi.hoisted(() => ({
   addErrors: [] as string[],
   indexResult: null as Partial<KbInfo> | null,
   fail: {} as Record<string, Error>,
+  analyze: [] as { preset: string; target: string | null }[],
+  analyzeFail: null as Error | null,
 }));
 
 const mk = (over: Partial<KbInfo> = {}): KbInfo => ({
@@ -63,16 +65,22 @@ vi.mock('../kb/api', async (orig) => {
     },
     kbRemoveSource: async (slug: string) => mk({ slug, sources: [], status: 'pending' }),
     kbDelete: async () => guard('delete'),
+    kbAnalyze: async (_slug: string, preset: string, target: string | null = null) => {
+      bridge.analyze.push({ preset, target });
+      if (bridge.analyzeFail) throw bridge.analyzeFail;
+      if (preset === 'impact') return { output: { title: preset, columns: ['file'], rows: [], targetNotIndexed: [target] } };
+      return { output: { title: preset, columns: ['file', 'symbols'], rows: [['a.ts', 3]], rowsTotal: 1 } };
+    },
   };
 });
 
-const { addFiles, createKb, deleteKb, refreshKbs, setKind, useKb } = await import('./kb');
+const { addFiles, askAbout, createKb, deleteKb, fileImpact, loadInsights, refreshKbs, setKind, useKb } = await import('./kb');
 const { useUi } = await import('./ui');
 
 beforeEach(() => {
-  Object.assign(bridge, { kbs: [], indexCalls: [], addErrors: [], indexResult: null, fail: {} });
-  useKb.setState({ kbs: [], selected: null, grounding: null, logs: {}, kindOverrides: {} });
-  useUi.setState({ toasts: [] });
+  Object.assign(bridge, { kbs: [], indexCalls: [], addErrors: [], indexResult: null, fail: {}, analyze: [], analyzeFail: null });
+  useKb.setState({ kbs: [], selected: null, grounding: null, logs: {}, kindOverrides: {}, insights: {} });
+  useUi.setState({ toasts: [], prefill: null });
 });
 const lastToast = () => useUi.getState().toasts.at(-1);
 
@@ -149,5 +157,49 @@ describe('knowledge base actions', () => {
     useKb.setState({ kbs: [mk()], logs: { docs: [{ at: 1, line: 'x' }] }, k: 16, grounding: 'docs' });
     const saved = JSON.parse(localStorage.getItem('andai.kb')!).state;
     expect(Object.keys(saved).sort()).toEqual(['grounding', 'k', 'kindOverrides', 'maxChars', 'selected']);
+  });
+});
+
+describe('code insights', () => {
+  const code = (over: Partial<KbInfo> = {}) => mk({ slug: 'repo', kind: 'code', status: 'ready', lastIndexedAt: 5, nodes: 9, edges: 8, ...over });
+
+  it('runs each preset once per index, and again after a re-index', async () => {
+    useKb.setState({ kbs: [code()] });
+    await loadInsights('repo', ['biggest_files', 'coupling_matrix']);
+    expect(bridge.analyze.map((c) => c.preset).sort()).toEqual(['biggest_files', 'coupling_matrix']);
+    expect(useKb.getState().insights.repo.results.biggest_files?.rows).toEqual([['a.ts', 3]]);
+    expect(useKb.getState().insights.repo.loading).toBe(false);
+
+    await loadInsights('repo', ['biggest_files']);
+    expect(bridge.analyze).toHaveLength(2);
+
+    useKb.setState({ kbs: [code({ lastIndexedAt: 6 })] });
+    await loadInsights('repo', ['biggest_files']);
+    expect(bridge.analyze).toHaveLength(3);
+    expect(Object.keys(useKb.getState().insights.repo.results)).toEqual(['biggest_files']);
+  });
+
+  it('skips a KB that isn’t indexed, and keeps each preset’s error, an old ug’s as an update hint', async () => {
+    useKb.setState({ kbs: [code({ status: 'pending' })] });
+    await loadInsights('repo', ['biggest_files']);
+    expect(bridge.analyze).toEqual([]);
+
+    useKb.setState({ kbs: [code()] });
+    bridge.analyzeFail = new Error('unknown command: analyze');
+    await loadInsights('repo', ['biggest_files']);
+    expect(useKb.getState().insights.repo.errors.biggest_files).toMatch(/ug upgrade/);
+  });
+
+  it('reads a file’s blast radius, with its caveats', async () => {
+    const r = await fileImpact('repo', 'src/a.ts');
+    expect(bridge.analyze.map((c) => c.target)).toEqual(['src/a.ts', 'src/a.ts', 'src/a.ts', 'src/a.ts']);
+    expect(r.impact?.caveats.join(' ')).toMatch(/src\/a\.ts isn't in the index/);
+    expect(r.error).toBeNull();
+  });
+
+  it('Ask grounds the chat in the KB and hands the question to the composer', () => {
+    askAbout('repo', 'Who calls withRetry?');
+    expect(useKb.getState().grounding).toBe('repo');
+    expect(useUi.getState()).toMatchObject({ prefill: 'Who calls withRetry?', route: 'command' });
   });
 });

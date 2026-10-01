@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { CopyButton, Markdown, Modal, Segmented, fmtAgo, fmtBytes } from '../components/ui';
 import type { KbInfo } from '../kb/api';
 import { pdfPages, readStructure, type OutlineItem, type SourceView, type Structure } from '../kb/source';
-import { viewSource } from '../state/kb';
+import { col, type Analysis } from '../kb/analysis';
+import { fileImpact, viewSource, type FileImpact } from '../state/kb';
 
 type Tab = 'overview' | 'content' | 'structure';
 
@@ -211,6 +212,7 @@ function Overview({
       )}
 
       <Relations kb={kb} structure={structure} onOpen={onOpen} />
+      {code && kb.kind !== 'document' && s.status === 'indexed' && <Impact kb={kb} file={s.file} onOpen={onOpen} />}
       {view.structureError && <StructureNotice text={view.structureError} />}
     </div>
   );
@@ -410,6 +412,104 @@ function Relations({ kb, structure, onOpen }: { kb: KbInfo; structure: Structure
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+const strings = (a: Analysis | null, name: string) =>
+  (a?.rows ?? []).map((r) => col(a!, r, name)).filter((v): v is string => typeof v === 'string' && !!v);
+
+/**
+ * What changing this file reaches (`ug analyze`, kb/analysis.ts): the files
+ * whose symbols depend on it within three hops, the tests that exercise it,
+ * and the external surfaces it feeds. Loaded after the rest of the dialog.
+ */
+function Impact({ kb, file, onOpen }: { kb: KbInfo; file: string; onOpen: (file: string) => void }) {
+  const [impact, setImpact] = useState<FileImpact | null>(null);
+  useEffect(() => {
+    let live = true;
+    void fileImpact(kb.slug, file).then((r) => live && setImpact(r));
+    return () => {
+      live = false;
+    };
+  }, [kb.slug, file]);
+
+  const chip = (f: string, title: string, label = f) =>
+    kb.sources.some((s) => s.file === f) ? (
+      <button key={f} type="button" className="sd-chip" onClick={() => onOpen(f)} title={title}>
+        {label}
+      </button>
+    ) : (
+      <span key={f} className="sd-chip static" title={title}>
+        {label}
+      </span>
+    );
+
+  if (!impact)
+    return (
+      <section className="sd-block" aria-label="Blast radius">
+        <h4 className="label">Blast radius</h4>
+        <div className="faint sd-impact-line">
+          <Loader2 size={13} className="spin" /> Tracing what depends on this file…
+        </div>
+      </section>
+    );
+  const { summary, impact: files, retest, boundary, error } = impact;
+  const caveats = [...new Set([summary, files, retest, boundary].flatMap((a) => a?.caveats ?? []))];
+  const row = summary?.rows[0];
+  const dependents = row ? Number(col(summary!, row, 'dependents') ?? 0) : 0;
+  const affected = row ? Number(col(summary!, row, 'files_affected') ?? 0) : 0;
+  const tests = strings(retest, 'test_file');
+  const surfaces = strings(boundary, 'surface');
+  return (
+    <section className="sd-block" aria-label="Blast radius">
+      <h4 className="label">Blast radius</h4>
+      {error && !summary ? (
+        <StructureNotice text={error} />
+      ) : caveats.length ? (
+        caveats.map((c) => <StructureNotice key={c} text={c} />)
+      ) : (
+        <div className="sd-impact-line">
+          {dependents
+            ? `${dependents.toLocaleString()} symbol${dependents === 1 ? '' : 's'} in ${affected.toLocaleString()} file${affected === 1 ? '' : 's'} reach this file within three hops.`
+            : 'Nothing else in the project depends on this file.'}
+        </div>
+      )}
+      {(files?.rows.length || tests.length || surfaces.length) > 0 && (
+        <div className="sd-rel">
+          {!!files?.rows.length && (
+            <div className="sd-rel-row">
+              <span className="sd-rel-label">Affected files</span>
+              <div className="sd-chips">
+                {files.rows.map((r) => {
+                  const f = String(col(files, r, 'file') ?? '');
+                  const n = Number(col(files, r, 'dependents') ?? 0);
+                  const t = Number(col(files, r, 'tests') ?? 0);
+                  return f ? chip(f, `${n} dependent symbol${n === 1 ? '' : 's'}${t ? `, ${t} in tests` : ''}`, `${f} · ${n}`) : null;
+                })}
+              </div>
+            </div>
+          )}
+          {!!tests.length && (
+            <div className="sd-rel-row">
+              <span className="sd-rel-label">Tests to re-run</span>
+              <div className="sd-chips">{tests.map((f) => chip(f, `Exercises code reachable from ${file}`))}</div>
+            </div>
+          )}
+          {!!surfaces.length && (
+            <div className="sd-rel-row">
+              <span className="sd-rel-label">External surfaces</span>
+              <div className="sd-chips">
+                {surfaces.map((x) => (
+                  <span key={x} className="sd-chip static">
+                    {x}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

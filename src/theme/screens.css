@@ -1342,6 +1342,218 @@ tr:hover .kn-remove {
   font-size: 13px;
   border-radius: var(--r-md);
 }
+/* Knowledge → Insights (screens/Insights.tsx) */
+.kn-view {
+  max-width: 300px;
+}
+.ins {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.ins-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 28px;
+}
+.ins-sub {
+  font-size: 13px;
+}
+.ins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 22px;
+}
+.ins-card {
+  padding: 22px 24px;
+  min-width: 0;
+}
+.ins-card.wide {
+  grid-column: 1 / -1;
+}
+.ins-card h3 {
+  font: 600 16px/1.2 var(--font-display);
+  margin: 0 0 4px;
+}
+.ins-hint {
+  font-size: 12.5px;
+  margin: 0 0 14px;
+}
+.ins-empty {
+  font-size: 13px;
+  padding: 6px 0;
+}
+.ins-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: var(--amber);
+}
+.ins-note > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.ins-note.error {
+  color: var(--red);
+}
+.ins-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ins-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.ins-row:first-child {
+  border-top: 0;
+}
+.ins-name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  font-size: 13.5px;
+  border-radius: var(--r-sm);
+}
+.ins-name:hover .mono {
+  color: var(--blue);
+}
+.ins-name:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 3px;
+}
+.ins-name .ellipsis {
+  max-width: 100%;
+}
+.ins-file {
+  font-size: 11.5px;
+}
+.ins-metric {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.ins-more {
+  margin-top: 8px;
+}
+.ins-shape {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ins-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+.ins-tile {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--inset);
+  font-size: 12px;
+}
+.ins-big {
+  font-size: 22px;
+  color: var(--text-strong);
+  margin: 6px 0 2px;
+}
+.ins-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ins-hist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.ins-hist-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 48px;
+  align-items: center;
+  gap: 10px;
+}
+.ins-hist-row > :last-child {
+  text-align: right;
+}
+.ins-hist-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--inset);
+  overflow: hidden;
+}
+.ins-hist-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--grad-cta);
+}
+.ins-heat-wrap {
+  overflow-x: auto;
+}
+.ins-heat {
+  border-collapse: separate;
+  border-spacing: 3px;
+  font-size: 12px;
+}
+.ins-heat caption {
+  caption-side: bottom;
+  text-align: left;
+  padding-top: 10px;
+  font-size: 12px;
+}
+.ins-heat th {
+  font: 500 11px/1.2 var(--font-mono);
+  color: var(--text-2);
+  font-weight: 500;
+}
+.ins-heat th[scope='row'] {
+  text-align: right;
+  padding-right: 8px;
+  max-width: 180px;
+}
+.ins-heat th[scope='col'] {
+  vertical-align: bottom;
+  height: 110px;
+  padding-bottom: 6px;
+}
+.ins-heat-col {
+  display: inline-block;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  max-height: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ins-heat td {
+  width: 44px;
+  height: 34px;
+  text-align: center;
+  border-radius: 5px;
+  background: var(--inset);
+  font-family: var(--font-mono);
+  color: var(--text-strong);
+}
+.ins-heat td.self {
+  background: repeating-linear-gradient(45deg, var(--inset) 0 4px, transparent 4px 8px);
+}
 .kn-log {
   max-height: 220px;
 }
@@ -4013,6 +4225,13 @@ button.cc-chip:focus-visible {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-3);
+}
+.sd-impact-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  margin-bottom: 12px;
 }
 .sd-rel {
   display: flex;

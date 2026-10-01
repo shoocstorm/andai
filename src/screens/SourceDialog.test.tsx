@@ -3,12 +3,14 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KbInfo, Source } from '../kb/api';
 import type { SourceView } from '../kb/source';
-import { viewSource } from '../state/kb';
+import { readAnalysis } from '../kb/analysis';
+import { fileImpact, viewSource } from '../state/kb';
 import { Sources } from './Knowledge';
 
 vi.mock('../state/kb', async (original) => ({
   ...(await original<typeof import('../state/kb')>()),
   viewSource: vi.fn(),
+  fileImpact: vi.fn(),
 }));
 
 const src = (file: string, kind: Source['kind'] = 'MD'): Source => ({
@@ -120,5 +122,41 @@ describe('source dialog', () => {
     vi.mocked(viewSource).mockRejectedValueOnce(new Error('“x.md” isn’t in this knowledge base.'));
     await user.click(screen.getByRole('button', { name: 'View refund-policy.md' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('isn’t in this knowledge base');
+  });
+});
+
+describe('blast radius', () => {
+  const code: KbInfo = { ...kb, kind: 'code', sources: [src('fares.ts', 'CODE'), src('booking.ts', 'CODE')] };
+  const open = async () => {
+    vi.mocked(viewSource).mockImplementation(async (_slug, file) => view(file, { source: src(file, 'CODE') }));
+    const user = userEvent.setup();
+    render(<Sources kb={code} onDelete={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'View fares.ts' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Source fares.ts' }));
+    return { user, region: within(await dialog.findByRole('region', { name: 'Blast radius' })) };
+  };
+
+  it('shows what depends on a code file and which tests to re-run; affected files open in place', async () => {
+    vi.mocked(fileImpact).mockResolvedValue({
+      summary: readAnalysis({ columns: ['dependents', 'files_affected'], rows: [[3, 2]] }),
+      impact: readAnalysis({ columns: ['file', 'dependents', 'tests'], rows: [['booking.ts', 2, 0], ['fares.test.ts', 1, 1]] }),
+      retest: readAnalysis({ columns: ['test_file', 'test_symbols'], rows: [['fares.test.ts', 1]] }),
+      boundary: readAnalysis({ columns: ['surface'], rows: [] }),
+      error: null,
+    });
+    const { user, region } = await open();
+    expect(await region.findByText('3 symbols in 2 files reach this file within three hops.')).toBeInTheDocument();
+    expect(fileImpact).toHaveBeenCalledWith('andai-ferries', 'fares.ts');
+    expect(region.getAllByText('fares.test.ts')).toHaveLength(1);
+    await user.click(region.getByRole('button', { name: 'booking.ts · 2' }));
+    expect(await screen.findByRole('dialog', { name: 'Source booking.ts' })).toBeInTheDocument();
+  });
+
+  it('never reads an unindexed file as “nothing depends on it”', async () => {
+    const missing = readAnalysis({ columns: ['file'], rows: [], targetNotIndexed: ['fares.ts'] });
+    vi.mocked(fileImpact).mockResolvedValue({ summary: missing, impact: missing, retest: missing, boundary: missing, error: null });
+    const { region } = await open();
+    expect(await region.findByText(/fares\.ts isn't in the index/)).toBeInTheDocument();
+    expect(region.queryByText(/Nothing else/)).toBeNull();
   });
 });

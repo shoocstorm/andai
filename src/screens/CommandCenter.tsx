@@ -620,6 +620,15 @@ function Composer() {
     composerRef.current = ta.current;
   }, []);
 
+  // A question handed over from another screen (Insights' Ask) becomes the draft, for the user to edit or send.
+  const prefill = useUi((s) => s.prefill);
+  useEffect(() => {
+    if (prefill === null) return;
+    setDraft(prefill);
+    useUi.setState({ prefill: null });
+    setTimeout(() => ta.current?.focus(), 30);
+  }, [prefill]);
+
   useLayoutEffect(() => {
     const el = ta.current;
     if (!el) return;

@@ -7,18 +7,21 @@ import {
   kbAddSample,
   kbCreate,
   kbDelete,
+  kbAnalyze,
   kbIndex,
   kbList,
   kbRemoveSource,
   kbSource,
   ugStatus,
+  type AnalyzePreset,
   type KbInfo,
   type KbKind,
   type UgStatus,
 } from '../kb/api';
+import { analysisError, INSIGHT_PRESETS, readAnalysis, type Analysis, type Insights } from '../kb/analysis';
 import type { SourceView } from '../kb/source';
 import { logApp } from './activity';
-import { toast } from './ui';
+import { toast, useUi } from './ui';
 
 type KbState = {
   kbs: KbInfo[];
@@ -35,6 +38,17 @@ type KbState = {
   logs: Record<string, { at: number; line: string }[]>;
   lastSearch: { ms: number; hits: number } | null;
   hits24h: number;
+  /** `ug analyze` results per KB for the Insights view and onboarding questions; not persisted. */
+  insights: Record<string, InsightsEntry>;
+};
+
+export type InsightsEntry = {
+  /** The index the results were read from: a re-index makes them stale. */
+  stamp: string;
+  results: Insights;
+  /** Per preset, why it failed. */
+  errors: Partial<Record<AnalyzePreset, string>>;
+  loading: boolean;
 };
 
 export const useKb = create<KbState>()(
@@ -51,6 +65,7 @@ export const useKb = create<KbState>()(
       logs: {},
       lastSearch: null,
       hits24h: 0,
+      insights: {},
     }),
     {
       name: 'andai.kb',
@@ -225,6 +240,67 @@ export async function viewSource(slug: string, file: string): Promise<SourceView
   } catch (e) {
     throw new Error(errText(e));
   }
+}
+
+/** What a KB's analysis was read from; it changes when the KB is indexed again. */
+export const indexStamp = (kb: Pick<KbInfo, 'lastIndexedAt' | 'nodes' | 'edges'>) => `${kb.lastIndexedAt ?? 0}:${kb.nodes}:${kb.edges}`;
+
+/** At most this many `ug analyze` runs at once: each is its own process, up to about a second on a large repo. */
+const ANALYZE_CONCURRENCY = 4;
+
+async function pool<T>(items: T[], n: number, run: (item: T) => Promise<void>) {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) await run(items[next++]);
+  }));
+}
+
+function patchInsights(slug: string, patch: (e: InsightsEntry) => InsightsEntry, stamp: string) {
+  const all = useKb.getState().insights;
+  const cur = all[slug]?.stamp === stamp ? all[slug] : { stamp, results: {}, errors: {}, loading: false };
+  useKb.setState({ insights: { ...all, [slug]: patch(cur) } });
+}
+
+/**
+ * Runs the analysis presets a KB doesn't have for its current index yet, a
+ * few at a time, into `insights`. Each result lands as it arrives; a failed
+ * preset keeps its error. Nothing runs for a KB that isn't indexed.
+ */
+export async function loadInsights(slug: string, presets: AnalyzePreset[] = INSIGHT_PRESETS) {
+  const kb = useKb.getState().kbs.find((k) => k.slug === slug);
+  if (!kb || kb.status !== 'ready') return;
+  const stamp = indexStamp(kb);
+  const have = useKb.getState().insights[slug];
+  const todo = presets.filter((p) => have?.stamp !== stamp || !(p in have.results || p in have.errors));
+  if (!todo.length || (have?.stamp === stamp && have.loading)) return;
+  patchInsights(slug, (e) => ({ ...e, loading: true }), stamp);
+  await pool(todo, ANALYZE_CONCURRENCY, async (preset) => {
+    try {
+      const out = await kbAnalyze(slug, preset, null, 25);
+      const a = readAnalysis(out.output);
+      patchInsights(slug, (e) => ({ ...e, results: { ...e.results, [preset]: a } }), stamp);
+    } catch (e) {
+      patchInsights(slug, (cur) => ({ ...cur, errors: { ...cur.errors, [preset]: analysisError(e) } }), stamp);
+    }
+  });
+  patchInsights(slug, (e) => ({ ...e, loading: false }), stamp);
+}
+
+/** A file's blast radius for the source dialog: who reaches it, which tests, which external surfaces. */
+export type FileImpact = { summary: Analysis | null; impact: Analysis | null; retest: Analysis | null; boundary: Analysis | null; error: string | null };
+
+export async function fileImpact(slug: string, file: string): Promise<FileImpact> {
+  const run = (p: AnalyzePreset) => kbAnalyze(slug, p, file, 25).then((o) => readAnalysis(o.output));
+  const settled = await Promise.allSettled([run('impact_summary'), run('impact'), run('retest_scope'), run('boundary_impact')]);
+  const [summary, impact, retest, boundary] = settled.map((s) => (s.status === 'fulfilled' ? s.value : null));
+  const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+  return { summary, impact, retest, boundary, error: failed ? analysisError(failed.reason) : null };
+}
+
+/** Grounds the chat in `slug` and opens it with `question` in the composer, for the user to send. */
+export function askAbout(slug: string, question: string) {
+  useKb.setState({ grounding: slug });
+  useUi.getState().ask(question);
 }
 
 export function recordSearch(ms: number, hits: number) {

@@ -15,7 +15,11 @@ type UiState = {
   aboutOpen: boolean;
   /** A Finder drag is hovering the window. */
   dragging: boolean;
+  /** Text for the chat composer to take as its draft (Insights' Ask), then clear. */
+  prefill: string | null;
   go: (route: Route) => void;
+  /** Opens the chat with `text` in the composer, for the user to edit or send. */
+  ask: (text: string) => void;
   toast: (t: Omit<Toast, 'id'>) => void;
   dismiss: (id: number) => void;
   setAbout: (open: boolean) => void;
@@ -34,9 +38,14 @@ export const useUi = create<UiState>((set, get) => ({
   toasts: [],
   aboutOpen: false,
   dragging: false,
+  prefill: null,
   go: (route) => {
     history.replaceState(null, '', `#${route}`);
     set({ route });
+  },
+  ask: (text) => {
+    set({ prefill: text });
+    get().go('command');
   },
   toast: (t) => {
     const id = nextId++;

@@ -20,6 +20,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Bar, Modal, Pager, Segmented, Slider, fmtAgo, fmtBytes, usePaged } from '../components/ui';
 import { inTauri, kbPickFiles, type KbInfo, type KbKind, type Source } from '../kb/api';
 import { SAMPLES, type SampleDef } from '../kb/samples';
+import { Insights } from './Insights';
 import { SourceDialog } from './SourceDialog';
 import { UgInstall } from './UgSetup';
 import { useUgInstall } from '../state/ugInstall';
@@ -41,6 +42,10 @@ export function Knowledge() {
   const kb = kbs.find((k) => k.slug === selected) ?? null;
   const [creating, setCreating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [view, setView] = useState<'sources' | 'insights'>('sources');
+  // Insights read the code graph: only for an indexed code or mixed KB.
+  const canAnalyze = !!kb && kb.kind !== 'document' && kb.status === 'ready';
+  const shown = canAnalyze ? view : 'sources';
 
   return (
     <div className="screen">
@@ -61,7 +66,22 @@ export function Knowledge() {
 
           <Ingest kb={kb} onNeedKb={() => setCreating(true)} />
 
-          {kb ? (
+          {canAnalyze && (
+            <div className="kn-view">
+            <Segmented
+              label="View"
+              value={shown}
+              onChange={setView}
+              options={[
+                { value: 'sources', label: 'Sources' },
+                { value: 'insights', label: 'Insights' },
+              ]}
+            />
+            </div>
+          )}
+          {kb && shown === 'insights' ? (
+            <Insights key={kb.slug} kb={kb} />
+          ) : kb ? (
             <Sources key={kb.slug} kb={kb} onDelete={() => setConfirmDelete(true)} />
           ) : (
             loaded && (
