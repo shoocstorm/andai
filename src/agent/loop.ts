@@ -28,6 +28,7 @@ import { recordToolRun, requestApproval, useTools } from '../state/tools';
 import { logActivity } from '../state/activity';
 import { addEvidence, mergeEvidence, type Found } from './evidence';
 import { agentState, LAYA_CHARS_PER_TOKEN, needsLookup, type Observation, type StatePassage } from './prompt';
+import { wholeRepoStep } from './repo';
 import { CALLERS, namedIdentifiers, planNext, searchAgainStep, type PlanInput } from './plan';
 import { DROP_BELOW, PassageScorer, passageText, scoringRequest, shownLines } from './relevance';
 import { fillArgs, parseObject } from './tools/argfill';
@@ -352,6 +353,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     const ruled = answerNext || !scorer || !found.length ? null : settings.plan !== 'off' ? planNext(evidence()) : settings.searchAgain ? searchAgainStep(evidence()) : null;
     const planned = ruled != null;
     let given: Record<string, unknown> | null = null;
+    let repoStep: ReturnType<typeof wholeRepoStep> = null;
     if (answerNext) {
       // What was fetched before answering is in; answer (unless the other fetch applies, below).
       action = ANSWER;
@@ -362,6 +364,15 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
     } else if (settings.plan === 'pure' && scorer && found.length) {
       action = ANSWER;
       note = 'Planned: no rule calls for another step, so answering.';
+    } else if (settings.searchFirst && index === 0 && (repoStep = wholeRepoStep(prompt, knownFiles(), new Set(tools.map((t) => t.id))))) {
+      // A whole-repo question (agent/repo.ts) starts with its analysis, as a content question starts
+      // with a search, and is answered from it: left to decide, Laya picked another analysis after it
+      // (4 of 5 in the eval) and one answer read that table as the one asked for.
+      action = repoStep.tool;
+      given = repoStep.args;
+      fallback = 'whole-repo';
+      answerNext = true;
+      note = 'Analyzed first, no decision: the request asks about the codebase as a whole';
     } else if (settings.searchFirst && index === 0 && searchTool && needsLookup(prompt)) {
       action = searchTool.id;
       note = 'Searched first, no decision: a question about the knowledge base’s content starts with a search';
@@ -513,7 +524,7 @@ export async function runAgent(input: LoopInput): Promise<AgentResult> {
           argsRaw: sameJson(fill.raw, args) ? null : fill.raw,
           argModel: fill.model,
           argAttempts: fill.attempts,
-          argIO: given ? { ...fill.io, note: planned ? `No argument writer: a rule set them (${Object.keys(given).join(', ')}): ${note ?? ''}` : fallback === 'named-symbol' ? 'No argument writer: the agent took the symbol the request names.' : 'No argument writer: the agent set the range to the whole section the search had clipped.' } : fill.io,
+          argIO: given ? { ...fill.io, note: planned ? `No argument writer: a rule set them (${Object.keys(given).join(', ')}): ${note ?? ''}` : fallback === 'named-symbol' ? 'No argument writer: the agent took the symbol the request names.' : fallback === 'whole-repo' ? `No argument writer: the request asks for this analysis (${JSON.stringify(given)}).` : 'No argument writer: the agent set the range to the whole section the search had clipped.' } : fill.io,
         });
       } else if (tool.id === 'kb_search') {
         // The fixed pipeline's query: the question itself.

@@ -96,7 +96,9 @@ export function rowText(a: Analysis, row: Cell[]): string {
 
 /** The result as one passage: what was asked, the rows, how many there were, and what it can't tell. */
 export function analysisText(a: Analysis, max = 20): string {
-  const head = [a.title && `Analysis: ${a.title}`, a.description].filter(Boolean).join('. ');
+  // The passage's header already names the analysis (agent/tools/ug.ts); a second "Analysis: x" line
+  // here was echoed back as the answer by Qwen3 1.7B, row after row (agent eval, 2026-10-02).
+  const head = a.description ? `${a.description.replace(/[.:]\s*$/, '')}:` : a.title;
   const rows = a.rows.slice(0, max).map((r, i) => `${i + 1}. ${rowText(a, r)}`);
   const shown = rows.length < a.total ? `Showing ${rows.length} of ${a.total} rows.` : '';
   return [head, ...(rows.length ? rows : ['No rows matched.']), shown, ...a.caveats.map((c) => `Note: ${c}`)]

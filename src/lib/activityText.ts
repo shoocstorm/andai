@@ -38,6 +38,7 @@ const FALLBACK: Record<string, string> = {
   'needs-range': 'searched first for a line range',
   'read-whole': 'read a clipped passage whole',
   'named-symbol': 'fetched a symbol the request names',
+  'whole-repo': 'analyzed the whole codebase first',
 };
 
 function turn(d: Obj): Described {

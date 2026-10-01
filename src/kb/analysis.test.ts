@@ -89,9 +89,9 @@ describe('analysis as text', () => {
     const a = readAnalysis(untested);
     expect(rowText(a, a.rows[0])).toBe('withRetry (Function, retry.ts) · depended on by 3 · loc 12');
     const text = analysisText(a);
-    expect(text).toMatch(/^Analysis: untested_symbols\. Source functions/);
+    expect(text).toMatch(/^Source functions no test reaches within 2 hops, most depended-upon first:\n1\. withRetry/);
     expect(text).toMatch(/Showing 2 of 6 rows\./);
-    expect(analysisText(readAnalysis(impactMissing))).toMatch(/No rows matched\.\nNote: src\/fares\.ts isn't in the index/);
+    expect(analysisText(readAnalysis(impactMissing))).toMatch(/^impact\nNo rows matched\.\nNote: src\/fares\.ts isn't in the index/);
   });
 
   it('turns a missing `ug analyze` into an update hint', () => {

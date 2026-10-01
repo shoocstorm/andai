@@ -125,7 +125,9 @@ export function buildSystem(
         if (p.status === 'left out') return [];
         const text = (h.snippet ?? h.description ?? '').trim();
         const clipped = p.status === 'clipped' ? `${text.slice(0, p.used)}…` : text;
-        return [`<passage>\n[${i + 1}] ${defang(h.file)} (lines ${h.start_line}-${h.end_line})\n${defang(clipped)}\n</passage>`];
+        // A passage without lines (a whole-repo analysis, the overview) is named by what it is, not "(analysis) (lines 0-0)".
+        const head = h.start_line ? `${h.file} (lines ${h.start_line}-${h.end_line})` : h.file.startsWith('(') ? h.name : h.file;
+        return [`<passage>\n[${i + 1}] ${defang(head)}\n${defang(clipped)}\n</passage>`];
       });
       parts.push(
         `Knowledge base “${kbName}” — retrieved context. Answer from it and cite sources inline as [n].\n` +

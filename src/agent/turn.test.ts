@@ -622,6 +622,28 @@ describe('runTurn (agent mode)', () => {
     }
   });
 
+  it('analyzes first, without a decision or argument writer, when the request asks about the whole codebase', async () => {
+    const src = { file: 'fares.ts', original: 'fares.ts', kind: 'CODE', bytes: 1, approxTokens: 1, addedAt: 0, status: 'indexed' } as const;
+    useKb.setState({ kbs: [kb({ kind: 'code', sources: [src] })] });
+    useTools.setState({ searchFirst: true });
+    agent.decisions = [{ chosen: 'answer_now' }];
+    await runTurn('What would be affected if I changed fares.ts?');
+    expect(steps()[0]).toMatchObject({ action: 'kb_impact', decision: null, fallback: 'whole-repo' });
+    expect(agent.tool[0].call).toEqual({ tool: 'kb_analyze', preset: 'impact', target: 'fares.ts', limit: 20 });
+    expect(steps()[0].call!.argModel).toBeNull();
+    // Answered from it, without another decision.
+    expect(steps().map((s) => s.action)).toEqual(['kb_impact', 'answer_now']);
+    expect(agent.seenOptions).toHaveLength(0);
+
+    // Not on a documents KB: the analysis tools aren't offered there, so it searches.
+    clearChat();
+    agent.tool = [];
+    useKb.setState({ kbs: [kb({ kind: 'document' })] });
+    agent.decisions = [{ chosen: 'answer_now' }];
+    await runTurn('Which functions have no tests?');
+    expect(steps()[0].action).toBe('kb_search');
+  });
+
   it('still lets the model decide on small talk, and after the first step', async () => {
     useTools.setState({ searchFirst: true });
     agent.decisions = [{ chosen: 'answer_now' }];

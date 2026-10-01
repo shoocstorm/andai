@@ -74,6 +74,11 @@ describe('buildSystem', () => {
     expect(s).toContain('cite sources inline as [n]');
   });
 
+  it('names a passage without lines (a whole-repo analysis) by what it is', () => {
+    const analysis = { ...hit('(analysis)', 'Analysis: untested_symbols'), name: 'Analysis: untested symbols', start_line: 0, end_line: 0 };
+    expect(buildSystem(persona, [analysis], 5000, 'Code')).toContain('[1] Analysis: untested symbols\nAnalysis: untested_symbols');
+  });
+
   it('clips a passage that overflows the budget, marking the cut', () => {
     const s = buildSystem(persona, [hit('a.md', 'x'.repeat(1500))], 1000, 'Docs');
     expect(s).toContain(`[1] a.md (lines 1-10)\n${'x'.repeat(1000)}…`);
