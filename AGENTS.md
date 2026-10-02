@@ -302,6 +302,11 @@ section and FAQ (see §8).
   a human decision (§1.10). Exception recorded above: `firebase` (JS only,
   no install script needed — `@firebase/util`'s and `protobufjs`'s blocked
   postinstalls stay blocked), web-only lazy chunks.
+- `overrides` pins `@grpc/grpc-js` to a patched release (GHSA-m9gg-hp2v-232j,
+  2026-10-02): `@firebase/firestore` pins `~1.9.0`, which `bun audit` fails
+  as high. Firestore is never imported (only `firebase/app` and
+  `firebase/analytics`), so the override changes no shipped code. Drop it
+  when a `firebase` release no longer pins a vulnerable version.
 
 ### Git: work on `main`, share it with other agents
 - **`bun install` installs a pre-push hook** (`.githooks/pre-push` via
