@@ -38,7 +38,10 @@ model download nothing leaves the machine: no account, no API key, no cloud.
   were cut to fit or were left out; how much conversation was kept; and the
   exact system prompt.
 - **Execution Trace.** A side panel with each step's status and timing,
-  each decision and tool call (see below), the sources used, live throughput (tokens/second) and how much of the model's
+  each decision and tool call (see below; under the plan step they sit
+  behind a one-line fold, collapsed by default so the turn's steps read at a
+  glance — click the line, or a step's chip, to open it), the sources used,
+  live throughput (tokens/second) and how much of the model's
   context window the turn used. It starts hidden; open it with the panel
   button or `⌘J`. While it's hidden and the agent is working, the button
   pulses and the header shows the current step.

@@ -367,6 +367,26 @@ describe('Command Center (agent mode)', () => {
     expect(trace.getByRole('button', { name: /copy trace/i })).toBeInTheDocument();
   });
 
+  it('folds the plan step’s agent steps away by default, and a chat chip opens the fold to its card', async () => {
+    const user = userEvent.setup();
+    turn([
+      { id: 's1', index: 0, at: 0, decision, action: 'kb_search', call: call() },
+      { id: 's2', index: 1, at: 0, decision: { ...decision, chosen: 'answer_now', confidence: 0.7 }, action: 'answer_now' },
+    ]);
+    render(<CommandCenter />);
+    const trace = within(screen.getByText('Execution Trace').closest('aside')!);
+    const fold = trace.getByText('2 steps · decisions and tool calls').closest('details')!;
+    expect(fold).not.toHaveAttribute('open');
+    await user.click(trace.getByText('2 steps · decisions and tool calls'));
+    expect(fold).toHaveAttribute('open');
+    expect(trace.getByRole('button', { name: 'Tool call' })).toBeInTheDocument();
+    // folded back, a tool chip still reaches its card inside the fold
+    await user.click(trace.getByText('2 steps · decisions and tool calls'));
+    expect(fold).not.toHaveAttribute('open');
+    await user.click(screen.getByRole('button', { name: /show step 01\.1 in the trace/i }));
+    await waitFor(() => expect(fold).toHaveAttribute('open'));
+  });
+
   it('explains a step in a dialog: why, what the model saw, what it returned', async () => {
     const user = userEvent.setup();
     const io = {

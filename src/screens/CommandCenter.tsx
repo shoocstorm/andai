@@ -350,6 +350,9 @@ export function flashTrace(domId: string) {
   const run = () => {
     const el = document.getElementById(domId);
     if (!el) return;
+    // the card can sit inside a fold (the agent loop's steps under the plan
+    // step): open every closed one up the tree, or there is nothing to scroll to
+    for (let p: HTMLElement | null = el.parentElement; p; p = p.parentElement) if (p instanceof HTMLDetailsElement && !p.open) p.open = true;
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     el.scrollIntoView?.({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
     el.classList.remove('flash');
@@ -964,9 +967,15 @@ function TracePanel({ msg }: { msg?: Message }) {
                   {s.kind === 'plan' && !!msg.agent?.length && (
                     <div className="trace-subs ag-subs">
                       <DecisionSummary agent={msg.agent} />
-                      {msg.agent.map((a) => (
-                        <AgentStepCard key={a.id} s={a} domId={traceCallId(msg.id, a.id)} />
-                      ))}
+                      {/* the loop's steps fold to one line, so the turn's own steps stay readable at a glance; a chip click opens the fold (flashTrace) */}
+                      <details className="ag-fold">
+                        <summary className="faint ag-small">
+                          {msg.agent.length} step{msg.agent.length === 1 ? '' : 's'} · decisions and tool calls
+                        </summary>
+                        {msg.agent.map((a) => (
+                          <AgentStepCard key={a.id} s={a} domId={traceCallId(msg.id, a.id)} />
+                        ))}
+                      </details>
                     </div>
                   )}
                   {s.kind === 'filter' && msg.relevance && <RelevanceList r={msg.relevance} sources={msg.sources ?? []} question={questionFor(msg)} />}
