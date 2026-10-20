@@ -69,7 +69,7 @@ export type SupportRecord = {
   items: SupportItem[];
 };
 
-const CITE = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
+export const CITE = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
 
 /**
  * Uncited sentences a citation-only fragment reaches back to: "… terminal. [6]"
@@ -78,8 +78,8 @@ const CITE = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
  */
 const REACH_BACK = 3;
 
-/** A sentence without Markdown, inline-code or citation marks. */
-const plain = (raw: string) =>
+/** A sentence without Markdown, inline-code or citation marks; how a claim's `sentence` is written. */
+export const plain = (raw: string) =>
   raw
     .replace(CITE, '')
     .replace(/`([^`]*)`/g, '$1')
@@ -101,7 +101,7 @@ export const aboutMissing = (sentence: string) =>
   /\b(not|no|nothing|doesn['’]t|don['’]t|isn['’]t|aren['’]t|lacks?|without)\b/i.test(sentence);
 
 /** Two words at least: ", , and [2]." or a bare "[6]" leaves nothing to check. */
-const checkable = (sentence: string) => (sentence.match(/[\p{L}\p{N}]+/gu) ?? []).length >= 2;
+export const checkable = (sentence: string) => (sentence.match(/[\p{L}\p{N}]+/gu) ?? []).length >= 2;
 
 /**
  * The cited sentences of an answer, one per sentence and source it cites, in

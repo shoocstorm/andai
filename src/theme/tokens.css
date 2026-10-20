@@ -35,6 +35,18 @@
   --border: #ffffff10;
   --border-strong: #ffffff1c;
   --border-focus: #7db4ff;
+  /* instrument rails: the hairline glow under the top bar (mirrored above the
+     status bar) and the two-tone ring a focused control wears */
+  --edge-glow: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--blue) 50%, transparent),
+    color-mix(in srgb, var(--violet) 35%, transparent) 38%,
+    transparent 72%
+  );
+  --focus-ring:
+    0 0 0 1px color-mix(in srgb, var(--blue) 55%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--blue) 10%, transparent),
+    0 0 24px -8px color-mix(in srgb, var(--violet) 55%, transparent);
   --edge: #5b6b86;
   --port: #7a8aa6;
 
@@ -127,6 +139,17 @@
   --border: #0b12201a;
   --border-strong: #0b122029;
   --border-focus: #2f6fe0;
+  /* softer rails on light: the same glow reads brighter on white, so dim it */
+  --edge-glow: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--blue) 28%, transparent),
+    color-mix(in srgb, var(--violet) 20%, transparent) 38%,
+    transparent 72%
+  );
+  --focus-ring:
+    0 0 0 1px color-mix(in srgb, var(--blue) 60%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--blue) 10%, transparent),
+    0 0 22px -8px color-mix(in srgb, var(--violet) 40%, transparent);
   --edge: #9aa6bd;
   --port: #7d8aa3;
 

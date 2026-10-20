@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { Component, type CSSProperties, type ErrorInfo, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, ChevronLeft, ChevronRight, Copy } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../state/ui';
 
@@ -190,61 +190,144 @@ export function linkCitations(text: string, max: number): string {
     .join('');
 }
 
+// The few hast shapes `sentenceSpans` touches; react-markdown doesn't re-export its types.
+type HNode = { type: string; value?: string; tagName?: string; properties?: Record<string, unknown>; children?: HNode[] };
+type HElement = HNode & { type: 'element'; tagName: string; children: HNode[] };
+
+/** Where sentences live: text blocks. Headings are labels, and code is never split. */
+const SENTENCE_BLOCKS = new Set(['p', 'li', 'td', 'th']);
+/** Inline elements stay whole inside the sentence they're in (a citation, a code span). */
+const INLINE = new Set(['a', 'strong', 'em', 'code', 'del', 'b', 'i', 'sup', 'sub', 'span']);
+/** The claim check's sentence split (agent/claims.ts `citedClaims`), kept as a separator. */
+const SENTENCE_BREAK = /((?<=[.!?])\s+|\n+)/;
+
+const isElement = (n: HNode): n is HElement => n.type === 'element';
+
+/** A hast node's text, citations included (`[n]` links read "[n]"). */
+export function hastText(n: HNode): string {
+  if (n.type === 'text') return n.value ?? '';
+  return (n.children ?? []).map(hastText).join('');
+}
+
+/** One block's children with each sentence's inline run wrapped in a `span.md-sent`. */
+function wrapSentences(children: HNode[]): HNode[] {
+  const out: HNode[] = [];
+  let run: HNode[] = [];
+  const flush = () => {
+    if (run.some((n) => hastText(n).trim())) out.push({ type: 'element', tagName: 'span', properties: { className: ['md-sent'] }, children: run });
+    else out.push(...run);
+    run = [];
+  };
+  for (const c of children) {
+    if (c.type === 'text') {
+      (c.value ?? '').split(SENTENCE_BREAK).forEach((part, i) => {
+        if (!part) return;
+        if (i % 2) {
+          flush();
+          out.push({ type: 'text', value: part });
+        } else run.push({ type: 'text', value: part });
+      });
+    } else if (isElement(c) && INLINE.has(c.tagName)) run.push(c);
+    else {
+      flush();
+      out.push(c);
+    }
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Rehype step: splits the text blocks of an answer into sentences the way the
+ * claim check does, each in a `span.md-sent`, so `Markdown`'s `sentence`
+ * renderer can mark it. Nested blocks (a paragraph in a list item) get their own.
+ */
+export function sentenceSpans() {
+  const walk = (n: HNode) => {
+    if (!n.children) return;
+    n.children.forEach(walk);
+    if (isElement(n) && SENTENCE_BLOCKS.has(n.tagName)) n.children = wrapSentences(n.children);
+  };
+  return (tree: HNode) => walk(tree);
+}
+
 /**
  * Model output as Markdown, made inert: no images, links copy-only. With
  * `onCite`, `[n]` citations (1…`sources`) become buttons that call it; they
- * never navigate.
+ * never navigate. With `sentence`, each sentence of a text block is rendered
+ * through it, with its text (citations read "[n]").
  */
-export function Markdown({ text, sources = 0, onCite }: { text: string; sources?: number; onCite?: (n: number) => void }) {
+export function Markdown({
+  text,
+  sources = 0,
+  onCite,
+  sentence,
+}: {
+  text: string;
+  sources?: number;
+  onCite?: (n: number) => void;
+  sentence?: (text: string, children: ReactNode) => ReactNode;
+}) {
+  // Stable while its inputs are: a new component per render would remount
+  // every sentence and lose the state inside it (an open claim dialog).
+  const components = useMemo<Components>(
+    () => ({
+      span: ({ node, className, children, ...rest }) =>
+        sentence && className === 'md-sent' && node ? (
+          <>{sentence(hastText(node as HNode), children)}</>
+        ) : (
+          <span className={className} {...rest}>
+            {children}
+          </span>
+        ),
+      img: ({ src, alt }) => {
+        const host = hostOf(typeof src === 'string' ? src : undefined);
+        return (
+          <span className="md-blocked" title="Andai never loads images from model output">
+            [image blocked{alt ? `: ${alt}` : ''}
+            {host && ` · ${host}`}]
+          </span>
+        );
+      },
+      a: ({ href, children }) => {
+        const cite = onCite && href ? CITE_HREF.exec(href) : null;
+        if (cite) {
+          const n = Number(cite[1]);
+          return (
+            <button type="button" className="md-cite" aria-haspopup="dialog" aria-label={`Source ${n}`} onClick={() => onCite!(n)}>
+              {children}
+            </button>
+          );
+        }
+        if (!href) return <span>{children}</span>;
+        const host = hostOf(href);
+        return (
+          <span className="md-link">
+            <span>{children}</span>
+            {host && <span className="md-link-host">{host}</span>}
+            <button
+              type="button"
+              className="md-link-copy"
+              aria-label={`Copy link ${href}`}
+              title={href}
+              onClick={() =>
+                void navigator.clipboard
+                  ?.writeText(href)
+                  .then(() => toast({ tone: 'info', title: 'Link copied', body: href }))
+                  .catch(() => toast({ tone: 'warn', title: 'Could not copy the link', body: href }))
+              }
+            >
+              <Copy size={12} />
+            </button>
+          </span>
+        );
+      },
+    }),
+    [onCite, sentence],
+  );
   return (
     <div className="md selectable">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          img: ({ src, alt }) => {
-            const host = hostOf(typeof src === 'string' ? src : undefined);
-            return (
-              <span className="md-blocked" title="Andai never loads images from model output">
-                [image blocked{alt ? `: ${alt}` : ''}
-                {host && ` · ${host}`}]
-              </span>
-            );
-          },
-          a: ({ href, children }) => {
-            const cite = onCite && href ? CITE_HREF.exec(href) : null;
-            if (cite) {
-              const n = Number(cite[1]);
-              return (
-                <button type="button" className="md-cite" aria-haspopup="dialog" aria-label={`Source ${n}`} onClick={() => onCite!(n)}>
-                  {children}
-                </button>
-              );
-            }
-            if (!href) return <span>{children}</span>;
-            const host = hostOf(href);
-            return (
-              <span className="md-link">
-                <span>{children}</span>
-                {host && <span className="md-link-host">{host}</span>}
-                <button
-                  type="button"
-                  className="md-link-copy"
-                  aria-label={`Copy link ${href}`}
-                  title={href}
-                  onClick={() =>
-                    void navigator.clipboard
-                      ?.writeText(href)
-                      .then(() => toast({ tone: 'info', title: 'Link copied', body: href }))
-                      .catch(() => toast({ tone: 'warn', title: 'Could not copy the link', body: href }))
-                  }
-                >
-                  <Copy size={12} />
-                </button>
-              </span>
-            );
-          },
-        }}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={sentence ? [sentenceSpans] : []} components={components}>
         {onCite && sources > 0 ? linkCitations(text, sources) : text}
       </ReactMarkdown>
     </div>

@@ -1102,16 +1102,43 @@ export function ClaimDialog({ x, r, passage, open, onClose }: { x: SupportItem; 
  */
 function ClaimLink({ x, r, sources, children }: { x: SupportItem; r: SupportRecord; sources: SearchHit[]; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
-  const h = sources[x.n - 1];
-  // A claim saved before these were kept has no `cites` or `source`: both follow from the answer's sources.
-  const full: SupportItem = { ...x, cites: x.cites ?? [x.n], source: x.source ?? (h ? `${h.file}:${h.start_line}-${h.end_line}` : `source [${x.n}]`) };
-  const rr: SupportRecord = { ...r, modelId: r.modelId ?? LAYA_MODELS.find((m) => m.name === r.model)?.id ?? '' };
   return (
     <>
       <TextLink label={`Claim check: [${x.n}] ${x.sentence}`} onClick={() => setOpen(true)}>
         {children}
       </TextLink>
-      {open && <ClaimDialog x={full} r={rr} passage={h ? passageText(h) : ''} open onClose={() => setOpen(false)} />}
+      {open && <SavedClaimDialog x={x} r={r} sources={sources} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/** A claim's dialog from what a message saved. */
+function SavedClaimDialog({ x, r, sources, onClose }: { x: SupportItem; r: SupportRecord; sources: SearchHit[]; onClose: () => void }) {
+  const h = sources[x.n - 1];
+  // A claim saved before these were kept has no `cites` or `source`: both follow from the answer's sources.
+  const full: SupportItem = { ...x, cites: x.cites ?? [x.n], source: x.source ?? (h ? `${h.file}:${h.start_line}-${h.end_line}` : `source [${x.n}]`) };
+  const rr: SupportRecord = { ...r, modelId: r.modelId ?? LAYA_MODELS.find((m) => m.name === r.model)?.id ?? '' };
+  return <ClaimDialog x={full} r={rr} passage={h ? passageText(h) : ''} open onClose={onClose} />;
+}
+
+/**
+ * A sentence's support score in the answer X-ray (screens/Xray.tsx), as a
+ * button to its claim dialog. Built open-only, like `ClaimLink`.
+ */
+export function ClaimBadge({ x, r, sources, flagged }: { x: SupportItem; r: SupportRecord; sources: SearchHit[]; flagged: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className={`xr-badge mono${flagged ? ' flagged' : ''}`}
+        aria-haspopup="dialog"
+        aria-label={`Claim check: ${pct(x.score)} supported by source ${x.n}${flagged ? ', may not be supported' : ''}`}
+        onClick={() => setOpen(true)}
+      >
+        {pct(x.score)}
+      </button>
+      {open && <SavedClaimDialog x={x} r={r} sources={sources} onClose={() => setOpen(false)} />}
     </>
   );
 }

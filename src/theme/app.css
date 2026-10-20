@@ -38,7 +38,7 @@ button:disabled {
   cursor: not-allowed;
 }
 :focus-visible {
-  outline: 1.5px dashed var(--border-focus);
+  outline: 1.5px solid color-mix(in srgb, var(--blue) 85%, transparent);
   outline-offset: 2px;
   border-radius: var(--r-sm);
 }
@@ -142,6 +142,18 @@ button:disabled {
   position: relative;
   z-index: 5;
 }
+/* instrument rail: a hairline under the bar that glows blue→violet from the
+   wordmark out (the status bar wears the same rail, mirrored) */
+.topbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--edge-glow);
+  pointer-events: none;
+}
 .wordmark {
   display: flex;
   align-items: baseline;
@@ -179,6 +191,10 @@ button:disabled {
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
+/* filter, not box-shadow: the pulse dots animate box-shadow (see @keyframes pulse) */
+.core-status .dot {
+  filter: drop-shadow(0 0 5px currentColor);
+}
 .topbar .spacer {
   flex: 1;
   align-self: stretch;
@@ -195,6 +211,7 @@ button:disabled {
 }
 .icon-btn:hover {
   background: var(--raised);
+  box-shadow: 0 0 14px -6px color-mix(in srgb, currentColor 55%, transparent);
 }
 .icon-btn[data-state='warn'] {
   color: var(--amber);
@@ -274,9 +291,11 @@ button:disabled {
   letter-spacing: 0.06em;
 }
 .agent-sub {
-  font-size: 12px;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--text-3);
-  margin-top: 4px;
+  margin-top: 5px;
 }
 .nav {
   display: flex;
@@ -314,8 +333,10 @@ button:disabled {
   bottom: 8px;
   width: 3px;
   border-radius: 3px;
-  background: var(--blue);
-  box-shadow: 0 0 12px 1px var(--blue-glow);
+  background: linear-gradient(180deg, var(--blue), var(--violet));
+  box-shadow:
+    0 0 12px 1px var(--blue-glow),
+    0 0 10px -2px color-mix(in srgb, var(--violet) 60%, transparent);
 }
 .nav-item .kbd {
   margin-left: auto;
@@ -374,23 +395,40 @@ button:disabled {
   right: -12px;
 }
 
-/* status bar */
+/* status bar: a mono instrument strip */
 .statusbar {
   grid-area: status;
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 20px;
   padding: 0 16px;
-  font: 500 11.5px/1 var(--font-body);
+  font: 600 10.5px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--text-2);
   border-top: 1px solid var(--border);
   background: var(--canvas-2);
 }
+.statusbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 1px;
+  background: var(--edge-glow);
+  transform: scaleX(-1);
+  pointer-events: none;
+}
 .statusbar .item {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   white-space: nowrap;
+}
+.statusbar .dot {
+  filter: drop-shadow(0 0 4px currentColor);
 }
 .statusbar .spacer {
   flex: 1;
@@ -401,13 +439,26 @@ button:disabled {
   letter-spacing: 0.04em;
 }
 .badge-offline {
-  font: 700 10.5px/1 var(--font-display);
-  letter-spacing: 0.06em;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.14em;
   color: var(--amber);
   border: 1px solid color-mix(in srgb, var(--amber) 33%, transparent);
   background: var(--amber-soft);
   padding: 5px 10px;
-  border-radius: 999px;
+  border-radius: 4px;
+  box-shadow: 0 0 16px -8px color-mix(in srgb, var(--amber) 70%, transparent);
+}
+/* a beacon: the one moving part of an otherwise still strip */
+.badge-offline::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 1.6s var(--ease) infinite;
 }
 
 /* ── primitives ───────────────────────────────────────────────────────── */
@@ -685,8 +736,8 @@ button:disabled {
   -webkit-user-select: text;
 }
 .field:focus {
-  border-color: color-mix(in srgb, var(--blue) 53%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 10%, transparent);
+  border-color: color-mix(in srgb, var(--blue) 55%, transparent);
+  box-shadow: var(--focus-ring);
 }
 .field::placeholder {
   color: var(--text-4);

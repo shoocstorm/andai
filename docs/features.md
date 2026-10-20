@@ -177,6 +177,16 @@ pasting in whatever one search returns:
   checks a sentence that cites several sources against each one alone (so
   a sentence that combines them can be flagged), and reads the stored
   passage, which may be shorter than what the chat model saw.
+- **Answer X-ray (with a Laya decision model).** The **X-ray** button under
+  an answer marks every sentence with what the claim check found: a green
+  tint that deepens with its support score, amber when it may not be
+  supported, a dotted underline when it cites a source the check has no
+  score for, and a dashed underline when it cites nothing. Each scored
+  sentence ends in its score; click it to open that sentence's check. A
+  sentence that cites several sources shows the weakest. It only shows
+  scores the claim check already computed, nothing is run again, and the
+  same limits apply. Without Laya (Intel Macs, Windows) there is no claim
+  check, so there is no X-ray.
 - **Search scope (with a Laya decision model).** A knowledge search is either
   *focused* (direct matches for a name or exact term) or *broad* (related
   passages too). With Laya loaded, Laya picks the scope as a typed choice in

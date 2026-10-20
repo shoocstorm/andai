@@ -927,6 +927,53 @@ describe('Command Center (agent mode)', () => {
     ]);
   });
 
+  it('X-rays an answer on request: each sentence’s support score opens its claim check, uncited ones are marked', async () => {
+    const support = {
+      model: 'Laya English',
+      modelId: 'laya-en',
+      ms: 60,
+      modelMs: 52,
+      flagBelow: 0.1,
+      items: [
+        { sentence: 'Use COOP.', n: 1, cites: [1], source: 'README.md:1-9', score: 0.93, flagged: false, inputTokens: 60, truncated: false },
+        { sentence: 'Cars pay 18.5.', n: 1, cites: [1, 2], source: 'README.md:1-9', score: 0.4, flagged: false, inputTokens: 44, truncated: false },
+        { sentence: 'Cars pay 18.5.', n: 2, cites: [1, 2], source: 'fares.ts:12-12', score: 0.04, flagged: true, inputTokens: 44, truncated: false },
+      ],
+    };
+    addMessage({ id: 'u', role: 'user', content: 'What headers?', createdAt: 0 });
+    addMessage({
+      id: 'a',
+      role: 'assistant',
+      content: 'Use COOP [1]. Cars pay 18.5 [1][2]. Ask the crew first.',
+      createdAt: 0,
+      sources: [
+        { id: 'h1', name: 'README', node_type: 'Section', file: 'README.md', start_line: 1, end_line: 9, snippet: 'Set COOP and COEP.' },
+        { id: 'h2', name: 'fares', node_type: 'Code', file: 'fares.ts', start_line: 12, end_line: 12, snippet: 'export const VEHICLE_SURCHARGE = 18.5;' },
+      ],
+      support,
+    });
+    render(<CommandCenter />);
+    const toggle = screen.getByRole('button', { name: /X-ray/ });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: /^Claim check: 93%/ })).toBeNull();
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('X-ray legend')).toBeInTheDocument();
+    screen.getByRole('button', { name: 'Claim check: 93% supported by source 1' });
+    expect(screen.getByText(/No citation: this sentence isn’t tied to a source/).closest('.xr')).toHaveTextContent('Ask the crew first.');
+    // a sentence citing two sources shows its weakest, the one the flag is about
+    await userEvent.click(screen.getByRole('button', { name: 'Claim check: 4.0% supported by source 2, may not be supported' }));
+    expect(within(screen.getByRole('dialog', { name: 'Claim check for source 2' })).getByText('May not be supported by its source')).toBeInTheDocument();
+  });
+
+  it('offers no X-ray when the claim check didn’t run', () => {
+    addMessage({ id: 'u', role: 'user', content: 'q', createdAt: 0 });
+    addMessage({ id: 'a', role: 'assistant', content: 'Use COOP [1].', createdAt: 0 });
+    render(<CommandCenter />);
+    expect(screen.queryByRole('button', { name: /X-ray/ })).toBeNull();
+  });
+
   it('builds a claim’s dialog only when it is opened, so a closed one never costs or breaks the chat', () => {
     // A claim check saved by an earlier build (before `cites`, `source` and
     // `inputTokens`) blanked the whole app on launch: every closed dialog ran

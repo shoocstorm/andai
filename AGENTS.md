@@ -117,6 +117,7 @@ Andai/
 │  ├─ screens/, shell/, components/
 │  ├─ theme/tokens.css       ALL colors, both themes
 │  ├─ lib/platform.ts        macOS vs Windows in the UI: shortcut labels (⌘ / Ctrl), traffic-light room
+│  ├─ lib/xray.ts            PURE: the claim check's verdict per rendered sentence (answer X-ray)
 │  ├─ lib/activityText.ts    PURE: activity log summaries + levels per event, grouping a day by question (Logs screen)
 │  ├─ mock/workflows.ts      data for the simulated Workflows screens
 │  ├─ smoke.ts               in-webview test harness (VITE_SMOKE)
@@ -228,7 +229,7 @@ that break a build, a release or the machine:
 | Knowledge bases: every ug project (`ug list`, no metadata file), create, ingest, index, search, delete; view a source's details, content and structure; read-only for projects Andai didn't create; listed `offline` without ug | Real (ug CLI) | `src-tauri/src/ug.rs`, `state/kb.ts`, `screens/SourceDialog.tsx` |
 | Install ug from inside Andai (launch prompt, Knowledge, Settings; release lookup, download progress, sha256, install; macOS/Linux, website on Windows) | Real | `src-tauri/src/ug_install.rs`, `state/ugInstall.ts`, `screens/UgSetup.tsx` |
 | Sample knowledge bases (Tidewater Ferries: documents, code, both), suggested questions | Real (bundled files, indexed by the user's ug) | `src-tauri/src/samples.rs`, `kb/samples.ts`, `screens/Knowledge.tsx` |
-| Laya decision model (download, verify, load, decide, stop question, relevance check, search scope, claim check; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts` |
+| Laya decision model (download, verify, load, decide, stop question, relevance check, search scope, claim check and the answer X-ray; Apple Silicon) | Real | `src-tauri/src/laya/`, `llm/laya.ts`, `llm/decide.ts`, `lib/xray.ts`, `screens/Xray.tsx` |
 | Agent tool loop: decisions, 8 ug tools, per-tool policy, approvals, decision model, Tools screen | Real | `agent/loop.ts`, `agent/tools/`, `llm/decide.ts`, `state/tools.ts`, `screens/Tools.tsx`, `src-tauri/src/tools.rs` |
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |

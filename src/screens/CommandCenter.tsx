@@ -49,6 +49,7 @@ import { toast, useUi } from '../state/ui';
 import { openUgSetup } from '../state/ugInstall';
 import { AgentStepCard, ApprovalCard, callChipText, callLive, ContextDialog, traceCallId, CopyTraceButton, DecisionSummary, MatchBadge, RelevanceList, SourceDialog, SupportList, SupportNote, ToolChips, decisionTiming, fmtMs } from './AgentTrace';
 import { pickFiles } from './Knowledge';
+import { XrayLegend, xraySentence, XrayToggle } from './Xray';
 import { shortcut } from '../lib/platform';
 
 export const composerRef: { current: HTMLTextAreaElement | null } = { current: null };
@@ -224,6 +225,10 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
   // The source whose dialog is open, from a citation or the passages list.
   const [source, setSource] = useState<number | null>(null);
   const nSources = m.sources?.length ?? 0;
+  // The answer X-ray: the claim check's verdict per sentence, once the answer is final.
+  const [xrayOn, setXray] = useState(false);
+  const xray = xrayOn && !m.streaming && m.support ? m.support : null;
+  const sentence = useMemo(() => (xray ? xraySentence(xray, m.sources ?? []) : undefined), [xray, m.sources]);
   return (
     <div className={`cc-turn${focused ? ' focused' : ''}`} onClick={onFocus}>
       <ReasoningStrip m={m} steps={visibleSteps} />
@@ -248,7 +253,12 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
               <i />
             </div>
           ) : (
-            answer && <Markdown text={answer + (m.streaming ? ' ▍' : '')} sources={nSources} onCite={setSource} />
+            answer && (
+              <>
+                {xray && <XrayLegend r={xray} />}
+                <Markdown text={answer + (m.streaming ? ' ▍' : '')} sources={nSources} onCite={setSource} sentence={sentence} />
+              </>
+            )
           )}
           {m.stopped && !answer && <div className="faint">Stopped before an answer was produced.</div>}
 
@@ -280,6 +290,7 @@ function AssistantMsg({ m, focused, onFocus }: { m: Message; focused: boolean; o
             {m.stats?.promptTokPerSec ? ` · prompt ${Math.round(m.stats.promptTokPerSec)} tok/s` : ''}
             {decisionLine(m)}
             {m.stopped && ' · stopped'}
+            {m.support && !m.streaming && answer && <XrayToggle on={xrayOn} onChange={setXray} />}
             <CopyButton text={() => reportFor(m)} label="Copy debug report" />
           </div>
         </motion.div>
