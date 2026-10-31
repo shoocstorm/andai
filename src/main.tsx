@@ -17,11 +17,14 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { runE2E, runSmoke } from './smoke';
 import { isMac } from './lib/platform';
+import { inTauri } from './kb/api';
 import { initWebAnalytics } from './lib/firebase';
 import { initTheme } from './state/theme';
 
-// app.css keeps the top bar clear of the macOS traffic lights.
+// Shortcut labels follow the platform; app.css keeps the desktop app's top bar
+// clear of the macOS traffic lights (a browser, an iPhone's included, has none).
 document.documentElement.dataset.platform = isMac ? 'mac' : 'other';
+document.documentElement.dataset.window = isMac && inTauri ? 'mac' : 'other';
 initTheme();
 // Web-only analytics: no-ops in the desktop app, and the firebase packages
 // stay in lazy chunks that only a browser session downloads (§1.4 record).

@@ -91,6 +91,36 @@ new, add it here, in the right section, with the date and the machine.
 
 ## Web deployment
 
+- **Phones** (2026-10-31; `usePhone`, `TabBar`, the phone blocks at the end
+  of `app.css` and `screens.css`). Below 640 px the desktop grid laid out at
+  565 px (sidebar 244 px plus fixed side columns), so iOS would have scaled
+  the whole app down; the phone layout swaps the sidebar for a tab bar and
+  every side column for one column. `detectMac` matches iPhone and iPad (it
+  picks ⌘ labels), so the traffic-light padding keys off `data-window`, set
+  only for the macOS desktop app. Safari zooms into a focused field under
+  16 px, so fields are 16 px on phones. `viewport-fit=cover` with
+  `env(safe-area-inset-*)` keeps the bars clear of the notch and home
+  indicator; `100dvh` follows Safari's collapsing toolbars. Checked with
+  headless Chrome's device emulation (390×844 and 375×667, touch, every
+  route, both themes, horizontal overflow measured per element), not on a
+  real iPhone.
+- **Models in iOS Safari** (2026-10-31; `llm/device.ts`, `engine.ts`
+  `warmUp`, `checkCrashedLoad`). Measured in the iPhone 17 Pro simulator
+  (iOS 26.5 Safari, `xcrun simctl`), production build with the
+  firebase.json headers: cross-origin isolated, 8 cores, no Memory64 or
+  JSPI (the compat build), shared memory up to 4 GB, no WebGPU adapter.
+  Qwen3 0.6B Q8_0 at 4,096 tokens: 604 MB weights + 448 MB KV + 30 MB
+  compute; at 2,048 tokens the KV is 224 MB. Loads in ~1 s from OPFS and
+  answers at 33.7 tok/s there (the Mac's CPU). A real iPhone differs in two
+  ways the simulator can't show: iOS kills a tab past its memory limit (the
+  page reloads, no error reaches JS), and it has a WebGPU adapter, so
+  wllama would copy the weights into GPU buffers too. So phones load on the
+  CPU (`n_gpu_layers: 0`, which also keeps wllama from starting WebGPU) at
+  ≤ 2,048 tokens; a caught memory or GPU error steps down to 1,024; a load
+  in progress is marked in localStorage, and a marker found at launch means
+  the page died under it (reported, next level saved, no autoload). Prompt
+  budgets use the context that loaded (`useEngine.nCtx`), not the catalog's.
+
 - **The web deployment is plain static hosting** (`firebase.json`, site
   `andai-agent`, project `aldrick-ai`, `bun run deploy:web`): Vite's `dist/`
   with the desktop isolation headers (COOP/COEP, so Chromium gets

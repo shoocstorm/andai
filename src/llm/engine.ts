@@ -19,6 +19,7 @@ import { ModelManager, Wllama, WllamaAbortError, type ChatCompletionParams, type
 import { create } from 'zustand';
 import { logApp } from '../state/activity';
 import { verifyBlobs } from './integrity';
+import { crashMessage, describeLoadError, detectDevice, loadPlan, MAX_LEVEL, planText, startLevel, type LoadPlan } from './device';
 import { downloadCheckpoint, downloadLaya, layaLoad, layaRemove, layaStatus, layaUnload, type LayaStatus } from './laya';
 import { allModels, isMlx, layaById, MODELS, modelById, type LayaDef, type MlxDef, type ModelDef, type WllamaDef } from './models';
 import {
@@ -70,6 +71,10 @@ type EngineState = {
   loadedId: string | null;
   progress: { loaded: number; total: number; speed: number; phase: string } | null;
   error: string | null;
+  /** The model the error is about, so its card can show it. */
+  errorId: string | null;
+  /** The context the chat model was loaded with (phones load less than the catalog's n_ctx). */
+  nCtx: number | null;
   info: EngineInfo | null;
   cached: Record<string, number>; // url -> bytes
   /** Copies cached under a model's pre-pinning URL, by model id -> bytes. */
@@ -100,6 +105,8 @@ export const useEngine = create<EngineState>(() => ({
   loadedId: null,
   progress: null,
   error: null,
+  errorId: null,
+  nCtx: null,
   info: null,
   cached: {},
   legacy: {},
@@ -141,6 +148,84 @@ export function gpuFromLog(line: string): { layers: number; total: number } | nu
   const m = /offloaded (\d+)\/(\d+) layers to GPU/.exec(line);
   if (m) return { layers: Number(m[1]), total: Number(m[2]) };
   return /ggml_webgpu: Failed to get an adapter/.test(line) ? { layers: 0, total: 0 } : null;
+}
+
+const device = detectDevice(typeof navigator === 'undefined' ? undefined : navigator);
+
+// A load in progress, so that a page iOS killed mid-load (no error to catch)
+// is recognized on the next launch (autoload → checkCrashedLoad). The level
+// a model last failed at is kept per model, so the next try asks for less.
+const ATTEMPT_KEY = 'andai.loadAttempt';
+const LEVEL_KEY = 'andai.loadLevel';
+type Attempt = { id: string; level: number; at: number };
+const readJson = <T,>(key: string, fallback: T): T => {
+  try {
+    return (JSON.parse(localStorage.getItem(key) ?? 'null') as T) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+const failedLevel = (id: string): number | undefined => readJson<Record<string, number>>(LEVEL_KEY, {})[id];
+const setFailedLevel = (id: string, level: number) => localStorage.setItem(LEVEL_KEY, JSON.stringify({ ...readJson<Record<string, number>>(LEVEL_KEY, {}), [id]: level }));
+
+/** How a wllama model will load here next: the device's start, or lighter after a failure. */
+export const plannedLoad = (def: { id: string; n_ctx: number }): LoadPlan => loadPlan(def.n_ctx, startLevel(device, failedLevel(def.id)));
+
+/**
+ * A load that never finished because the page was closed under it: says so
+ * and makes the next try lighter. Returns the model's id so autoload doesn't
+ * start it again (that would close the page on every launch).
+ */
+export function checkCrashedLoad(): string | null {
+  const a = readJson<Attempt | null>(ATTEMPT_KEY, null);
+  localStorage.removeItem(ATTEMPT_KEY);
+  // Only a recent attempt counts: an old marker is from a session the user ended.
+  if (!a || Date.now() - a.at > 15 * 60_000) return null;
+  const def = modelById(a.id);
+  const next = a.level < MAX_LEVEL ? loadPlan(def?.n_ctx ?? 4096, a.level + 1) : null;
+  setFailedLevel(a.id, Math.min(MAX_LEVEL, a.level + 1));
+  useEngine.setState({ status: 'error', error: crashMessage(def?.name ?? a.id, loadPlan(def?.n_ctx ?? 4096, a.level), next, device), errorId: a.id });
+  logModel('load-failed', 'chat', a.id, { error: 'page closed while loading', level: a.level });
+  return a.id;
+}
+
+/** Fails a warm-up that hangs (a worker that died without a word), instead of spinning forever. */
+const WARMUP_LIMIT_MS = 180_000;
+function withinWarmup<T>(p: Promise<T>, onTimeout: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    p.finally(() => clearTimeout(timer)),
+    new Promise<T>((_, reject) => {
+      timer = setTimeout(() => {
+        onTimeout();
+        reject(new Error('timed out warming up'));
+      }, WARMUP_LIMIT_MS);
+    }),
+  ]);
+}
+
+/** Loads a verified model into a new wllama at `plan`; the attempt is marked until it settles. */
+async function warmUp(id: string, model: Awaited<ReturnType<typeof openVerified>>['model'], plan: LoadPlan, onGpu: (g: { layers: number; total: number }) => void): Promise<Wllama> {
+  const w = newWllama(onGpu);
+  localStorage.setItem(ATTEMPT_KEY, JSON.stringify({ id, level: plan.level, at: Date.now() } satisfies Attempt));
+  try {
+    await withinWarmup(
+      w.loadModel(model, {
+        n_ctx: plan.n_ctx,
+        // CPU only: wllama then doesn't initialize WebGPU at all
+        ...(plan.gpu ? {} : { n_gpu_layers: 0 }),
+        // keep <think> blocks in the raw stream so the UI can fold them itself
+        reasoning_format: 'none',
+      }),
+      () => void w.exit().catch(() => {}),
+    );
+    return w;
+  } catch (e) {
+    await w.exit().catch(() => {});
+    throw e;
+  } finally {
+    localStorage.removeItem(ATTEMPT_KEY);
+  }
 }
 
 function newWllama(onGpu?: (gpu: { layers: number; total: number }) => void): Wllama {
@@ -276,9 +361,11 @@ export async function loadModel(id: string): Promise<void> {
     status: 'loading',
     loadingId: id,
     error: null,
+    errorId: null,
     progress: { loaded: 0, total: def.bytes, speed: 0, phase: 'Connecting…' },
   });
   const started = performance.now();
+  let plan: LoadPlan | null = null;
   try {
     if (isMlx(def)) {
       await ensureNative(def, (progress) => useEngine.setState({ progress }));
@@ -289,6 +376,7 @@ export async function loadModel(id: string): Promise<void> {
         loadedId: id,
         progress: null,
         info: nativeInfo(loaded),
+        nCtx: loaded.nCtx,
         lastLoadMs: performance.now() - started,
         lastVerifyMs: null,
       });
@@ -299,19 +387,28 @@ export async function loadModel(id: string): Promise<void> {
     const { model, verifyMs } = await openVerified(def, (progress) => useEngine.setState({ progress }));
     useEngine.setState({ lastVerifyMs: verifyMs });
     let gpu: { layers: number; total: number } | null = null;
-    const w = newWllama((g) => (gpu = g));
-    await w.loadModel(model, {
-      n_ctx: def.n_ctx,
-      // keep <think> blocks in the raw stream so the UI can fold them itself
-      reasoning_format: 'none',
-    });
+    // Phones start lighter; a failure that more memory or the GPU caused steps down a level.
+    let w: Wllama | null = null;
+    for (let level = startLevel(device, failedLevel(id)); !w; level++) {
+      plan = loadPlan(def.n_ctx, level);
+      useEngine.setState({ progress: { loaded: def.bytes, total: def.bytes, speed: 0, phase: level > startLevel(device, failedLevel(id)) ? `Retrying with less memory (${planText(plan)})…` : 'Warming up…' } });
+      try {
+        w = await warmUp(id, model, plan, (g) => (gpu = g));
+      } catch (e) {
+        const failure = describeLoadError(e instanceof Error ? e.message : String(e), def.name, plan, device);
+        if (!failure.retryLighter || level >= MAX_LEVEL) throw e;
+        console.warn(`[engine] ${def.name} failed at ${planText(plan)}; trying less`, e);
+        setFailedLevel(id, level + 1);
+      }
+    }
     wllama = w;
     useEngine.setState({
       status: 'ready',
       loadingId: null,
       loadedId: id,
       progress: null,
-      info: readInfo(w, gpu),
+      info: readInfo(w!, gpu),
+      nCtx: plan?.n_ctx ?? def.n_ctx,
       lastLoadMs: performance.now() - started,
     });
     const info = useEngine.getState().info;
@@ -319,12 +416,14 @@ export async function loadModel(id: string): Promise<void> {
     localStorage.setItem('andai.lastModel', id);
   } catch (e) {
     console.error('[engine] load failed', e);
-    logModel('load-failed', 'chat', id, { ms: Math.round(performance.now() - started), error: e instanceof Error ? e.message : String(e) });
+    const raw = e instanceof Error ? e.message : String(e);
+    logModel('load-failed', 'chat', id, { ms: Math.round(performance.now() - started), error: raw, plan: plan ? planText(plan) : null });
     useEngine.setState({
       status: 'error',
       loadingId: null,
       progress: null,
-      error: e instanceof Error ? e.message : String(e),
+      error: describeLoadError(raw, def.name, plan, device).message,
+      errorId: id,
     });
   } finally {
     await refreshCache();
@@ -337,7 +436,7 @@ export async function unloadModel(): Promise<void> {
   const was = useEngine.getState().loadedId;
   if (was) logModel('unload', 'chat', was);
   wllama = null;
-  useEngine.setState({ status: 'idle', loadedId: null, info: null, tokPerSec: null });
+  useEngine.setState({ status: 'idle', loadedId: null, info: null, nCtx: null, tokPerSec: null });
   await w?.exit().catch(() => {});
   if (native) await nativeUnload('chat').catch(() => {});
 }
@@ -386,7 +485,9 @@ export async function loadDecider(id: string): Promise<void> {
       const { model } = await openVerified(def!, (progress) => setDecider({ progress }));
       const w = newWllama();
       // Decisions are short prompts scored in one forward pass.
-      await w.loadModel(model, { n_ctx: Math.min(def!.n_ctx, 4096), reasoning_format: 'none' });
+      // On a phone the decision model shares the page's memory with the chat model: the same lighter plan.
+      const plan = loadPlan(Math.min(def!.n_ctx, 4096), startLevel(device, undefined));
+      await w.loadModel(model, { n_ctx: plan.n_ctx, ...(plan.gpu ? {} : { n_gpu_layers: 0 }), reasoning_format: 'none' });
       deciderWllama = w;
     }
     setDecider({ status: 'ready', loadingId: null, loadedId: id, progress: null });
@@ -677,10 +778,12 @@ async function* chatNative(
 
 /** Load whatever model the user had last, if it's still cached. */
 export async function autoload(): Promise<void> {
+  // A load the page didn't survive is reported, and not started again by itself.
+  const crashed = checkCrashedLoad();
   await refreshCache();
   const last = localStorage.getItem('andai.lastModel');
   const def = modelById(last);
-  if (def && useEngine.getState().cached[def.url]) await loadModel(def.id);
+  if (def && def.id !== crashed && useEngine.getState().cached[def.url]) await loadModel(def.id);
   const lastDecider = localStorage.getItem('andai.lastDecider');
   const decider = modelById(lastDecider);
   if (decider && useEngine.getState().cached[decider.url]) await loadDecider(decider.id);

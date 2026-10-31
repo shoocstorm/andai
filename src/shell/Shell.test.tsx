@@ -1,10 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useLayout } from '../state/layout';
 import { initTheme, useTheme } from '../state/theme';
 import { useUi } from '../state/ui';
-import { Sidebar, StatusBar, TopBar } from './Shell';
+import { Sidebar, StatusBar, TabBar, TopBar } from './Shell';
 import { shortcut } from '../lib/platform';
 
 beforeEach(() => {
@@ -74,6 +74,39 @@ describe('Sidebar collapse', () => {
   it('remembers the choice across launches', () => {
     useLayout.getState().toggleNav();
     expect(JSON.parse(localStorage.getItem('andai.layout')!).state).toEqual({ navCollapsed: true, traceOpen: true });
+  });
+});
+
+describe('TabBar (phone)', () => {
+  it('marks the current screen and navigates', async () => {
+    const user = userEvent.setup();
+    render(<TabBar />);
+    expect(screen.getByRole('navigation', { name: /main navigation/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Command Center' })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(useUi.getState().route).toBe('settings');
+  });
+
+  it('reaches the other screens and Support through More', async () => {
+    const user = userEvent.setup();
+    render(<TabBar />);
+    await user.click(screen.getByRole('button', { name: 'More screens' }));
+    const sheet = screen.getByRole('dialog', { name: 'More screens' });
+    expect(sheet).toHaveClass('sheet');
+    await user.click(within(sheet).getByRole('button', { name: 'Activity log' }));
+    expect(useUi.getState().route).toBe('logs');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // a screen under More marks More as current
+    expect(screen.getByRole('button', { name: 'More screens' })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('button', { name: 'More screens' }));
+    await user.click(screen.getByRole('button', { name: 'Support' }));
+    expect(useUi.getState().aboutOpen).toBe(true);
+  });
+
+  it('keeps More current on the workflow detail screen', () => {
+    useUi.setState({ route: 'workflow-detail' });
+    render(<TabBar />);
+    expect(screen.getByRole('button', { name: 'More screens' })).toHaveAttribute('aria-current', 'page');
   });
 });
 

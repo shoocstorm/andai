@@ -374,12 +374,13 @@ export function CopyButton({ text, label, size = 12, children }: { text: string 
  * inside a transformed element (an answer card animates with `transform`), a
  * `position: fixed` backdrop would be laid out and clipped inside that element.
  */
-export function Modal({ open, onClose, children, wide, label }: { open: boolean; onClose: () => void; children: ReactNode; wide?: boolean; label?: string }) {
+/** A dialog over a backdrop. `sheet`: anchored to the bottom edge (a phone's action sheet). */
+export function Modal({ open, onClose, children, wide, label, sheet }: { open: boolean; onClose: () => void; children: ReactNode; wide?: boolean; label?: string; sheet?: boolean }) {
   return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
-          className="backdrop"
+          className={`backdrop${sheet ? ' sheet-backdrop' : ''}`}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -388,7 +389,7 @@ export function Modal({ open, onClose, children, wide, label }: { open: boolean;
           onKeyDown={(e) => e.key === 'Escape' && onClose()}
         >
           <motion.div
-            className={`modal${wide ? ' wide' : ''}`}
+            className={`modal${wide ? ' wide' : ''}${sheet ? ' sheet' : ''}`}
             role="dialog"
             aria-modal="true"
             aria-label={label}

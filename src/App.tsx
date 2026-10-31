@@ -15,7 +15,8 @@ import { Tools } from './screens/Tools';
 import { WorkflowDetail } from './screens/WorkflowDetail';
 import { Workflows } from './screens/Workflows';
 import { ScreenBoundary } from './components/ui';
-import { AboutModal, Sidebar, StatusBar, Toasts, TopBar } from './shell/Shell';
+import { AboutModal, Sidebar, StatusBar, TabBar, Toasts, TopBar } from './shell/Shell';
+import { usePhone } from './lib/platform';
 import { useLayout } from './state/layout';
 import { addFiles, createKb, refreshKbs, startKbEvents, useKb } from './state/kb';
 import { useUi, type Route } from './state/ui';
@@ -55,6 +56,7 @@ export function App() {
     return s.kbs.find((k) => k.slug === slug)?.name ?? 'a new knowledge base';
   });
   const Screen = SCREENS[route];
+  const phone = usePhone();
 
   useEffect(() => {
     void refreshKbs().then(promptUgSetupIfMissing);
@@ -108,9 +110,9 @@ export function App() {
   }, []);
 
   return (
-    <div className="app">
+    <div className={`app${phone ? ' phone' : ''}`}>
       <TopBar />
-      <Sidebar />
+      {phone ? <TabBar /> : <Sidebar />}
       <main className="main">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -127,7 +129,7 @@ export function App() {
           </motion.div>
         </AnimatePresence>
       </main>
-      <StatusBar />
+      {!phone && <StatusBar />}
       <Toasts />
       <AboutModal />
       <UgSetupDialog />

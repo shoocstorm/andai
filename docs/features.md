@@ -360,6 +360,14 @@ pasting in whatever one search returns:
   uses; after that, Andai keeps your choice.
 - **Collapsible sidebar** (`⌘B`) and **hideable Execution Trace** (`⌘J`),
   both remembered.
+- **Phone layout:** in a window 640 px wide or less (a phone's browser, or a
+  narrow window), the sidebar becomes a bottom tab bar (Command, Knowledge,
+  Tools, Settings, and More for Workflows, Persona, Activity log and
+  Support), every screen is one column, and the Execution Trace opens over
+  the conversation. It leaves room for the iPhone's notch and home
+  indicator, and text fields are sized so Safari doesn't zoom in on them.
+  Checked at 375 and 390 px in Chrome's iPhone emulation; not yet tested on
+  a real iPhone.
 - **Keyboard shortcuts:** `⌘K` focus the input · `⌘1–5` switch screens ·
   `⌘,` Settings · `⌘L` Activity log · `Enter` send · `Shift+Enter` new line · `Esc` stop. On
   Windows, use `Ctrl` instead of `⌘`; the app shows the right key.
@@ -478,6 +486,16 @@ with `bun run deploy:web` (Firebase Hosting).
 
 - A current **Chrome or Edge** (WebGPU, multi-threaded inference) or **Safari
   16+** (slower WebAssembly fallback). Not tested on Firefox.
+- **Phones:** the layout fits a phone screen (see *Workspace*). Models load
+  with less memory on phones and tablets: on the CPU with a 2,048-token
+  context (Qwen3 0.6B then needs about 860 MB instead of 1.1 GB). If a load
+  fails for lack of memory, Andai tries again with a 1,024-token context.
+  If iOS closes the page while a model warms up, Andai says so when you
+  come back, uses less memory next time, and doesn't start that model again
+  by itself. Every failed load says why (memory, storage, network) where you
+  see it, with a **Try again** button. Tested in iOS Safari on the iPhone 17
+  Pro simulator (download, load, answer); not yet on a real iPhone, whose
+  memory limit for a page is lower than the simulator's.
 - The model (~0.6–1.2 GB) is downloaded once per browser and stored in the
   browser's cache; clearing site data removes it.
 - Everything a web page can offer: your chats live in this browser's storage

@@ -11,6 +11,10 @@ const state = vi.hoisted(() => ({
   loaded: 0,
   opened: 0,
   gpuLine: null as string | null,
+  /** Errors the next loads throw, in order; `'hang'` never settles (a dead worker). */
+  loadFails: [] as (Error | 'hang')[],
+  loadParams: [] as Record<string, unknown>[],
+  exited: 0,
   stream: { promptMs: 0, tokens: 0, gapMs: 0, timings: null as Record<string, number> | null },
 }));
 
@@ -64,7 +68,11 @@ vi.mock('@wllama/wllama', () => {
       this.logger = config.logger;
     }
     setCompat() {}
-    async loadModel() {
+    async loadModel(_model: unknown, params: Record<string, unknown>) {
+      state.loadParams.push(params);
+      const fail = state.loadFails.shift();
+      if (fail === 'hang') return new Promise(() => {});
+      if (fail) throw fail;
       state.loaded++;
       if (state.gpuLine) this.logger?.log(state.gpuLine);
     }
@@ -97,16 +105,18 @@ vi.mock('@wllama/wllama', () => {
     getWorkerResources() {
       return { compat: false };
     }
-    async exit() {}
+    async exit() {
+      state.exited++;
+    }
   }
   return { ModelManager, Wllama, WllamaAbortError: class extends Error {} };
 });
 
-const { chat, gpuFromLog, loadModel, unloadModel, refreshCache, removeLegacyCopies, useEngine } = await import('./engine');
+const { autoload, chat, checkCrashedLoad, gpuFromLog, loadModel, unloadModel, refreshCache, removeLegacyCopies, useEngine } = await import('./engine');
 
 beforeEach(async () => {
   await unloadModel();
-  Object.assign(state, { cached: [], blob: new Blob([bytes]), removed: [], loaded: 0, opened: 0, gpuLine: null });
+  Object.assign(state, { cached: [], blob: new Blob([bytes]), removed: [], loaded: 0, opened: 0, gpuLine: null, loadFails: [], loadParams: [], exited: 0 });
   localStorage.clear();
   useEngine.setState({ status: 'idle', error: null });
 });
@@ -154,6 +164,100 @@ describe('loadModel integrity gate', () => {
     logged.mockRestore();
     expect(useEngine.getState().status).toBe('error');
     expect(state.loaded).toBe(1);
+  });
+});
+
+describe('a load that fails on this device', () => {
+  it('steps down to less memory (CPU only) after an out-of-memory error, and remembers it', async () => {
+    state.loadFails = [new Error('RangeError: Out of memory')];
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await loadModel('tiny');
+    warned.mockRestore();
+    const s = useEngine.getState();
+    expect(s.status).toBe('ready');
+    expect(state.loadParams[0]).not.toHaveProperty('n_gpu_layers');
+    expect(state.loadParams[1]).toMatchObject({ n_gpu_layers: 0, n_ctx: 1024 });
+    expect(s.nCtx).toBe(1024);
+    expect(JSON.parse(localStorage.getItem('andai.loadLevel')!)).toEqual({ tiny: 1 });
+    expect(localStorage.getItem('andai.loadAttempt')).toBeNull();
+    // the next load starts at the level that worked
+    await unloadModel();
+    await loadModel('tiny');
+    expect(state.loadParams[2]).toMatchObject({ n_gpu_layers: 0 });
+  });
+
+  it('says plainly when nothing fits, on the model it was about', async () => {
+    state.loadFails = [new Error('Out of memory'), new Error('Out of memory'), new Error('Out of memory')];
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logged = catchLoadError();
+    await loadModel('tiny');
+    logged.mockRestore();
+    vi.mocked(console.warn).mockRestore();
+    const s = useEngine.getState();
+    expect(s.status).toBe('error');
+    expect(s.errorId).toBe('tiny');
+    expect(s.error).toMatch(/^Tiny needs more memory than the browser gives this page.*CPU only, 1,024-token context.*smaller model/);
+    expect(state.loadParams).toHaveLength(3);
+    expect(state.exited).toBe(3);
+  });
+
+  it("doesn't retry what less memory can't fix", async () => {
+    state.loadFails = [new Error('QuotaExceededError: the quota has been exceeded')];
+    const logged = catchLoadError();
+    await loadModel('tiny');
+    logged.mockRestore();
+    expect(state.loadParams).toHaveLength(1);
+    expect(useEngine.getState().error).toMatch(/enough storage space/);
+  });
+
+  it('stops a warm-up that never finishes, instead of spinning forever', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    state.loadFails = ['hang', 'hang', 'hang'];
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logged = catchLoadError();
+    const done = loadModel('tiny');
+    for (let i = 0; i < 3; i++) {
+      await vi.waitFor(() => expect(state.loadParams).toHaveLength(i + 1));
+      await vi.advanceTimersByTimeAsync(180_000);
+    }
+    await done;
+    vi.useRealTimers();
+    logged.mockRestore();
+    vi.mocked(console.warn).mockRestore();
+    expect(useEngine.getState().error).toMatch(/didn't finish warming up in 3 minutes/);
+    expect(state.exited).toBeGreaterThanOrEqual(3);
+  });
+
+  it('reports a page closed mid-load on the next launch, asks for less, and does not start it again', async () => {
+    localStorage.setItem('andai.loadAttempt', JSON.stringify({ id: 'tiny', level: 0, at: Date.now() - 5_000 }));
+    localStorage.setItem('andai.lastModel', 'tiny');
+    state.cached = [{ url: 'https://huggingface.co/o/r/resolve/0000000000000000000000000000000000000000/t.gguf', size: 8, remove: async () => {} }];
+    await autoload();
+    const s = useEngine.getState();
+    expect(s.status).toBe('error');
+    expect(s.errorId).toBe('tiny');
+    expect(s.error).toMatch(/closed while Tiny was warming up \(GPU, 1,024-token context\).*ran out of memory.*next try uses less memory \(CPU only/);
+    expect(state.loadParams).toHaveLength(0);
+    expect(localStorage.getItem('andai.loadAttempt')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('andai.loadLevel')!)).toEqual({ tiny: 1 });
+  });
+
+  it('ignores a stale marker from an old session', () => {
+    localStorage.setItem('andai.loadAttempt', JSON.stringify({ id: 'tiny', level: 0, at: Date.now() - 60 * 60_000 }));
+    expect(checkCrashedLoad()).toBeNull();
+    expect(useEngine.getState().error).toBeNull();
+    expect(localStorage.getItem('andai.loadAttempt')).toBeNull();
+  });
+
+  it('marks the attempt only while warming up', async () => {
+    let during: string | null = null;
+    state.loadFails = [];
+    const spy = vi.spyOn(Storage.prototype, 'setItem');
+    await loadModel('tiny');
+    during = spy.mock.calls.find(([k]) => k === 'andai.loadAttempt')?.[1] ?? null;
+    spy.mockRestore();
+    expect(JSON.parse(during!)).toMatchObject({ id: 'tiny', level: 0 });
+    expect(localStorage.getItem('andai.loadAttempt')).toBeNull();
   });
 });
 

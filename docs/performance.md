@@ -62,6 +62,12 @@ Firebase Analytics chunks (`src/lib/firebase.ts`). They are lazy chunks a
 browser session downloads; the desktop app never loads them, they only ride
 along in its bundle on disk.
 
+Recorded 2026-10-31: app-css +15 KB (147.6 → 162.5 KB), mostly the phone
+layout (the tab bar, the one-column blocks at the end of `app.css` and
+`screens.css`) and the load-error styles; app-js +41 KB (1.21 → 1.25 MB)
+also covers the answer X-ray and trace folding committed since the
+2026-09-30 baseline, plus `llm/device.ts`.
+
 ### Micro: `tests/perf/hot-paths.perf.tsx`, tolerance 1.5
 
 Recorded on Apple M5 Max · 18 cores · 128 GB (Node 22 + jsdom, via Vitest).

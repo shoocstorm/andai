@@ -523,7 +523,7 @@ function useOnboarding(kb: KbInfo | null): { name: string; questions: string[] }
 }
 
 function EmptyHub() {
-  const { loadedId, status, cached, progress, loadingId, native } = useEngine();
+  const { loadedId, status, cached, progress, loadingId, native, error, errorId } = useEngine();
   const kbs = useKb((s) => s.kbs);
   const grounding = useKb((s) => s.grounding);
   // Grounded in a bundled sample: suggest questions it can answer.
@@ -571,7 +571,7 @@ function EmptyHub() {
             </div>
             <button className="btn primary" disabled={loading} onClick={() => void loadModel(def.id)}>
               {loading ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
-              {loading ? `${Math.round(pct * 100)}%` : cached[def.url] ? 'Load' : 'Download'}
+              {loading ? `${Math.round(pct * 100)}%` : error && errorId === def.id ? 'Try again' : cached[def.url] ? 'Load' : 'Download'}
             </button>
           </div>
           {loading && <Bar value={pct} indeterminate={!pct} />}
@@ -641,6 +641,10 @@ function Composer() {
   const [menu, setMenu] = useState<'tools' | 'kb' | null>(null);
   const busy = useChat((s) => s.messages.some((m) => m.streaming));
   const loaded = useEngine((s) => s.loadedId);
+  const failed = useEngine((s) => s.status === 'error' && !s.loadedId);
+  const errorText = useEngine((s) => s.error);
+  const errorId = useEngine((s) => s.errorId);
+  const loadError = failed ? { text: errorText, id: errorId } : null;
   const name = usePersona((s) => s.agentName);
   const { kbs, grounding, ug } = useKb();
   const kb = kbs.find((k) => k.slug === grounding);
@@ -696,6 +700,18 @@ function Composer() {
 
   return (
     <div className="cc-composer panel">
+      {/* A failed load, where it's always on screen: on a phone the setup card scrolls out of view. */}
+      {loadError?.text && (
+        <div className="load-error cc-load-error" role="alert">
+          <TriangleAlert size={15} aria-hidden="true" />
+          <span>{loadError.text}</span>
+          {loadError.id && modelById(loadError.id) && (
+            <button className="btn secondary sm" onClick={() => void loadModel(loadError.id!)}>
+              Try again
+            </button>
+          )}
+        </div>
+      )}
       <div className="cc-tools">
         <button className="btn ghost sm" onClick={() => void addFile()}>
           <Plus size={13} /> Add file

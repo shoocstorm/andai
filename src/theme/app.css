@@ -15,6 +15,7 @@ body,
 body {
   background: var(--canvas);
   color: var(--text);
+  -webkit-text-size-adjust: 100%;
   font: 400 14px/1.5 var(--font-body);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
@@ -175,7 +176,7 @@ button:disabled {
   margin-left: 8px;
 }
 /* the macOS traffic lights live in the first 80px */
-:root[data-platform='mac'] .topbar {
+:root[data-window='mac'] .topbar {
   padding-left: 88px;
 }
 .topbar .divider {
@@ -459,6 +460,102 @@ button:disabled {
   border-radius: 50%;
   background: currentColor;
   animation: pulse 1.6s var(--ease) infinite;
+}
+
+/* ── phone (lib/platform.ts PHONE_QUERY, ≤ 640px) ─────────────────────── */
+/* The sidebar and status strip give way to a bottom tab bar (Shell.tsx
+   TabBar); the bars pad for the iPhone's notch and home indicator
+   (viewport-fit=cover in index.html), and the app follows the visible
+   viewport as Safari's toolbars come and go (dvh). */
+.app.phone {
+  height: 100dvh;
+  grid-template-rows: calc(var(--topbar-h-phone) + env(safe-area-inset-top)) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'top' 'main' 'tabs';
+}
+.app.phone .topbar {
+  gap: 10px;
+  padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left));
+}
+.app.phone .wordmark {
+  font-size: 19px;
+}
+.app.phone .wordmark .b,
+.app.phone .topbar .divider,
+.app.phone .tb-wide {
+  display: none;
+}
+.app.phone .core-status {
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.app.phone .icon-btn {
+  width: 40px;
+  height: 40px;
+}
+.tabbar {
+  grid-area: tabs;
+  display: flex;
+  padding: 0 max(4px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(4px, env(safe-area-inset-left));
+  border-top: 1px solid var(--border);
+  background: var(--canvas-2);
+  position: relative;
+  z-index: 5;
+}
+.tab {
+  flex: 1;
+  min-width: 0;
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--text-3);
+  font: 600 10.5px/1 var(--font-body);
+  letter-spacing: 0.01em;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+}
+.tab[aria-current='page'] {
+  color: var(--blue);
+}
+.tab[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 30%;
+  right: 30%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--blue), var(--violet));
+  box-shadow: 0 0 10px 1px var(--blue-glow);
+}
+.backdrop.sheet-backdrop {
+  place-items: end stretch;
+}
+.modal.sheet {
+  width: 100%;
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  padding: 14px 10px calc(14px + env(safe-area-inset-bottom));
+}
+.sheet-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sheet-nav .nav-item {
+  border-radius: var(--r-md);
+  height: 52px;
+}
+/* toasts clear the tab bar */
+.app.phone .toasts {
+  left: 12px;
+  right: 12px;
+  bottom: calc(68px + env(safe-area-inset-bottom));
 }
 
 /* ── primitives ───────────────────────────────────────────────────────── */
@@ -1019,4 +1116,64 @@ select.field {
 }
 .pager-btn:disabled {
   opacity: 0.35;
+}
+
+/* phone overrides of the primitives above (after them, so they win) */
+@media (max-width: 640px) {
+  /* Safari zooms into a field whose text is under 16px when it's focused. */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+  .modal {
+    width: calc(100vw - 24px);
+    padding: 22px 18px;
+  }
+  .modal.wide {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 32px);
+  }
+  .toast {
+    min-width: 0;
+  }
+}
+
+/* a model that failed to load, said where the user looks (Settings card, Command Center setup) */
+.load-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 11px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
+  background: var(--red-soft);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.load-error svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--red);
+}
+.load-error .btn {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+}
+.cc-load-error {
+  margin: 0 0 10px;
+}
+@media (max-width: 640px) {
+  .cc-load-error {
+    flex-wrap: wrap;
+  }
+  .cc-load-error span {
+    flex: 1 1 calc(100% - 30px);
+  }
 }

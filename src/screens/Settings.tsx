@@ -2,7 +2,8 @@ import { AlertTriangle, Check, CheckCircle2, Cpu, Download, FolderOpen, GitFork,
 import { useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { Bar, Modal, Toggle, fmtBytes } from '../components/ui';
-import { evictModel, loadDecider, loadModel, refreshLaya, refreshNative, removeLaya, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
+import { evictModel, loadDecider, loadModel, plannedLoad, refreshLaya, refreshNative, removeLaya, removeLegacyCopies, unloadDecider, unloadModel, useEngine } from '../llm/engine';
+import { inTauri } from '../kb/api';
 import { removeCustomModel } from '../llm/custom';
 import { availableModels, isMlx, LAYA_MODELS, layaById, memoryFit, modelById, type LayaDef, type ModelDef } from '../llm/models';
 import { activityInfo, clearActivity, openActivityFolder, useActivity, type ActivityInfo } from '../state/activity';
@@ -141,13 +142,18 @@ function DecisionModel() {
 
 /** Which engine runs a model, on its card: MLX is the fast one on a Mac. */
 function EngineChip({ def }: { def: ModelDef }) {
-  return isMlx(def) ? (
-    <span className="pill green" title="Runs natively on your Mac’s GPU with MLX">
-      <Zap size={11} /> MLX · Metal · fastest on this Mac
-    </span>
-  ) : (
-    <span className="pill" title="llama.cpp compiled to WebAssembly, in the app’s webview, on WebGPU">
-      wllama · WebGPU
+  if (isMlx(def)) {
+    return (
+      <span className="pill green" title="Runs natively on your Mac’s GPU with MLX">
+        <Zap size={11} /> MLX · Metal · fastest on this Mac
+      </span>
+    );
+  }
+  // What this device will ask for: phones (and a model that failed here before) load on the CPU.
+  const gpu = plannedLoad(def).gpu;
+  return (
+    <span className="pill" title={`llama.cpp compiled to WebAssembly, in the ${inTauri ? 'app’s webview' : 'browser'}, on ${gpu ? 'WebGPU when there is one' : 'the CPU, to fit this device’s memory'}`}>
+      wllama · {gpu ? 'WebGPU' : 'CPU'}
     </span>
   );
 }
@@ -224,7 +230,7 @@ export function Settings() {
                   <EngineChip def={m} />
                 </div>
                 <div className="mono faint" style={{ fontSize: 11.5, letterSpacing: '0.04em' }}>
-                  {m.family} · ctx {m.n_ctx.toLocaleString()}
+                  {m.family} · ctx {(loaded && e.nCtx ? e.nCtx : isMlx(m) ? m.n_ctx : plannedLoad(m).n_ctx).toLocaleString()}
                   {m.thinking ? ' · reasoning' : ''}
                 </div>
                 <p className="muted">{m.note}</p>
@@ -261,6 +267,12 @@ export function Settings() {
                         {p && p.speed > 0 && pct < 1 ? ` · ${fmtBytes(p.speed)}/s` : ''}
                       </span>
                     </div>
+                  </div>
+                )}
+                {e.error && e.errorId === m.id && (
+                  <div className="load-error" role="alert">
+                    <AlertTriangle size={15} aria-hidden="true" />
+                    <span>{e.error}</span>
                   </div>
                 )}
                 <div className="st-model-actions">
@@ -347,9 +359,10 @@ export function Settings() {
             </button>
           </div>
         </Modal>
-        {e.error && (
-          <div className="kn-error" style={{ marginTop: 16 }}>
-            <X size={15} /> Model load failed: {e.error}
+        {e.error && !availableModels(mlx).some((m) => m.id === e.errorId) && (
+          <div className="load-error" role="alert" style={{ marginTop: 16 }}>
+            <AlertTriangle size={15} aria-hidden="true" />
+            <span>{e.error}</span>
           </div>
         )}
 

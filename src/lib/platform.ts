@@ -1,6 +1,9 @@
-// Andai ships for macOS and Windows. The only UI differences are the shortcut
-// modifier (⌘ vs Ctrl) and room for the macOS traffic lights in the top bar.
-// Shortcuts themselves accept either key on every platform (App.tsx).
+// Andai ships for macOS and Windows, and its web app also runs on phones. The
+// UI differences: the shortcut modifier (⌘ vs Ctrl), room for the macOS
+// traffic lights in the desktop app's top bar, and the phone layout (a bottom
+// tab bar instead of the sidebar). Shortcuts accept either key everywhere (App.tsx).
+
+import { useSyncExternalStore } from 'react';
 
 type Nav = Pick<Navigator, 'platform' | 'userAgent'>;
 
@@ -14,4 +17,22 @@ export const isMac = detectMac(typeof navigator === 'undefined' ? undefined : na
 /** A shortcut label: `⌘B` on macOS, `Ctrl+B` elsewhere. */
 export function shortcut(key: string, mac = isMac): string {
   return mac ? `⌘${key}` : `Ctrl+${key}`;
+}
+
+/** Below this width the shell switches to the phone layout (app.css mirrors it). */
+export const PHONE_QUERY = '(max-width: 640px)';
+
+const phoneMedia = () => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(PHONE_QUERY) : null);
+
+/** Whether the window is phone-sized, updated as it resizes or rotates. */
+export function usePhone(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      const m = phoneMedia();
+      m?.addEventListener('change', cb);
+      return () => m?.removeEventListener('change', cb);
+    },
+    () => phoneMedia()?.matches ?? false,
+    () => false,
+  );
 }

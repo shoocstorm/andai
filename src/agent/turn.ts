@@ -6,7 +6,7 @@
 
 import { kbSearch, type SearchHit } from '../kb/api';
 import { budgets, buildHistory, buildSystem, CHARS_PER_TOKEN, keywords, planPassages, type ContextRecord } from './prompt';
-import { chat, deciderLaya, isAbort, loadedModel, type ChatMessage } from '../llm/engine';
+import { chat, deciderLaya, isAbort, loadedModel, useEngine, type ChatMessage } from '../llm/engine';
 import {
   addMessage,
   patchMessage,
@@ -201,7 +201,8 @@ export async function runTurn(text: string, opts: { seed?: number } = {}): Promi
     if (signal.aborted) throw new DOMException('aborted', 'AbortError');
 
     patchStep(id, 'build', { status: 'running' });
-    const nCtx = model.n_ctx;
+    // The context the model was actually loaded with: phones load less than the catalog's (llm/device.ts).
+    const nCtx = useEngine.getState().nCtx ?? model.n_ctx;
     const budget = budgets(nCtx, persona.maxTokens);
     const system = buildSystem(persona, hits, budget.context, kb?.name ?? null, { searched, clarify });
     const sentHistory = buildHistory(useChat.getState().messages, budget.history, id);

@@ -15,6 +15,7 @@ import {
   Workflow,
   Wrench,
   Zap,
+  Ellipsis,
   CheckCircle2,
   AlertTriangle,
   Info,
@@ -22,7 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useEngine } from '../llm/engine';
 import { modelById } from '../llm/models';
 import { inTauri } from '../kb/api';
@@ -72,7 +73,7 @@ export function TopBar() {
       </div>
       <div className="spacer" data-tauri-drag-region />
       <button
-        className="icon-btn"
+        className="icon-btn tb-wide"
         data-state={ug?.found ? 'ok' : 'warn'}
         title={ug?.found ? `ug knowledge engine · ${ug.version}` : 'ug (UltraGraph) not installed · click to install'}
         aria-label={ug?.found ? 'Knowledge engine' : 'Install UltraGraph'}
@@ -88,11 +89,11 @@ export function TopBar() {
       >
         <Cpu size={19} />
       </button>
-      <button className="icon-btn" title="Persona" onClick={() => go('persona')}>
+      <button className="icon-btn tb-wide" title="Persona" onClick={() => go('persona')}>
         <Zap size={19} />
       </button>
       <ThemeButton />
-      <div className="avatar" title={name}>
+      <div className="avatar tb-wide" title={name}>
         {name.slice(0, 1)}
       </div>
     </header>
@@ -193,6 +194,67 @@ export function Sidebar() {
         </button>
       </nav>
     </aside>
+  );
+}
+
+/** On a phone, the sidebar becomes this bottom tab bar: the screens used most,
+ *  and a More sheet for the rest (usePhone, App.tsx). */
+const TABS: { route: Route; label: string; short: string; icon: ReactNode }[] = [
+  { route: 'command', label: 'Command Center', short: 'Command', icon: <SquareTerminal size={21} /> },
+  { route: 'knowledge', label: 'Knowledge', short: 'Knowledge', icon: <Database size={21} /> },
+  { route: 'tools', label: 'Tools', short: 'Tools', icon: <Wrench size={21} /> },
+  { route: 'settings', label: 'Settings', short: 'Settings', icon: <Settings size={21} /> },
+];
+const MORE: { route: Route; label: string; icon: ReactNode }[] = [
+  { route: 'workflows', label: 'Workflows', icon: <Workflow size={19} /> },
+  { route: 'persona', label: 'Persona', icon: <UserRoundCog size={19} /> },
+  { route: 'logs', label: 'Activity log', icon: <ScrollText size={19} /> },
+];
+
+export function TabBar() {
+  const { route, go, setAbout } = useUi();
+  const [more, setMore] = useState(false);
+  const current = route === 'workflow-detail' ? 'workflows' : route;
+  const inMore = MORE.some((m) => m.route === current);
+  const pick = (r: Route) => {
+    setMore(false);
+    go(r);
+  };
+  return (
+    <>
+      <nav className="tabbar" aria-label="Main navigation">
+        {TABS.map((t) => (
+          <button key={t.route} className="tab" aria-label={t.label} aria-current={current === t.route ? 'page' : undefined} onClick={() => go(t.route)}>
+            {t.icon}
+            <span>{t.short}</span>
+          </button>
+        ))}
+        <button className="tab" aria-label="More screens" aria-haspopup="dialog" aria-current={inMore ? 'page' : undefined} onClick={() => setMore(true)}>
+          <Ellipsis size={21} />
+          <span>More</span>
+        </button>
+      </nav>
+      <Modal open={more} onClose={() => setMore(false)} label="More screens" sheet>
+        <nav className="sheet-nav">
+          {MORE.map((m) => (
+            <button key={m.route} className="nav-item" aria-current={current === m.route ? 'page' : undefined} onClick={() => pick(m.route)}>
+              {m.icon}
+              <span className="nav-label">{m.label}</span>
+            </button>
+          ))}
+          <button
+            className="nav-item"
+            onClick={() => {
+              setMore(false);
+              setAbout(true);
+            }}
+          >
+            <HelpCircle size={19} />
+            <span className="nav-label">Support</span>
+          </button>
+        </nav>
+      </Modal>
+    </>
   );
 }
 
