@@ -1432,9 +1432,11 @@ mod tests {
 
     #[test]
     fn reads_ug_list_and_skips_projects_that_dont_look_real() {
+        // Absolute on every platform: "/r" has no drive, so Windows calls it relative.
+        let root = std::env::temp_dir();
         let list = json!({ "projects": [
-            project("andai-docs", Path::new("/r")),
-            project("--evil", Path::new("/r")),
+            project("andai-docs", &root),
+            project("--evil", &root),
             { "name": "relative", "repoRoot": "r" },
             { "name": "no-root" },
         ]});
@@ -1444,7 +1446,7 @@ mod tests {
         assert_eq!(ps[0].kb_kind.as_deref(), Some("code"));
         // ug 0.1.22 prints a sentence, not JSON, when there are no projects.
         assert!(parse_projects(&json!({})).is_empty());
-        let mut never_ingested = project("p", Path::new("/r"));
+        let mut never_ingested = project("p", &root);
         never_ingested["hasDb"] = json!(false);
         assert!(parse_projects(&json!({ "projects": [never_ingested] }))[0].stale);
     }
