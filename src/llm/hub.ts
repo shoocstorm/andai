@@ -154,12 +154,12 @@ const MLX_GROUPS = [32, 64, 128];
 
 /**
  * What the native engine can run (mirrors src-tauri/src/llm/config.rs, which
- * decides): Qwen3 or dense Qwen3.5, MLX-quantized (mixed precision allowed),
+ * decides): Qwen3 or Qwen3.5 (dense or mixture-of-experts), MLX-quantized (mixed precision allowed),
  * a ChatML template with an end-of-turn token.
  */
 export function mlxChecks(config: unknown, tokenizerConfig: unknown, jinja: string | null): { checks: Check[]; layers: number; bits: number; thinking: boolean } {
   const c = obj(config);
-  const qwen35 = c.model_type === 'qwen3_5';
+  const qwen35 = c.model_type === 'qwen3_5' || c.model_type === 'qwen3_5_moe';
   // Qwen3.5 checkpoints are vision-language: the text model's settings are nested.
   const t = qwen35 && c.text_config && typeof c.text_config === 'object' ? obj(c.text_config) : c;
   const q = obj(c.quantization ?? t.quantization);
@@ -167,13 +167,21 @@ export function mlxChecks(config: unknown, tokenizerConfig: unknown, jinja: stri
   const block = (text: string) => checks.push({ level: 'block', text });
   if (c.model_type === 'qwen3') checks.push({ level: 'ok', text: 'Qwen3, which the native engine runs.' });
   else if (qwen35) {
-    if (num(t.num_experts) > 0) block('It’s a mixture-of-experts Qwen3.5, which the native engine doesn’t run.');
-    else checks.push({ level: 'ok', text: 'Qwen3.5 (text only), which the native engine runs.' });
+    const experts = num(t.num_experts);
+    if (experts <= 0) checks.push({ level: 'ok', text: 'Qwen3.5 (text only), which the native engine runs.' });
+    else {
+      const topK = num(t.num_experts_per_tok);
+      if (experts > 1024 || topK <= 0 || topK > experts || num(t.moe_intermediate_size) <= 0 || num(t.shared_expert_intermediate_size) <= 0) {
+        block('Its mixture-of-experts settings aren’t ones the native engine reads.');
+      } else if ((t.decoder_sparse_step !== undefined && num(t.decoder_sparse_step) !== 1) || (Array.isArray(t.mlp_only_layers) && t.mlp_only_layers.length > 0)) {
+        block('It mixes dense and expert layers, which the native engine doesn’t run.');
+      } else checks.push({ level: 'ok', text: `Qwen3.5 mixture-of-experts (${topK} of ${experts} experts per token, text only), which the native engine runs.` });
+    }
     const rope = obj(t.rope_parameters);
     const kind = str(rope.rope_type) ?? str(rope.type) ?? 'default';
     if (kind !== 'default') block(`It uses ${kind} RoPE scaling, which the native engine doesn’t support.`);
     if (t.attn_output_gate === false) block('Its attention has no output gate, which the Qwen3.5 engine expects.');
-  } else block(`It’s a ${str(c.model_type) ?? 'unknown'} model; the native engine runs Qwen3 and Qwen3.5.`);
+  } else block(`It’s a ${str(c.model_type) ?? 'unknown'} model; the native engine runs Qwen3 and Qwen3.5 (dense or mixture-of-experts).`);
   const bits = num(q.bits);
   const layerQuant = Object.entries(q).filter(([k, v]) => !['group_size', 'bits', 'mode'].includes(k) && typeof v !== 'boolean');
   const quantOk = (b: number, g: number) => MLX_BITS.includes(b) && MLX_GROUPS.includes(g);

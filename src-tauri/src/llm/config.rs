@@ -37,6 +37,20 @@ impl Hybrid {
     }
 }
 
+/// Qwen3.5's mixture-of-experts MLP (mlx-lm `Qwen3NextSparseMoeBlock`):
+/// a router picks `top_k` of `experts` per token, plus one shared expert
+/// weighted by its own sigmoid gate. Every layer is sparse, like mlx-lm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Moe {
+    pub experts: i32,
+    pub top_k: i32,
+    /// Each routed expert's hidden width (`moe_intermediate_size`).
+    pub intermediate: i32,
+    pub shared_intermediate: i32,
+    /// Rescale the chosen experts' router scores to sum to 1.
+    pub norm_topk: bool,
+}
+
 /// How one weight is quantized (MLX affine: packed values, a scale and a bias per group).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Quant {
@@ -49,7 +63,9 @@ pub struct Config {
     pub arch: Arch,
     pub vocab: i32,
     pub hidden: i32,
+    /// The dense MLP's width; unused (0) when `moe` is set.
     pub intermediate: i32,
+    pub moe: Option<Moe>,
     pub layers: usize,
     pub heads: i32,
     pub kv_heads: i32,
@@ -85,8 +101,8 @@ impl Config {
         let model_type = v["model_type"].as_str();
         let qwen35 = match model_type {
             Some("qwen3") => false,
-            Some("qwen3_5") => true,
-            other => return Err(format!("it's a {} model; the native engine runs Qwen3 and Qwen3.5 (model_type qwen3, qwen3_5)", other.unwrap_or("unknown"))),
+            Some("qwen3_5" | "qwen3_5_moe") => true,
+            other => return Err(format!("it's a {} model; the native engine runs Qwen3 and Qwen3.5 (model_type qwen3, qwen3_5, qwen3_5_moe)", other.unwrap_or("unknown"))),
         };
         // Qwen3.5 nests the language model's settings (it's a vision-language
         // checkpoint; the engine runs its text part).
@@ -131,11 +147,13 @@ impl Config {
         }
         let head_dim = t["head_dim"].as_i64().map(|n| n as i32).unwrap_or(hidden / heads);
         let (arch, rotary_dims, theta) = if qwen35 { Self::hybrid(t, layers, head_dim)? } else { (Arch::Qwen3, head_dim, t["rope_theta"].as_f64().unwrap_or(1_000_000.0) as f32) };
+        let moe = if qwen35 { Self::moe(t)? } else { None };
         Ok(Self {
             arch,
             vocab: int("vocab_size")?,
             hidden,
-            intermediate: int("intermediate_size")?,
+            intermediate: if moe.is_some() { 0 } else { int("intermediate_size")? },
+            moe,
             layers,
             heads,
             kv_heads,
@@ -150,15 +168,11 @@ impl Config {
         })
     }
 
-    /// Qwen3.5's text settings, as mlx-lm reads them: dense layers only (no
-    /// experts), a gated attention output, and plain RoPE on a part of each
+    /// Qwen3.5's text settings, as mlx-lm reads them: a gated attention output, and plain RoPE on a part of each
     /// head. Its multimodal RoPE (`mrope_section`) gives every section the same
     /// position for text, so it reduces to that.
     fn hybrid(t: &Value, layers: usize, head_dim: i32) -> R<(Arch, i32, f32)> {
         let int = |k: &str| t[k].as_i64().filter(|n| *n > 0 && *n <= 4096).map(|n| n as i32).ok_or_else(|| format!("model config: missing {k}"));
-        if t["num_experts"].as_i64().is_some_and(|n| n > 0) {
-            return Err("it's a mixture-of-experts model, which the native engine doesn't run".into());
-        }
         if t["attn_output_gate"].as_bool() == Some(false) {
             return Err("its attention has no output gate, which Qwen3.5's engine expects".into());
         }
@@ -197,6 +211,31 @@ impl Config {
             }
         }
         Ok((Arch::Qwen35(h), rotary_dims, theta))
+    }
+
+    /// Qwen3.5's experts, when `num_experts` > 0 (`qwen3_5_moe`). mlx-lm makes
+    /// every layer sparse and ignores `decoder_sparse_step` / `mlp_only_layers`,
+    /// so a config that sets them otherwise isn't one it (or this port) runs.
+    fn moe(t: &Value) -> R<Option<Moe>> {
+        let experts = t["num_experts"].as_i64().unwrap_or(0);
+        if experts <= 0 {
+            return Ok(None);
+        }
+        let int = |k: &str, max: i64| t[k].as_i64().filter(|n| *n > 0 && *n <= max).map(|n| n as i32).ok_or_else(|| format!("model config: missing or bad {k}"));
+        if experts > 1024 {
+            return Err("model config: too many experts".into());
+        }
+        let top_k = int("num_experts_per_tok", experts)?;
+        if t["decoder_sparse_step"].as_i64().is_some_and(|n| n != 1) || t["mlp_only_layers"].as_array().is_some_and(|a| !a.is_empty()) {
+            return Err("it mixes dense and expert layers, which the native engine doesn't run".into());
+        }
+        Ok(Some(Moe {
+            experts: experts as i32,
+            top_k,
+            intermediate: int("moe_intermediate_size", 65_536)?,
+            shared_intermediate: int("shared_expert_intermediate_size", 65_536)?,
+            norm_topk: t["norm_topk_prob"].as_bool().unwrap_or(true),
+        }))
     }
 
     /// The quantization of the weight named `name` (without `.weight`).
@@ -271,7 +310,7 @@ mod tests {
     fn refuses_what_the_port_does_not_implement_and_says_why() {
         for (k, v, why) in [
             ("model_type", json!("llama"), "llama model"),
-            ("model_type", json!("qwen3_5_moe"), "qwen3_5_moe model"),
+            ("model_type", json!("qwen3_moe"), "qwen3_moe model"),
             ("rope_scaling", json!({"type": "yarn"}), "RoPE"),
             ("attention_bias", json!(true), "bias"),
             ("quantization", Value::Null, "quantized"),
@@ -335,10 +374,66 @@ mod tests {
         assert!(Config::from_json(&bonsai).unwrap_err().contains("1-bit"));
     }
 
+    /// Jackrong/MLX-Qwen3.5-35B-A3B-…-4bit's config.json (mlx-community's
+    /// Qwen3.6-35B-A3B has the same text settings), trimmed.
+    fn qwen35_moe_json() -> Value {
+        let mut j = qwen35_json();
+        j["model_type"] = json!("qwen3_5_moe");
+        j["tie_word_embeddings"] = json!(false);
+        j["quantization"] = json!({"group_size": 64, "bits": 4, "mode": "affine",
+            "language_model.model.layers.0.mlp.gate": {"group_size": 64, "bits": 8},
+            "language_model.model.layers.0.mlp.shared_expert_gate": {"group_size": 64, "bits": 8}});
+        let t = &mut j["text_config"];
+        t["model_type"] = json!("qwen3_5_moe_text");
+        t["tie_word_embeddings"] = json!(false);
+        t.as_object_mut().unwrap().remove("intermediate_size");
+        for (k, v) in [("hidden_size", json!(2048)), ("num_hidden_layers", json!(40)), ("num_attention_heads", json!(16)), ("linear_num_value_heads", json!(32)),
+            ("num_experts", json!(256)), ("num_experts_per_tok", json!(8)), ("moe_intermediate_size", json!(512)),
+            ("shared_expert_intermediate_size", json!(512)), ("mlp_only_layers", json!([])), ("mtp_num_hidden_layers", json!(1))] {
+            t[k] = v;
+        }
+        let types: Vec<&str> = (0..40).map(|i| if (i + 1) % 4 == 0 { "full_attention" } else { "linear_attention" }).collect();
+        t["layer_types"] = json!(types);
+        j
+    }
+
+    #[test]
+    fn reads_the_qwen35_moe_config() {
+        let c = Config::from_json(&qwen35_moe_json()).unwrap();
+        assert!(matches!(c.arch, Arch::Qwen35(_)));
+        assert_eq!(c.moe, Some(Moe { experts: 256, top_k: 8, intermediate: 512, shared_intermediate: 512, norm_topk: true }));
+        assert_eq!((c.hidden, c.layers, c.intermediate, c.tied), (2048, 40, 0, false));
+        assert_eq!(c.quant("language_model.model.layers.0.mlp.gate").bits, 8);
+        let mut no_norm = qwen35_moe_json();
+        no_norm["text_config"]["norm_topk_prob"] = json!(false);
+        assert!(!Config::from_json(&no_norm).unwrap().moe.unwrap().norm_topk);
+        assert_eq!(Config::from_json(&qwen35_json()).unwrap().moe, None, "dense Qwen3.5 stays dense");
+    }
+
+    #[test]
+    fn refuses_moe_variants_the_port_does_not_implement() {
+        for (k, v, why) in [
+            ("num_experts_per_tok", json!(0), "num_experts_per_tok"),
+            ("num_experts_per_tok", json!(300), "num_experts_per_tok"),
+            ("num_experts", json!(5000), "too many experts"),
+            ("moe_intermediate_size", Value::Null, "moe_intermediate_size"),
+            ("shared_expert_intermediate_size", json!(0), "shared_expert_intermediate_size"),
+            ("decoder_sparse_step", json!(2), "dense and expert"),
+            ("mlp_only_layers", json!([0]), "dense and expert"),
+        ] {
+            let mut j = qwen35_moe_json();
+            j["text_config"][k] = v;
+            let err = Config::from_json(&j).unwrap_err();
+            assert!(err.contains(why), "{k}: {err}");
+        }
+        let mut qwen3_moe = cfg_json();
+        qwen3_moe["model_type"] = json!("qwen3_moe");
+        assert!(Config::from_json(&qwen3_moe).unwrap_err().contains("qwen3_moe model"));
+    }
+
     #[test]
     fn refuses_qwen35_variants_the_port_does_not_implement() {
         for (k, v, why) in [
-            ("num_experts", json!(256), "mixture-of-experts"),
             ("attn_output_gate", json!(false), "gate"),
             ("rope_parameters", json!({"rope_type": "yarn", "factor": 4.0}), "yarn"),
             ("full_attention_interval", json!(3), "layer_types"),

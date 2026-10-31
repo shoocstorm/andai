@@ -9,9 +9,9 @@
 //!   state is fixed-size; the fourth is attention with a sigmoid output gate
 //!   and RoPE on a quarter of each head. The vision tower is skipped.
 
-use super::config::{Arch, Hybrid};
+use super::config::{Arch, Hybrid, Moe};
 use mlx_rs::fast::{self, ScaledDotProductAttentionMask};
-use mlx_rs::ops::indexing::{IndexOp, TryIndexMutOp};
+use mlx_rs::ops::indexing::{Ellipsis, IndexOp, TryIndexMutOp};
 use mlx_rs::{ops, Array, Dtype};
 use std::collections::HashMap;
 use std::path::Path;
@@ -32,8 +32,48 @@ impl QLinear {
         ops::quantized_matmul(x, &self.w, &self.scales, &self.biases, true, self.group_size, self.bits).map_err(e)
     }
 
+    /// Stacked experts `[E, out, in]`: each row of `x` through the expert
+    /// `idx` names (mlx-lm `QuantizedSwitchLinear`). `sorted` when `idx` is.
+    fn gather(&self, x: &Array, idx: &Array, sorted: bool) -> R<Array> {
+        ops::gather_qmm(x, &self.w, &self.scales, &self.biases, None, idx, true, self.group_size, self.bits, sorted).map_err(e)
+    }
+
     fn arrays(&self) -> [Array; 3] {
         [self.w.clone(), self.scales.clone(), self.biases.clone()]
+    }
+}
+
+/// A SwiGLU MLP: `down(silu(gate(x)) · up(x))`.
+struct Mlp {
+    gate: QLinear,
+    up: QLinear,
+    down: QLinear,
+}
+
+/// Qwen3.5's mixture-of-experts MLP (mlx-lm `Qwen3NextSparseMoeBlock`).
+struct Experts {
+    /// `[experts, D]`: one logit per expert.
+    router: QLinear,
+    /// The routed experts, stacked (`switch_mlp`).
+    switch: Mlp,
+    shared: Mlp,
+    /// `[1, D]`: the shared expert's sigmoid weight.
+    shared_gate: QLinear,
+    moe: Moe,
+}
+
+enum Ffn {
+    Dense(Mlp),
+    Moe(Box<Experts>),
+}
+
+impl Ffn {
+    fn arrays(&self) -> Vec<Array> {
+        let mlp = |m: &Mlp| [&m.gate, &m.up, &m.down].into_iter().flat_map(QLinear::arrays).collect::<Vec<_>>();
+        match self {
+            Ffn::Dense(m) => mlp(m),
+            Ffn::Moe(x) => [mlp(&x.switch), mlp(&x.shared), x.router.arrays().to_vec(), x.shared_gate.arrays().to_vec()].concat(),
+        }
     }
 }
 
@@ -71,9 +111,7 @@ struct Layer {
     input_norm: Array,
     mixer: Mixer,
     post_norm: Array,
-    gate: QLinear,
-    up: QLinear,
-    down: QLinear,
+    ffn: Ffn,
 }
 
 /// One layer's keys and values, grown in steps (mlx-lm `KVCache`). `offset`
@@ -237,6 +275,51 @@ fn swiglu(gate: &Array, up: &Array) -> R<Array> {
     compiled((gate, up)).map_err(e)
 }
 
+fn dense(m: &Mlp, x: &Array) -> R<Array> {
+    m.down.call(&swiglu(&m.gate.call(x)?, &m.up.call(x)?)?)
+}
+
+/// `x` `[B, L, D]` through the mixture of experts, as mlx-lm computes it: a
+/// precise softmax over the router's logits, the `top_k` best experts (their
+/// scores renormalized when `norm_topk`), their SwiGLU outputs weighted by
+/// those scores, plus the shared expert times `σ(shared_gate(x))`.
+fn experts(m: &Experts, x: &Array) -> R<Array> {
+    let Moe { experts: n, top_k: k, norm_topk, .. } = m.moe;
+    let gates = ops::softmax_axis(m.router.call(x)?, -1, true).map_err(e)?;
+    let inds = ops::argpartition_axis(&gates, n - k, -1).map_err(e)?.index((Ellipsis, (n - k)..));
+    let mut scores = gates.take_along_axis(&inds, -1).map_err(e)?;
+    if norm_topk {
+        scores = ops::divide(&scores, scores.sum_axis(-1, true).map_err(e)?).map_err(e)?;
+    }
+    let y = switch_glu(&m.switch, x, &inds)?;
+    let y = ops::multiply(&y, scores.expand_dims(-1).map_err(e)?).map_err(e)?.sum_axis(-2, false).map_err(e)?;
+    let shared = ops::multiply(dense(&m.shared, x)?, ops::sigmoid(m.shared_gate.call(x)?).map_err(e)?).map_err(e)?;
+    ops::add(&y, &shared).map_err(e)
+}
+
+/// mlx-lm's `SwitchGLU`: `x` `[B, L, D]` through the experts `inds` `[B, L, k]`
+/// → `[B, L, k, D]`. With 64 or more (token, expert) pairs (a prefill), the
+/// pairs are sorted by expert first, so each expert's weights are read once.
+fn switch_glu(m: &Mlp, x: &Array, inds: &Array) -> R<Array> {
+    let x = x.expand_dims_axes(&[-2, -3]).map_err(e)?;
+    let k = *inds.shape().last().ok_or("router output has no axes")?;
+    let run = |x: &Array, idx: &Array, sorted: bool| -> R<Array> {
+        let act = swiglu(&m.gate.gather(x, idx, sorted)?, &m.up.gather(x, idx, sorted)?)?;
+        m.down.gather(&act, idx, sorted)
+    };
+    let y = if inds.size() >= 64 {
+        let flat = inds.flatten(None, None).map_err(e)?;
+        let order = ops::argsort_axis(&flat, 0).map_err(e)?;
+        let inv = ops::argsort_axis(&order, 0).map_err(e)?;
+        let rows = x.flatten(0, -3).map_err(e)?.take_axis(ops::floor_divide(&order, Array::from_int(k)).map_err(e)?, 0).map_err(e)?;
+        let y = run(&rows, &flat.take_axis(&order, 0).map_err(e)?, true)?;
+        ops::unflatten(y.take_axis(&inv, 0).map_err(e)?, 0, inds.shape()).map_err(e)?
+    } else {
+        run(&x, inds, false)?
+    };
+    y.squeeze_axes(&[-2]).map_err(e)
+}
+
 /// `x · σ(x)`, compiled like MLX's `nn.silu` (its rounding differs from separate ops).
 fn silu(x: &Array) -> R<Array> {
     let f = |x: &Array| ops::multiply(x, ops::sigmoid(x)?);
@@ -354,6 +437,11 @@ impl Weights {
     }
 
     fn qlinear(&mut self, p: &str, out: i32, inp: i32, cfg: &Config) -> R<QLinear> {
+        self.qstack(p, &[], out, inp, cfg)
+    }
+
+    /// A quantized weight with leading dimensions `lead` (`[E]` for stacked experts).
+    fn qstack(&mut self, p: &str, lead: &[i32], out: i32, inp: i32, cfg: &Config) -> R<QLinear> {
         // `bits`-bit values packed into u32 words; one scale and bias per group.
         let q = cfg.quant(p);
         if inp % q.group_size != 0 || (inp * q.bits) % 32 != 0 {
@@ -361,10 +449,11 @@ impl Weights {
         }
         let packed = inp * q.bits / 32;
         let groups = inp / q.group_size;
+        let shape = |last: i32| [lead, &[out, last]].concat();
         Ok(QLinear {
-            w: self.take(&format!("{p}.weight"), &[out, packed])?,
-            scales: self.take(&format!("{p}.scales"), &[out, groups])?,
-            biases: self.take(&format!("{p}.biases"), &[out, groups])?,
+            w: self.take(&format!("{p}.weight"), &shape(packed))?,
+            scales: self.take(&format!("{p}.scales"), &shape(groups))?,
+            biases: self.take(&format!("{p}.biases"), &shape(groups))?,
             group_size: q.group_size,
             bits: q.bits,
         })
@@ -401,9 +490,16 @@ impl Model {
                 input_norm: w.take(&format!("{p}.input_layernorm.weight"), &[d])?,
                 mixer,
                 post_norm: w.take(&format!("{p}.post_attention_layernorm.weight"), &[d])?,
-                gate: w.qlinear(&format!("{p}.mlp.gate_proj"), cfg.intermediate, d, &cfg)?,
-                up: w.qlinear(&format!("{p}.mlp.up_proj"), cfg.intermediate, d, &cfg)?,
-                down: w.qlinear(&format!("{p}.mlp.down_proj"), d, cfg.intermediate, &cfg)?,
+                ffn: match cfg.moe {
+                    None => Ffn::Dense(Self::mlp(&mut w, &format!("{p}.mlp"), &[], cfg.intermediate, &cfg)?),
+                    Some(m) => Ffn::Moe(Box::new(Experts {
+                        router: w.qlinear(&format!("{p}.mlp.gate"), m.experts, d, &cfg)?,
+                        switch: Self::mlp(&mut w, &format!("{p}.mlp.switch_mlp"), &[m.experts], m.intermediate, &cfg)?,
+                        shared: Self::mlp(&mut w, &format!("{p}.mlp.shared_expert"), &[], m.shared_intermediate, &cfg)?,
+                        shared_gate: w.qlinear(&format!("{p}.mlp.shared_expert_gate"), 1, d, &cfg)?,
+                        moe: m,
+                    })),
+                },
             });
         }
         let norm = w.take(&format!("{pre}model.norm.weight"), &[d])?;
@@ -441,6 +537,15 @@ impl Model {
         })
     }
 
+    fn mlp(w: &mut Weights, p: &str, lead: &[i32], width: i32, cfg: &Config) -> R<Mlp> {
+        let d = cfg.hidden;
+        Ok(Mlp {
+            gate: w.qstack(&format!("{p}.gate_proj"), lead, width, d, cfg)?,
+            up: w.qstack(&format!("{p}.up_proj"), lead, width, d, cfg)?,
+            down: w.qstack(&format!("{p}.down_proj"), lead, d, width, cfg)?,
+        })
+    }
+
     /// Reads every weight into memory now, not on the first token.
     fn materialize(&self) -> R<()> {
         let mut all: Vec<Array> = self.embed.arrays().to_vec();
@@ -449,9 +554,7 @@ impl Model {
         }
         all.push(self.norm.clone());
         for l in &self.layers {
-            for x in [&l.gate, &l.up, &l.down] {
-                all.extend(x.arrays());
-            }
+            all.extend(l.ffn.arrays());
             all.extend([l.input_norm.clone(), l.post_norm.clone()]);
             match &l.mixer {
                 Mixer::Attention(a) => {
@@ -593,8 +696,11 @@ impl Model {
             };
             h = ops::add(&h, r).map_err(e)?;
             let x = fast::rms_norm(&h, Some(&layer.post_norm), c.eps).map_err(e)?;
-            let act = swiglu(&layer.gate.call(&x)?, &layer.up.call(&x)?)?;
-            h = ops::add(&h, layer.down.call(&act)?).map_err(e)?;
+            let y = match &layer.ffn {
+                Ffn::Dense(m) => dense(m, &x)?,
+                Ffn::Moe(m) => experts(m, &x)?,
+            };
+            h = ops::add(&h, y).map_err(e)?;
         }
         fast::rms_norm(&h, Some(&self.norm), c.eps).map_err(e)
     }

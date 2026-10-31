@@ -155,7 +155,8 @@ impl Engine {
         let tok = tokenizers::Tokenizer::from_file(dir.join("tokenizer.json")).map_err(e)?;
         let tcfg = read_json(&dir.join("tokenizer_config.json"))?;
         let jinja = std::fs::read_to_string(dir.join("chat_template.jinja")).ok();
-        let think_switch = super::config::check_template(super::config::chat_template(&tcfg, jinja.as_deref()).as_deref())?;
+        let template = super::config::chat_template(&tcfg, jinja.as_deref());
+        let think_switch = super::config::check_template(template.as_deref())?;
         // The end-of-turn token, and end-of-text in case a model emits it instead.
         let mut stop = Vec::new();
         for name in ["eos_token", "pad_token"] {
@@ -167,10 +168,7 @@ impl Engine {
         if stop.is_empty() {
             return Err("tokenizer config names no end-of-turn token".into());
         }
-        let flavor = match cfg.arch {
-            Arch::Qwen3 => Flavor::Qwen3,
-            Arch::Qwen35(_) => Flavor::Qwen35,
-        };
+        let flavor = Flavor::of(template.as_deref().unwrap_or(""), think_switch);
         let msg_start = tok.token_to_id("<|im_start|>");
         let model = Model::load(dir, cfg)?;
         let cache = model.new_cache();
@@ -825,6 +823,18 @@ mod tests {
         let dir = PathBuf::from(home).join(".cache/huggingface/hub/models--mlx-community--Qwen3.5-0.8B-OptiQ-4bit/snapshots/ef60586933bd2cc02b763f77eb8839a5114bbec1");
         let g: Value = serde_json::from_str(include_str!("../../tests/fixtures/llm/golden-qwen3.5-0.8b-optiq.json")).unwrap();
         run_on("qwen3.5-0.8b-optiq", &dir, g);
+    }
+
+    /// Mixture-of-experts Qwen3.5 (35B-A3B: 256 experts, 8 per token, a shared
+    /// expert; 4-bit with 8-bit routers), against golden35.py's goldens.
+    /// Needs `hf download Jackrong/MLX-Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-4bit --revision a98d086…` (19.5 GB).
+    #[test]
+    #[ignore = "needs the Qwen3.5 35B-A3B MLX checkpoint"]
+    fn llm_qwen35_35b_a3b_moe_matches_mlx_lm() {
+        let home = std::env::var_os("HOME").expect("HOME");
+        let dir = PathBuf::from(home).join(".cache/huggingface/hub/models--Jackrong--MLX-Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-4bit/snapshots/a98d08651911c4137cedadc26013de4d9216ecf5");
+        let g: Value = serde_json::from_str(include_str!("../../tests/fixtures/llm/golden-qwen3.5-35b-a3b-moe.json")).unwrap();
+        run_on("qwen3.5-35b-a3b-moe", &dir, g);
     }
 
     #[test]

@@ -171,8 +171,8 @@ new, add it here, in the right section, with the date and the machine.
   A small file's `resolve/<commit>` URL 307-redirects within huggingface.co
   (`/api/resolve-cache/…`). Some MLX repos ship
   `model.safetensors.index.json` that names only `model.safetensors`; the
-  single file wins (`load_weights`). The native engine runs Qwen3 and dense
-  Qwen3.5 (below), MLX-quantized (affine, 2–8 bits, mixed per weight), with
+  single file wins (`load_weights`). The native engine runs Qwen3 and
+  Qwen3.5, dense or mixture-of-experts (below), MLX-quantized (affine, 2–8 bits, mixed per weight), with
   a ChatML template; untied LM heads (Qwen3 8B) and sharded weights are
   supported. Checked end to end on
   Qwen3 8B 4-bit (`test:llm`): add, chunked download, sha256, load, same
@@ -294,7 +294,7 @@ new, add it here, in the right section, with the date and the machine.
   fixed `[Hv, Dv, Dk]` float32 state), the fourth attention with a sigmoid
   output gate and RoPE on a quarter of each head; config under
   `text_config`, weights under `language_model.`, vision tower skipped.
-  Dense only (`qwen3_5_moe` refused). The recurrence is mlx-lm's Metal
+  The recurrence is mlx-lm's Metal
   kernel through mlx-sys's C API (`mlx_fast_metal_kernel_*`; mlx-rs 0.32
   doesn't wrap it), checked against an ops version. Its template differs
   from Qwen3's (content trimmed, thinking on ends the prompt with
@@ -304,6 +304,28 @@ new, add it here, in the right section, with the date and the machine.
   last shared snapshot. Qwen3.5 0.8B OptiQ (mixed 4/8-bit) on an M5 Max
   (`test:llm`): same token ids and greedy text as mlx-lm, decision letters
   Δ 0.002, 307 tok/s generation, 4,164 tok/s prompt.
+- **Qwen3.5 mixture-of-experts on MLX** (`qwen3_5_moe`, 2026-10-31;
+  `llm/model.rs` `experts`, `switch_glu`). mlx-lm's `Qwen3NextSparseMoeBlock`:
+  a precise softmax over the router (8-bit), the top `num_experts_per_tok`
+  renormalized (`norm_topk_prob`, default true), the experts stacked
+  `[E, out, in]` under `switch_mlp` and run with `gather_qmm` (mlx-rs 0.32
+  wraps it), plus a shared expert times `σ(shared_expert_gate)`. Every layer
+  is sparse (mlx-lm ignores `decoder_sparse_step`; configs that set it or
+  `mlp_only_layers` are refused). With 64+ (token, expert) pairs the pairs
+  are sorted by expert first, like `SwitchGLU`. No `intermediate_size` in
+  these configs. Jackrong/MLX-Qwen3.5-35B-A3B-…-Distilled-4bit (`a98d086`,
+  19.5 GB, 256 experts, 8 per token) on an M5 Max (`test:llm`): same token
+  ids and greedy text as mlx-lm, decision letters Δ 0.000, 61 tok/s
+  generation, 1,059 tok/s prompt (539 tokens); the whole engine test, load
+  included, took 9.5 s with the files in the disk cache. Its golden needs `mlx==0.32.2` with `mlx-lm==0.31.3`:
+  mlx-lm 0.32.2 passes `gather_qmm` a `global_scale` that MLX 0.32.2 lacks.
+- **The chat template picks the rendering, not `model_type`** (2026-10-31;
+  `template::Flavor::of`). Fine-tunes keep the architecture and swap the
+  template: Jackrong's 35B-A3B distill is `qwen3_5_moe` with a Qwen3-style
+  template (no `|trim`, Qwen3's think rules) whose reply always opens
+  `<think>\n` and has no `enable_thinking`. `|trim` → Qwen3.5's rendering;
+  no switch and a generation prompt of `assistant\n<think>\n` →
+  `Qwen3Open`; else Qwen3's.
 - **mlx-lm's Python wheel and the MLX that mlx-sys builds round
   differently on an M5** (2026-09-30). mlx-sys 0.6.0 builds MLX v0.32.2
   from source without the neural-accelerator (NAX) kernels the wheel's

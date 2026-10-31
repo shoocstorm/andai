@@ -337,10 +337,13 @@ pasting in whatever one search returns:
   - **MLX**, on Apple Silicon Macs: Qwen3 and Qwen3.5 models quantized for
     MLX (2- to 8-bit, mixed precision included, and larger ones like Qwen3
     8B), run natively on the GPU. Qwen3.5 runs as a text model (its image
-    input isn't used); its mixture-of-experts versions and 1-bit builds
-    aren't supported. Tested with Qwen3 8B 4-bit (about 115 tokens/second on
-    an Apple M5 Max) and Qwen3.5 0.8B OptiQ 4/8-bit (about 300 tokens/second,
-    engine test on the same Mac).
+    input isn't used), including its mixture-of-experts versions such as
+    Qwen3.5/3.6-35B-A3B (about 20 GB at 4-bit; they need the memory for all
+    their experts, though only a few run per token). 1-bit builds aren't
+    supported. Tested with Qwen3 8B 4-bit (about 115 tokens/second on an
+    Apple M5 Max), Qwen3.5 0.8B OptiQ 4/8-bit (about 250–300 tokens/second)
+    and Jackrong's Qwen3.5-35B-A3B reasoning distill, 4-bit (about 60
+    tokens/second; engine tests on the same Mac).
   The model is pinned to the version you saw and each file is checked
   against its sha256 before it loads. Models that need a Hugging Face login
   (gated) or are private can't be added. These are third-party models Andai

@@ -186,10 +186,36 @@ describe('mlxChecks mirrors Rust’s config check', () => {
     expect([v.layers, v.bits]).toEqual([24, 4]);
   });
 
+  // Jackrong/MLX-Qwen3.5-35B-A3B-…-4bit's config.json, trimmed.
+  const qwen35Moe = {
+    ...qwen35,
+    model_type: 'qwen3_5_moe',
+    quantization: { group_size: 64, bits: 4, mode: 'affine', 'language_model.model.layers.0.mlp.gate': { group_size: 64, bits: 8 } },
+    text_config: { ...qwen35.text_config, model_type: 'qwen3_5_moe_text', num_hidden_layers: 40, num_experts: 256, num_experts_per_tok: 8, moe_intermediate_size: 512, shared_expert_intermediate_size: 512, mlp_only_layers: [] },
+  };
+
+  it('accepts mixture-of-experts Qwen3.5', () => {
+    const v = mlxChecks(qwen35Moe, qwenTokenizer, null);
+    expect(v.checks.filter((c) => c.level === 'block')).toEqual([]);
+    expect(v.checks.some((c) => c.text.includes('8 of 256 experts'))).toBe(true);
+    expect([v.layers, v.bits]).toEqual([40, 4]);
+    // The same experts under a dense Qwen3.5 model_type (mlx-lm builds them too).
+    expect(blocked({ ...qwen35Moe, model_type: 'qwen3_5' })).toBe(false);
+  });
+
+  it('refuses the mixture-of-experts variants Rust refuses', () => {
+    const moe = (t: Record<string, unknown>) => blocked({ ...qwen35Moe, text_config: { ...qwen35Moe.text_config, ...t } });
+    expect(moe({ num_experts_per_tok: 0 })).toBe(true);
+    expect(moe({ num_experts_per_tok: 300 })).toBe(true);
+    expect(moe({ num_experts: 5000 })).toBe(true);
+    expect(moe({ moe_intermediate_size: undefined })).toBe(true);
+    expect(moe({ decoder_sparse_step: 2 })).toBe(true);
+    expect(moe({ mlp_only_layers: [0] })).toBe(true);
+    expect(blocked({ ...qwen35Moe, model_type: 'qwen3_moe' })).toBe(true);
+  });
+
   it('refuses the Qwen3.5 variants Rust refuses', () => {
-    expect(blocked({ ...qwen35, text_config: { ...qwen35.text_config, num_experts: 256 } })).toBe(true);
     expect(blocked({ ...qwen35, text_config: { ...qwen35.text_config, rope_parameters: { rope_type: 'yarn' } } })).toBe(true);
     expect(blocked({ ...qwen35, quantization: { group_size: 128, bits: 1 } })).toBe(true);
-    expect(blocked({ ...qwen35, model_type: 'qwen3_5_moe' })).toBe(true);
   });
 });

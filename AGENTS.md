@@ -234,7 +234,7 @@ that break a build, a release or the machine:
 | Persona, auto-optimize | Real | `screens/Persona.tsx` |
 | Models: download, load, unload, evict | Real | `llm/engine.ts` |
 | Native MLX chat models (download, verify, load, stream, stop, decide; Apple Silicon) | Real | `src-tauri/src/llm/`, `src-tauri/src/mlx.rs`, `llm/native.ts` |
-| Add a model from Hugging Face (search, compatibility check, pin, verified download; GGUF anywhere, MLX Qwen3 and Qwen3.5 on Apple Silicon) | Real | `llm/hub.ts`, `llm/custom.ts`, `screens/HubModels.tsx`, `src-tauri/src/llm/custom.rs` |
+| Add a model from Hugging Face (search, compatibility check, pin, verified download; GGUF anywhere, MLX Qwen3 and Qwen3.5 (dense or mixture-of-experts) on Apple Silicon) | Real | `llm/hub.ts`, `llm/custom.ts`, `screens/HubModels.tsx`, `src-tauri/src/llm/custom.rs` |
 | Appearance (light / dark; first run follows the OS) | Real | `state/theme.ts` |
 | Activity log (off by default; each step, argument writer call, tool call, context and answer, plus model and KB events, as JSONL with a one-line summary and level, 7 days) and its screen (⌘L: by question, filters, search, raw data) | Real | `state/activity.ts`, `lib/activityText.ts`, `src-tauri/src/activity.rs`, `screens/Logs.tsx`, Settings |
 | Layout: collapsible nav (⌘B), Execution Trace on/off (⌘J) | Real, persisted | `state/layout.ts` |

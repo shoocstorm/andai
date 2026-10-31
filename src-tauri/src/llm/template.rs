@@ -43,6 +43,26 @@ pub enum Flavor {
     /// continue; and a system message after the first is refused (rendered in
     /// place here, as for Qwen3, since Andai may send one).
     Qwen35,
+    /// Qwen3's rendering, but the reply always opens a think block
+    /// (`<think>\n`) and there's no thinking switch: fine-tunes such as
+    /// Jackrong's Qwen3.5-35B-A3B reasoning distills ship this template.
+    Qwen3Open,
+}
+
+impl Flavor {
+    /// Which rendering a chat template asks for, read from its text: Qwen3.5's
+    /// trims every message (`|trim`); Qwen3's doesn't. A fine-tune keeps the
+    /// architecture but may swap the template, so the text decides, not
+    /// `model_type`.
+    pub fn of(template: &str, think_switch: bool) -> Self {
+        if template.contains("|trim") {
+            Flavor::Qwen35
+        } else if !think_switch && (template.contains("assistant\n<think>\n") || template.contains("assistant\\n<think>\\n")) {
+            Flavor::Qwen3Open
+        } else {
+            Flavor::Qwen3
+        }
+    }
 }
 
 /// The prompt text for `messages` in Qwen3's template (tests).
@@ -95,6 +115,7 @@ pub fn render_as(flavor: Flavor, messages: &[Message], thinking: bool) -> String
     out.push_str("<|im_start|>assistant\n");
     match (flavor, thinking) {
         (Flavor::Qwen35, true) => out.push_str("<think>\n"),
+        (Flavor::Qwen3Open, _) => out.push_str("<think>\n"),
         (_, false) => out.push_str("<think>\n\n</think>\n\n"),
         (Flavor::Qwen3, true) => {}
     }
@@ -131,6 +152,28 @@ mod tests {
             let got = render_as(Flavor::Qwen35, &messages, case["enable_thinking"].as_bool().unwrap());
             assert_eq!(got, case["text"].as_str().unwrap(), "qwen3.5 {name}");
         }
+    }
+
+    #[test]
+    fn qwen3_open_matches_transformers_on_every_golden_case() {
+        let g = golden("qwen3.5-35b-a3b-moe");
+        for (name, case) in g["cases"].as_object().unwrap() {
+            let messages: Vec<Message> = serde_json::from_value(case["messages"].clone()).unwrap();
+            // No thinking switch: the engine always renders it as thinking on.
+            let got = render_as(Flavor::Qwen3Open, &messages, true);
+            assert_eq!(got, case["text"].as_str().unwrap(), "qwen3.5-35b-a3b {name}");
+        }
+    }
+
+    #[test]
+    fn the_template_text_picks_the_flavor() {
+        let q35 = "{%- set content = render_content(m.content)|trim %}{%- if enable_thinking is defined %}";
+        let open = "{{- '<|im_start|>' + message.role + '\\n' + content }}{%- if add_generation_prompt %}{{- '<|im_start|>assistant\n<think>\n' }}{%- endif %}";
+        let qwen3 = "{%- if enable_thinking is defined and enable_thinking is false %}{{- '<think>\\n\\n</think>\\n\\n' }}";
+        assert_eq!(Flavor::of(q35, true), Flavor::Qwen35);
+        assert_eq!(Flavor::of(open, false), Flavor::Qwen3Open);
+        assert_eq!(Flavor::of(qwen3, true), Flavor::Qwen3);
+        assert_eq!(Flavor::of("<|im_start|>{{ m }}", false), Flavor::Qwen3, "no switch, no think block: plain Qwen3");
     }
 
     #[test]
