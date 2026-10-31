@@ -233,7 +233,7 @@ fn scrubbed(cmd: &mut Command) {
     cmd.env("PATH", "/usr/bin:/bin");
     #[cfg(windows)]
     if let Some(root) = std::env::var_os("SystemRoot") {
-        let root = PathBuf::from(root);
+        let root = std::path::PathBuf::from(root);
         if let Ok(path) = std::env::join_paths([root.join("System32"), root]) {
             cmd.env("PATH", path);
         }
