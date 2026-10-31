@@ -389,6 +389,7 @@ mod tests {
         assert!(parse_sha256_file("nope", name).is_err());
     }
 
+    #[cfg(unix)] // only the unix install tests below use it
     fn tarball(dir: &Path, files: &[(&str, &str)]) -> PathBuf {
         let src = dir.join("src");
         fs::create_dir_all(&src).unwrap();
