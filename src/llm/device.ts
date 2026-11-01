@@ -48,6 +48,16 @@ export function planText(p: LoadPlan): string {
   return `${p.gpu ? 'GPU' : 'CPU only'}, ${p.n_ctx.toLocaleString('en-US')}-token context`;
 }
 
+/**
+ * A native log line that means the worker died: wllama only logs these (an
+ * abort, even one it logs with console.log; a worker's `error` event), and
+ * its promise then never settles, so the warm-up stops on them instead of
+ * waiting out the time limit (wasm.ts has the case that hung 0.1.7).
+ */
+const FATAL = /Aborted\(|worker sent an error|Cannot enlarge memory|out of memory|RuntimeError/i;
+export const isFatalLog = (line: string): boolean => FATAL.test(line);
+
+const COMPILE = /CompileError|doesn't parse|is not enabled/i;
 const MEMORY = /out of memory|\bOOM\b|bad_alloc|failed to allocate|could not allocate|unable to allocate|Cannot allocate|memory access out of bounds|RangeError.*(memory|buffer|allocation)|Maximum call stack|Aborted\(/i;
 const STORAGE = /QuotaExceeded|quota|NoModificationAllowed|not enough space|storage/i;
 const NETWORK = /Failed to fetch|NetworkError|network|Load failed|ERR_|HTTP (4|5)\d\d|status (4|5)\d\d/i;
@@ -65,10 +75,15 @@ export function describeLoadError(raw: string, name: string, plan: LoadPlan | nu
   const where = device.ios ? 'this iPhone' : device.mobile ? 'this phone' : 'this computer';
   if (/integrity check/.test(raw)) return { message: raw, retryLighter: false };
   if (/timed out warming up/.test(raw)) {
+    const last = /last log: (.+)\)$/.exec(raw)?.[1];
     return {
-      message: `${name} didn't finish warming up in 3 minutes on ${where}, so loading was stopped. Close other tabs and try again, or pick a smaller model.`,
+      message: `${name} didn't finish warming up in 3 minutes on ${where}, so loading was stopped.${last ? ` Last step: ${last}.` : ''} Close other tabs and try again, or pick a smaller model.`,
       retryLighter: true,
     };
+  }
+  // before MEMORY: an abort while compiling isn't about memory, and less of it won't help
+  if (COMPILE.test(raw)) {
+    return { message: `This browser can't run the engine build Andai picked for ${name} (${raw.slice(0, 160)}). Update the browser, or report this with its version.`, retryLighter: false };
   }
   if (MEMORY.test(raw)) {
     return {

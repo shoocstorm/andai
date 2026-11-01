@@ -11,8 +11,8 @@ const state = vi.hoisted(() => ({
   loaded: 0,
   opened: 0,
   gpuLine: null as string | null,
-  /** Errors the next loads throw, in order; `'hang'` never settles (a dead worker). */
-  loadFails: [] as (Error | 'hang')[],
+  /** Errors the next loads throw, in order; `'hang'` never settles, the other two log a dead worker first. */
+  loadFails: [] as (Error | 'hang' | 'dead-thread' | 'worker-event' | 'compile-abort')[],
   loadParams: [] as Record<string, unknown>[],
   exited: 0,
   stream: { promptMs: 0, tokens: 0, gapMs: 0, timings: null as Record<string, number> | null },
@@ -63,8 +63,11 @@ vi.mock('@wllama/wllama', () => {
     }
   }
   class Wllama {
-    logger?: { log: (...a: unknown[]) => void };
-    constructor(_paths: unknown, config: { logger?: { log: (...a: unknown[]) => void } }) {
+    logger?: { log: (...a: unknown[]) => void; error: (...a: unknown[]) => void };
+    getWorkerResources() {
+      return { compat: false, wasmPath: '' };
+    }
+    constructor(_paths: unknown, config: { logger?: { log: (...a: unknown[]) => void; error: (...a: unknown[]) => void } }) {
       this.logger = config.logger;
     }
     setCompat() {}
@@ -72,6 +75,21 @@ vi.mock('@wllama/wllama', () => {
       state.loadParams.push(params);
       const fail = state.loadFails.shift();
       if (fail === 'hang') return new Promise(() => {});
+      // what wllama does when a pthread worker dies: it logs, and its promise never settles
+      if (fail === 'dead-thread') {
+        this.logger?.log('llama_model_load: loading tensors');
+        this.logger?.error('worker sent an error! blob:x:1: RuntimeError: unreachable');
+        return new Promise(() => {});
+      }
+      // 0.1.7 in WebKit 27: the default build can't compile, and wllama logs the abort with console.log
+      if (fail === 'compile-abort') {
+        this.logger?.log("Aborted(CompileError: WebAssembly.Module doesn't parse at byte 4617: Memory64 is not enabled)");
+        return new Promise(() => {});
+      }
+      if (fail === 'worker-event') {
+        this.logger?.error(new Event('error'));
+        return new Promise(() => {});
+      }
       if (fail) throw fail;
       state.loaded++;
       if (state.gpuLine) this.logger?.log(state.gpuLine);
@@ -101,9 +119,6 @@ vi.mock('@wllama/wllama', () => {
     }
     getNumThreads() {
       return 4;
-    }
-    getWorkerResources() {
-      return { compat: false };
     }
     async exit() {
       state.exited++;
@@ -226,6 +241,38 @@ describe('a load that fails on this device', () => {
     vi.mocked(console.warn).mockRestore();
     expect(useEngine.getState().error).toMatch(/didn't finish warming up in 3 minutes/);
     expect(state.exited).toBeGreaterThanOrEqual(3);
+  });
+
+  it('stops at once when a worker dies under wllama, and tries again lighter', async () => {
+    for (const fail of ['dead-thread', 'worker-event'] as const) {
+      await unloadModel();
+      localStorage.clear();
+      state.loadParams = [];
+      state.loadFails = ['dead-thread', fail];
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const native = catchLoadError();
+      // no timers advanced: without the fatal-log check this would wait out the limit
+      await loadModel('tiny');
+      native.mockRestore();
+      vi.mocked(console.warn).mockRestore();
+      vi.mocked(console.log).mockRestore();
+      expect(useEngine.getState().status).toBe('ready');
+      expect(state.loadParams).toHaveLength(3);
+      expect(state.loadParams[2]).toMatchObject({ n_gpu_layers: 0, n_ctx: 1024 });
+      expect(JSON.parse(localStorage.getItem('andai.loadLevel')!)).toEqual({ tiny: 2 });
+    }
+  });
+
+  it('says so at once when the engine build cannot compile, instead of hanging or blaming memory', async () => {
+    state.loadFails = ['compile-abort'];
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logged = catchLoadError();
+    await loadModel('tiny');
+    logged.mockRestore();
+    vi.mocked(console.log).mockRestore();
+    expect(state.loadParams).toHaveLength(1);
+    expect(useEngine.getState().error).toMatch(/^This browser can't run the engine build Andai picked for Tiny .*Memory64 is not enabled/);
   });
 
   it('reports a page closed mid-load on the next launch, asks for less, and does not start it again', async () => {

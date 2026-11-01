@@ -492,10 +492,12 @@ with `bun run deploy:web` (Firebase Hosting).
   fails for lack of memory, Andai tries again with a 1,024-token context.
   If iOS closes the page while a model warms up, Andai says so when you
   come back, uses less memory next time, and doesn't start that model again
-  by itself. Every failed load says why (memory, storage, network) where you
-  see it, with a **Try again** button. Tested in iOS Safari on the iPhone 17
-  Pro simulator (download, load, answer); not yet on a real iPhone, whose
-  memory limit for a page is lower than the simulator's.
+  by itself. Every failed load says why (memory, storage, network, a browser
+  that can't run the engine, or the last step it reached) where you see it,
+  with a **Try again** button. Tested in iOS Safari on the iPhone 17 Pro
+  simulator (download, load, answer). Andai 0.1.7 couldn't load a model in
+  Safari 27 (macOS 27, iOS 27); fixed after it, checked in WKWebView on
+  macOS 27, not yet re-tested on a real iPhone.
 - The model (~0.6–1.2 GB) is downloaded once per browser and stored in the
   browser's cache; clearing site data removes it.
 - Everything a web page can offer: your chats live in this browser's storage

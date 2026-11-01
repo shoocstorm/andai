@@ -116,10 +116,25 @@ new, add it here, in the right section, with the date and the machine.
   page reloads, no error reaches JS), and it has a WebGPU adapter, so
   wllama would copy the weights into GPU buffers too. So phones load on the
   CPU (`n_gpu_layers: 0`, which also keeps wllama from starting WebGPU) at
-  ≤ 2,048 tokens; a caught memory or GPU error steps down to 1,024; a load
+  ≤ 2,048 tokens; a caught memory or GPU error steps down a level; a load
   in progress is marked in localStorage, and a marker found at launch means
   the page died under it (reported, next level saved, no autoload). Prompt
   budgets use the context that loaded (`useEngine.nCtx`), not the catalog's.
+- **WebKit 27 fools wllama's compat check** (2026-11-01; `llm/wasm.ts`).
+  Andai 0.1.7 hung in warm-up on an iPhone 18 Pro Max (iOS 27 Safari) and in
+  WKWebView on macOS 27.0.1, until the 3-minute limit. Probed with the
+  system JavaScriptCore (`osascript -l JavaScript`): `WebAssembly.Suspending`
+  exists (JSPI), `new WebAssembly.Memory({ address: 'i64', initial: 1n })`
+  doesn't throw, but a Memory64 module doesn't compile ("Memory64 is not
+  enabled"). wllama's `needCompat()` (unchanged up to 3.8.1) uses exactly
+  those two checks, so it loaded the default build; the compile abort went
+  to `console.log` and its promise never settled. `AndaiWllama` decides
+  with `WebAssembly.validate` on `(module (memory i64 1))` plus JSPI and
+  forces the compat build otherwise; e2e then loads `wllama/compat/` again.
+  wllama only *logs* aborts and worker `error` events, so `warmUp` also
+  stops on such a line (`isFatalLog`) instead of waiting, and a timeout
+  names the last native log line. The iOS simulator (26.5) had neither
+  feature, so it never saw this.
 
 - **The web deployment is plain static hosting** (`firebase.json`, site
   `andai-agent`, project `aldrick-ai`, `bun run deploy:web`): Vite's `dist/`

@@ -5,7 +5,8 @@
 // on the same prompt. The runner passes the settings in VITE_BENCH.
 // Loaded only when VITE_SMOKE=bench (main.tsx), so none of it ships in the app.
 import { invoke } from '@tauri-apps/api/core';
-import { ModelManager, Wllama } from '@wllama/wllama';
+import { ModelManager, type Wllama } from '@wllama/wllama';
+import { AndaiWllama } from './llm/wasm';
 import { downloadCheckpoint } from './llm/laya';
 import { isMlx, modelById, type MlxDef } from './llm/models';
 import { genTokPerSec, nativeGenerate, nativeLoad, nativeStatus, nativeUnload, promptTokPerSec } from './llm/native';
@@ -87,7 +88,7 @@ export async function runBench(input: BenchInput) {
         const s = a.map(String).join(' ');
         if (INTERESTING.test(s) && lines.length < 60) lines.push(s.slice(0, 240));
       };
-      const w = new Wllama({ default: asset('/wllama/default/wllama.wasm') }, { logger: { debug: keep, log: keep, warn: keep, error: keep } });
+      const w = new AndaiWllama({ default: asset('/wllama/default/wllama.wasm') }, { logger: { debug: keep, log: keep, warn: keep, error: keep } });
       w.setCompat({ worker: asset('/wllama/compat/wllama.js'), wasm: asset('/wllama/compat/wllama.wasm') });
       const { name, ...params } = cfg;
       const t0 = performance.now();

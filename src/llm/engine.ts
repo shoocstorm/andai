@@ -5,8 +5,9 @@
 // way on both. The rest of this note is about wllama.
 //
 // On macOS, Tauri renders with WKWebView (Safari's engine), which lacks the
-// Memory64 and JSPI features wllama's default build needs. wllama detects that
-// itself (`needCompat()`) and switches to the compat build we point it at via
+// Memory64 the default build needs (JSPI it has since macOS/iOS 27). wllama's
+// own check is fooled there, so `AndaiWllama` (wasm.ts) decides by compiling a
+// Memory64 module and switches to the compat build we point it at via
 // `setCompat` — served from public/wllama/, never the CDN. In Chromium (plain
 // `vite` in a browser, and WebView2 on Windows) the default build runs and
 // `setCompat` is ignored.
@@ -19,7 +20,8 @@ import { ModelManager, Wllama, WllamaAbortError, type ChatCompletionParams, type
 import { create } from 'zustand';
 import { logApp } from '../state/activity';
 import { verifyBlobs } from './integrity';
-import { crashMessage, describeLoadError, detectDevice, loadPlan, MAX_LEVEL, planText, startLevel, type LoadPlan } from './device';
+import { AndaiWllama } from './wasm';
+import { crashMessage, describeLoadError, detectDevice, isFatalLog, loadPlan, MAX_LEVEL, planText, startLevel, type LoadPlan } from './device';
 import { downloadCheckpoint, downloadLaya, layaLoad, layaRemove, layaStatus, layaUnload, type LayaStatus } from './laya';
 import { allModels, isMlx, layaById, MODELS, modelById, type LayaDef, type MlxDef, type ModelDef, type WllamaDef } from './models';
 import {
@@ -189,56 +191,86 @@ export function checkCrashedLoad(): string | null {
   return a.id;
 }
 
-/** Fails a warm-up that hangs (a worker that died without a word), instead of spinning forever. */
+/**
+ * Fails a warm-up that hangs (a worker that died without a word), instead of
+ * spinning forever: at the time limit, or as soon as the native log says a
+ * worker died (`isFatalLog`), since wllama's promise never settles then.
+ */
 const WARMUP_LIMIT_MS = 180_000;
-function withinWarmup<T>(p: Promise<T>, onTimeout: () => void): Promise<T> {
+function withinWarmup<T>(p: Promise<T>, watch: NativeWatch, onStop: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   return Promise.race([
     p.finally(() => clearTimeout(timer)),
     new Promise<T>((_, reject) => {
-      timer = setTimeout(() => {
-        onTimeout();
-        reject(new Error('timed out warming up'));
-      }, WARMUP_LIMIT_MS);
+      const stop = (e: Error) => {
+        clearTimeout(timer);
+        onStop();
+        reject(e);
+      };
+      timer = setTimeout(() => stop(new Error(`timed out warming up${watch.last ? ` (last log: ${watch.last})` : ''}`)), WARMUP_LIMIT_MS);
+      // a worker can die before this hook is set; the line is kept for that
+      if (watch.fatal) stop(new Error(watch.fatal));
+      else watch.onFatal = (line) => stop(new Error(line));
     }),
   ]);
 }
 
 /** Loads a verified model into a new wllama at `plan`; the attempt is marked until it settles. */
 async function warmUp(id: string, model: Awaited<ReturnType<typeof openVerified>>['model'], plan: LoadPlan, onGpu: (g: { layers: number; total: number }) => void): Promise<Wllama> {
-  const w = newWllama(onGpu);
+  const watch: NativeWatch = { last: '' };
+  const w = newWllama(onGpu, watch);
   localStorage.setItem(ATTEMPT_KEY, JSON.stringify({ id, level: plan.level, at: Date.now() } satisfies Attempt));
   try {
-    await withinWarmup(
-      w.loadModel(model, {
-        n_ctx: plan.n_ctx,
-        // CPU only: wllama then doesn't initialize WebGPU at all
-        ...(plan.gpu ? {} : { n_gpu_layers: 0 }),
-        // keep <think> blocks in the raw stream so the UI can fold them itself
-        reasoning_format: 'none',
-      }),
-      () => void w.exit().catch(() => {}),
-    );
+    await withinWarmup(w.loadModel(model, wllamaParams(plan)), watch, () => void w.exit().catch(() => {}));
     return w;
   } catch (e) {
     await w.exit().catch(() => {});
     throw e;
   } finally {
+    watch.onFatal = undefined;
     localStorage.removeItem(ATTEMPT_KEY);
   }
 }
 
-function newWllama(onGpu?: (gpu: { layers: number; total: number }) => void): Wllama {
-  // Native logs still reach the console; the GPU lines are also kept for EngineInfo.
+/** wllama's load options for a plan. */
+function wllamaParams(plan: LoadPlan) {
+  return {
+    n_ctx: plan.n_ctx,
+    // CPU only: wllama then doesn't initialize WebGPU at all
+    ...(plan.gpu ? {} : { n_gpu_layers: 0 }),
+    // keep <think> blocks in the raw stream so the UI can fold them itself
+    reasoning_format: 'none' as const,
+  };
+}
+
+/** What a warm-up reads from the native log: the last line, and a hook for a fatal one. */
+type NativeWatch = { last: string; fatal?: string; onFatal?: (line: string) => void };
+
+/** A worker's `error` event, which wllama hands its logger as is (and nothing else). */
+const isEvent = (v: unknown): v is Event => typeof Event !== 'undefined' && v instanceof Event;
+const logText = (v: unknown): string => (isEvent(v) ? `worker error: ${(v as ErrorEvent).message || v.type}` : String(v));
+
+function newWllama(onGpu?: (gpu: { layers: number; total: number }) => void, native?: NativeWatch): Wllama {
+  // Native logs still reach the console; the GPU lines are also kept for EngineInfo,
+  // and a warm-up watches them for the last step and for a worker that died.
   const watch =
     (fn: (...a: unknown[]) => void) =>
     (...a: unknown[]) => {
-      const gpu = onGpu && gpuFromLog(a.map(String).join(' '));
+      const line = a.map(logText).join(' ');
+      const gpu = onGpu && gpuFromLog(line);
       if (gpu) onGpu(gpu);
+      if (native) {
+        native.last = line.replace(/\s+/g, ' ').trim().slice(0, 160);
+        // any channel: wllama logs an abort (e.g. a build that can't compile) with console.log
+        if (!native.fatal && (a.some(isEvent) || isFatalLog(line))) {
+          native.fatal = native.last;
+          native.onFatal?.(native.fatal);
+        }
+      }
       fn(...a);
     };
   const logger = { debug: watch(console.debug), log: watch(console.log), warn: watch(console.warn), error: watch(console.error) };
-  const w = new Wllama({ default: asset('/wllama/default/wllama.wasm') }, { parallelDownloads: 3, logger });
+  const w = new AndaiWllama({ default: asset('/wllama/default/wllama.wasm') }, { parallelDownloads: 3, logger });
   w.setCompat({ worker: asset('/wllama/compat/wllama.js'), wasm: asset('/wllama/compat/wllama.wasm') });
   return w;
 }
@@ -487,7 +519,7 @@ export async function loadDecider(id: string): Promise<void> {
       // Decisions are short prompts scored in one forward pass.
       // On a phone the decision model shares the page's memory with the chat model: the same lighter plan.
       const plan = loadPlan(Math.min(def!.n_ctx, 4096), startLevel(device, undefined));
-      await w.loadModel(model, { n_ctx: plan.n_ctx, ...(plan.gpu ? {} : { n_gpu_layers: 0 }), reasoning_format: 'none' });
+      await w.loadModel(model, wllamaParams(plan));
       deciderWllama = w;
     }
     setDecider({ status: 'ready', loadingId: null, loadedId: id, progress: null });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { crashMessage, describeLoadError, detectDevice, loadPlan, MAX_LEVEL, planText, startLevel } from './device';
+import { crashMessage, describeLoadError, detectDevice, isFatalLog, loadPlan, MAX_LEVEL, planText, startLevel } from './device';
 
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Mobile/15E148 Safari/604.1';
 const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15';
@@ -57,7 +57,28 @@ describe('describeLoadError', () => {
   it('retries a GPU failure on the CPU, and keeps an unknown error readable', () => {
     expect(describeLoadError('GPUDevice lost', 'M', loadPlan(4096, 0), desktop).retryLighter).toBe(true);
     expect(describeLoadError('timed out warming up', 'M', plan, desktop).message).toMatch(/^M didn't finish warming up in 3 minutes on this computer/);
+    // the error names the last native step, so a report can say where it stuck
+    const timeout = describeLoadError('timed out warming up (last log: llama_model_load: loading tensors)', 'M', plan, phone);
+    expect(timeout).toMatchObject({ retryLighter: true, message: expect.stringMatching(/^M didn't finish warming up in 3 minutes on this iPhone, .*Last step: llama_model_load: loading tensors\./) });
     expect(describeLoadError('something odd', 'M', plan, desktop)).toEqual({ message: "M couldn't be loaded: something odd", retryLighter: true });
+  });
+});
+
+describe('a build that cannot compile', () => {
+  it('is said as such, not as memory, and not retried lighter', () => {
+    const raw = "Aborted(CompileError: WebAssembly.Module doesn't parse at byte 4617: Memory64 is not enabled)";
+    const f = describeLoadError(raw, 'Qwen3 0.6B', plan(), phone);
+    expect(f.retryLighter).toBe(false);
+    expect(f.message).toMatch(/^This browser can't run the engine build Andai picked for Qwen3 0.6B \(Aborted\(CompileError.*Memory64 is not enabled/);
+    expect(isFatalLog(raw)).toBe(true);
+  });
+  const plan = () => loadPlan(4096, 1);
+});
+
+describe('isFatalLog', () => {
+  it('knows a dead worker from ordinary native output', () => {
+    for (const line of ['worker sent an error! blob:x:1: RuntimeError: unreachable', 'Aborted(OOM)', 'Cannot enlarge memory arrays to size 1073741824 bytes']) expect(isFatalLog(line)).toBe(true);
+    for (const line of ['llama_model_load: loading tensors', 'ggml_webgpu: Failed to get an adapter', 'load_tensors: CPU model buffer size = 604.15 MiB']) expect(isFatalLog(line)).toBe(false);
   });
 });
 
